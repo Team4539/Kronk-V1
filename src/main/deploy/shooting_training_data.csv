@@ -1,0 +1,65 @@
+# Shooting Training Data - With Shooting On The Fly Support
+# Copy lines from SmartDashboard "ShootingTraining/CopyThisLine" and paste below
+#
+# NEW FORMAT (15 fields) - includes robot velocity for shooting on the fly:
+# TargetType,Distance,RobotX,RobotY,RobotHeading,VelocityX,VelocityY,Omega,TurretAngle,AngleToTarget,AngleCorrection,TopPower,BottomPower,Voltage,Result
+#
+# FIELD DESCRIPTIONS:
+# TargetType: HUB or TRENCH
+# Distance: Distance from robot to target (meters)
+# RobotX: Robot X position on field (meters)
+# RobotY: Robot Y position on field (meters)
+# RobotHeading: Robot heading (degrees, 0 = toward red alliance)
+# VelocityX: Robot X velocity (m/s, field-relative) - FOR SHOOTING ON THE FLY
+# VelocityY: Robot Y velocity (m/s, field-relative) - FOR SHOOTING ON THE FLY
+# Omega: Robot rotational velocity (rad/s) - FOR SHOOTING ON THE FLY
+# TurretAngle: Turret angle when shot was made (degrees, 0 = forward)
+# AngleToTarget: Field-relative angle from robot to target (degrees)
+# AngleCorrection: Turret adjustment needed (degrees, + = right, - = left)
+# TopPower: Top motor power correction (+ = more, - = less)
+# BottomPower: Bottom motor power correction
+# Voltage: Battery voltage when shot was made
+# Result: HIT, SHORT, LONG, LEFT, or RIGHT
+#
+# SHOOTING ON THE FLY:
+# - When robot is moving, ball inherits robot velocity
+# - System automatically calculates lead angle based on velocity
+# - Training data from moving shots helps refine predictions
+# - Robot speed >= 0.3 m/s is considered "moving"
+# - Dashboard shows: AutoShoot/IsMoving, AutoShoot/LeadAngle, AutoShoot/RobotSpeed
+#
+# WHY POSE/VELOCITY MATTERS:
+# - Shooting from LEFT side of hub vs RIGHT side may need different corrections
+# - Turret angle affects ball trajectory (shooting forward vs over shoulder)
+# - Moving vs stationary shots may need different corrections
+# - Ball drift during flight requires lead angle compensation
+#
+# SIMILARITY SCORING:
+# - Training finds similar conditions: distance (40%), angle to target (25%), velocity (20%), turret angle (15%)
+# - Moving/stationary match bonus applied
+# - More similar training data = more accurate predictions
+#
+# VOLTAGE COMPENSATION:
+# - Training data is normalized to 12.5V reference
+# - Lower voltage = automatic power boost (up to 25%)
+#
+# LEGACY FORMATS (still supported):
+# 12 fields: TargetType,Distance,RobotX,RobotY,RobotHeading,TurretAngle,AngleToTarget,AngleCorr,TopPower,BottomPower,Voltage,Result
+# 7 fields: TargetType,Distance,AngleCorr,TopPower,BottomPower,Voltage,Result
+# 6 fields: TargetType,Distance,AngleCorr,TopPower,BottomPower,Result
+#
+# EXAMPLE (new format with velocity):
+# HUB,3.50,5.2,4.1,45.0,1.2,-0.5,0.1,30.5,120.3,1.5,0.02,0.03,12.40,HIT
+#
+# DISTANCE RANGES TO TRAIN:
+# HUB: 1.5m, 2.0m, 2.5m, 3.0m, 3.5m, 4.0m, 4.5m, 5.0m, 5.5m, 6.0m
+# TRENCH: 3.0m, 4.0m, 5.0m, 6.0m, 7.0m, 8.0m
+#
+# SHOOTING ON THE FLY TRAINING:
+# 1. Drive robot at constant speed toward/across hub
+# 2. When shot lands correctly, record training point
+# 3. Mix stationary and moving training data for best results
+#
+
+# Train from MULTIPLE ANGLES around the hub for best coverage!
+#

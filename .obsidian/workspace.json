@@ -1,0 +1,210 @@
+{
+  "main": {
+    "id": "ad61c217dff3706a",
+    "type": "split",
+    "children": [
+      {
+        "id": "9c1db6a1c4b08ff7",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "6a24dc894b4e1733",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "docs/CALIBRATION.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "CALIBRATION"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "425e02c6590db27c",
+    "type": "split",
+    "children": [
+      {
+        "id": "b4b426ba6beaef81",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "520a9c44e7fe905a",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "cb7f3d831284c9a0",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "b0bdc4bf4fbd29c5",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "18e8ea4c0390ccbc",
+    "type": "split",
+    "children": [
+      {
+        "id": "def339315ba3c1d2",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "28b55812a4e2087a",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "TROUBLESHOOTING_GUIDE.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for TROUBLESHOOTING_GUIDE"
+            }
+          },
+          {
+            "id": "f3c0be5e083cb239",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "TROUBLESHOOTING_GUIDE.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links from TROUBLESHOOTING_GUIDE"
+            }
+          },
+          {
+            "id": "f3c5f5c019793fdb",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "7ccb496ac42b731f",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "79ed49e9a7c1f500",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "TROUBLESHOOTING_GUIDE.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline of TROUBLESHOOTING_GUIDE"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false
+    }
+  },
+  "active": "6a24dc894b4e1733",
+  "lastOpenFiles": [
+    "build/tmp/compileJava/compileTransaction/stash-dir/LEDSubsystem.class.uniqueId7",
+    "build/tmp/compileJava/compileTransaction/stash-dir/LEDSubsystem$LEDState.class.uniqueId6",
+    "build/tmp/compileJava/compileTransaction/stash-dir/AutoShootCommand.class.uniqueId5",
+    "build/tmp/compileJava/compileTransaction/stash-dir/SetLEDActionCommand.class.uniqueId4",
+    "build/tmp/compileJava/compileTransaction/stash-dir/Robot.class.uniqueId3",
+    "build/tmp/compileJava/compileTransaction/stash-dir/RobotContainer.class.uniqueId2",
+    "build/tmp/compileJava/compileTransaction/stash-dir/LEDSubsystem$1.class.uniqueId1",
+    "build/tmp/compileJava/compileTransaction/stash-dir/Constants$Spindexer.class.uniqueId43",
+    "build/tmp/compileJava/compileTransaction/stash-dir/AutoShootCommand.class.uniqueId42",
+    "build/tmp/compileJava/compileTransaction/stash-dir/Constants$TurretFeed.class.uniqueId40",
+    "build/tmp/compileJava/compileTransaction/stash-dir/Constants$LEDs.class.uniqueId38",
+    "README.md",
+    "docs/CALIBRATION.md",
+    "docs/LEDS.md",
+    "WPILib-License.md",
+    "docs/TROUBLESHOOTING.md",
+    "SMART_LED_PRIORITY.md",
+    "LED_GAME_PHASE_WARNINGS.md",
+    "LED_ACTION_STATES_GUIDE.md",
+    "CALIBRATION_GUIDE.md",
+    "TROUBLESHOOTING_GUIDE.md"
+  ]
+}
