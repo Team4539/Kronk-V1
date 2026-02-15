@@ -9,6 +9,7 @@ import frc.robot.util.DashboardHelper;
 import frc.robot.util.DashboardHelper.Category;
 import frc.robot.util.Elastic;
 import frc.robot.util.Elastic.NotificationLevel;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
 import frc.robot.GameStateManager;
@@ -51,6 +52,10 @@ public class ShooterSubsystem extends SubsystemBase {
     private boolean hasWarnedHighTemp = false;
     private int tempCheckCounter = 0; // Only check temps every N cycles
     
+    // RPM recovery compensation - auto-boosts power when balls sap flywheel speed
+    private double topRpmBoost = 0.0;
+    private double bottomRpmBoost = 0.0;
+    
     // Reusable array to avoid allocations in interpolatePowers
     private final double[] interpolatedPowers = new double[2];
 
@@ -77,20 +82,14 @@ public class ShooterSubsystem extends SubsystemBase {
     }
 
     public boolean checkHealth() {
-        boolean topMotorHealthy = (topMotor.isAlive() && topMotor.getDeviceTemp() != null);
-        boolean bottemMotorHealthy = (bottomMotor.isAlive() && bottomMotor.getDeviceTemp() != null);
-
-        if (topMotorHealthy && bottemMotorHealthy){
-            return isHealthy = true;
-        }
-        else 
-        { 
-            return isHealthy = false;
-        }
+        boolean topMotorHealthy = topMotor.isAlive();
+        boolean bottomMotorHealthy = bottomMotor.isAlive();
+        isHealthy = topMotorHealthy && bottomMotorHealthy;
+        return isHealthy;
     }
 
     public Boolean isHealthy() {
-        return isHealthy();
+        return isHealthy;
     }
 
     // POWER CONTROL METHODS
@@ -290,9 +289,16 @@ public class ShooterSubsystem extends SubsystemBase {
         }
         
         // Linear interpolation
-        double t = (distance - lower.getKey()) / (upper.getKey() - lower.getKey());
         double[] lo = lower.getValue();
         double[] hi = upper.getValue();
+        double range = upper.getKey() - lower.getKey();
+        if (range == 0) {
+            // Same key — just use the value
+            interpolatedPowers[0] = lo[0];
+            interpolatedPowers[1] = lo[1];
+            return interpolatedPowers;
+        }
+        double t = (distance - lower.getKey()) / range;
         interpolatedPowers[0] = lo[0] + (hi[0] - lo[0]) * t;
         interpolatedPowers[1] = lo[1] + (hi[1] - lo[1]) * t;
         return interpolatedPowers;
@@ -302,10 +308,59 @@ public class ShooterSubsystem extends SubsystemBase {
         return Math.max(min, Math.min(max, value));
     }
     
+    // RPM RECOVERY COMPENSATION
+    
+    /**
+     * Calculates how much extra power to add when flywheel RPM drops below target.
+     * This compensates for energy loss when balls hit the flywheels during rapid fire.
+     * 
+     * How it works:
+     *   1. Expected RPM = targetPower × motor free speed
+     *   2. Actual RPM = read from motor velocity sensor
+     *   3. If actual < threshold% of expected → boost proportionally to the deficit
+     *   4. Boost is clamped to RPM_RECOVERY_MAX_BOOST to prevent runaway
+     * 
+     * @param targetPower The desired power (0.0 to 1.0)
+     * @param actualVelocityRps The actual motor velocity in rotations per second
+     * @return Extra power to add (0.0 if no recovery needed)
+     */
+    private double calculateRpmRecoveryBoost(double targetPower, double actualVelocityRps) {
+        // Don't compensate if we're not trying to spin
+        if (targetPower < 0.05) return 0.0;
+        
+        // Expected velocity based on target duty cycle
+        double expectedRps = targetPower * Constants.Shooter.MOTOR_FREE_SPEED_RPS;
+        
+        // If actual RPM is below threshold of expected, calculate boost
+        double rpmRatio = (expectedRps > 0) ? Math.abs(actualVelocityRps) / expectedRps : 1.0;
+        
+        if (rpmRatio < Constants.Shooter.RPM_RECOVERY_THRESHOLD) {
+            // How far below target we are, as a fraction (e.g. 0.10 = 10% below)
+            double deficit = 1.0 - rpmRatio;
+            // Proportional boost, clamped to max
+            return Math.min(deficit * Constants.Shooter.RPM_RECOVERY_GAIN, 
+                           Constants.Shooter.RPM_RECOVERY_MAX_BOOST);
+        }
+        
+        return 0.0;
+    }
+    
     // PERIODIC UPDATE
     
     @Override
     public void periodic() {
+        // SAFETY: When robot is disabled, send zero power and skip all motor logic.
+        // Coast mode means flywheels spin down naturally without drawing current.
+        if (DriverStation.isDisabled()) {
+            topMotor.setControl(topControl.withOutput(0));
+            bottomMotor.setControl(bottomControl.withOutput(0));
+            isSpunUp = false;
+            DashboardHelper.putNumber(Category.TELEOP, "Shooter/TopPower", 0.0);
+            DashboardHelper.putNumber(Category.TELEOP, "Shooter/BottomPower", 0.0);
+            DashboardHelper.putBoolean(Category.TELEOP, "Shooter/Ready", false);
+            return;
+        }
+        
         // Check if shooter should be disabled
         boolean shooterDisabled = !gameState.shouldShooterRun();
         
@@ -324,6 +379,22 @@ public class ShooterSubsystem extends SubsystemBase {
         double effectiveTopPower = shooterDisabled ? 0 : targetTopPower * speedLimit;
         double effectiveBottomPower = shooterDisabled ? 0 : targetBottomPower * speedLimit;
         
+        // RPM recovery: read actual motor speed and boost power if RPM has dropped
+        // (e.g. when balls sap flywheel energy during rapid fire)
+        if (!shooterDisabled && effectiveTopPower > 0.05) {
+            double topVelocityRps = topMotor.getVelocity().getValueAsDouble();
+            double bottomVelocityRps = bottomMotor.getVelocity().getValueAsDouble();
+            
+            topRpmBoost = calculateRpmRecoveryBoost(effectiveTopPower, topVelocityRps);
+            bottomRpmBoost = calculateRpmRecoveryBoost(effectiveBottomPower, bottomVelocityRps);
+            
+            effectiveTopPower = clamp(effectiveTopPower + topRpmBoost, 0, Constants.Shooter.MAX_POWER);
+            effectiveBottomPower = clamp(effectiveBottomPower + bottomRpmBoost, 0, Constants.Shooter.MAX_POWER);
+        } else {
+            topRpmBoost = 0.0;
+            bottomRpmBoost = 0.0;
+        }
+        
         // Apply motor outputs
         topMotor.setControl(topControl.withOutput(effectiveTopPower));
         bottomMotor.setControl(bottomControl.withOutput(effectiveBottomPower));
@@ -336,6 +407,7 @@ public class ShooterSubsystem extends SubsystemBase {
         DashboardHelper.putNumber(Category.TELEOP, "Shooter/TopPower", effectiveTopPower);
         DashboardHelper.putNumber(Category.TELEOP, "Shooter/BottomPower", effectiveBottomPower);
         DashboardHelper.putBoolean(Category.TELEOP, "Shooter/Ready", isSpunUp);
+        DashboardHelper.putNumber(Category.TELEOP, "Shooter/RPM_Boost", Math.max(topRpmBoost, bottomRpmBoost));
         
         // Check motor temps every 25 cycles (~500ms) to reduce CAN traffic
         tempCheckCounter++;

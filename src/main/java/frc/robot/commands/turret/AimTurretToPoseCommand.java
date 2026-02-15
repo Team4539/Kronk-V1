@@ -1,19 +1,26 @@
 package frc.robot.commands.turret;
 
-import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import frc.robot.Constants;
 import frc.robot.GameStateManager;
+import frc.robot.GameStateManager.TargetMode;
 import frc.robot.subsystems.LimelightSubsystem;
 import frc.robot.subsystems.TurretSubsystem;
-import frc.robot.util.ShootingTrainingManager;
-import frc.robot.util.ShootingTrainingManager.TargetType;
+import frc.robot.util.PiShootingHelper;
 
 /**
- * Aims the turret at the current target using robot pose estimation.
- * Automatically switches between hub and trench based on robot position.
- * Applies learned shooting training corrections for improved accuracy.
+ * Aims the turret at the current target using the Raspberry Pi coprocessor.
+ * 
+ * All turret angle calculations are done on the Pi. This command publishes
+ * the robot pose to the Pi via NetworkTables and reads back the turret angle.
+ * If the Pi is unreachable, PiShootingHelper provides a fallback angle based
+ * on pose geometry and the Constants calibration tables.
+ * 
+ * This is the DEFAULT turret command — it runs continuously when no other
+ * turret command (like AutoShootCommand) is active.
  */
 public class AimTurretToPoseCommand extends Command {
     
@@ -21,29 +28,24 @@ public class AimTurretToPoseCommand extends Command {
     
     private final TurretSubsystem turret;
     private final LimelightSubsystem limelight;
-    private final ShootingTrainingManager trainingManager;
+    private final PiShootingHelper piHelper;
     
     // STATE
     
-    /** The calculated turret angle to point at target */
+    /** The turret angle received from Pi (or fallback) */
     private double targetTurretAngle = 0.0;
     
-    /** Distance from robot to current target (for shooter calculations) */
+    /** Distance from robot to current target */
     private double distanceToTarget = 0.0;
     
     /** Whether we're currently aiming at trench (true) or hub (false) */
     private boolean aimingAtTrench = false;
-    
-    /** Training correction applied this frame */
-    private double trainingCorrection = 0.0;
-    
-    /** Confidence in training data */
-    private double trainingConfidence = 0.0;
 
     // CONSTRUCTOR
     
     /**
      * Creates the pose-based turret aiming command.
+     * All processing is offloaded to the Raspberry Pi via PiShootingHelper.
      * 
      * @param turret The turret subsystem to control
      * @param limelight The limelight subsystem for pose estimation
@@ -51,7 +53,7 @@ public class AimTurretToPoseCommand extends Command {
     public AimTurretToPoseCommand(TurretSubsystem turret, LimelightSubsystem limelight) {
         this.turret = turret;
         this.limelight = limelight;
-        this.trainingManager = ShootingTrainingManager.getInstance();
+        this.piHelper = PiShootingHelper.getInstance();
         
         // This command requires exclusive control of the turret
         addRequirements(turret);
@@ -82,60 +84,28 @@ public class AimTurretToPoseCommand extends Command {
             return;
         }
 
-        // ----- Get current target mode from GameStateManager -----
+        // ----- Determine target mode -----
         aimingAtTrench = gameState.isShuttleMode();
+        TargetMode targetMode = aimingAtTrench ? TargetMode.TRENCH : TargetMode.HUB;
+        String targetName = aimingAtTrench ? "TRENCH" : "HUB";
         
-        // ----- Get target position and calculate turret angle -----
-        Translation2d targetPosition;
-        String targetName;
-        TargetType targetType;
+        // ----- Send pose to Pi and get turret angle back -----
+        Pose2d robotPose = limelight.getRobotPose();
         
-        if (aimingAtTrench) {
-            // Shuttle mode - aim at trench
-            targetPosition = limelight.getTrenchPosition();
-            targetTurretAngle = limelight.getTurretAngleToTrench();
-            distanceToTarget = limelight.getDistanceToTrench();
-            targetName = "TRENCH";
-            targetType = TargetType.TRENCH;
-        } else {
-            // Normal mode - aim at hub
-            targetPosition = limelight.getHubPosition();
-            targetTurretAngle = limelight.getTurretAngleToHub();
-            distanceToTarget = limelight.getDistanceToHub();
-            targetName = "HUB";
-            targetType = TargetType.HUB;
-        }
+        // Default command doesn't have drivetrain reference, so use zero speeds.
+        // AutoShootCommand provides real chassis speeds for lead compensation.
+        piHelper.update(robotPose, new ChassisSpeeds(), targetMode);
         
-        // ----- Apply calibration offset (tunable via SmartDashboard) -----
-        double calibrationOffset = SmartDashboard.getNumber("AimPose/CalibrationOffset", 
-                                                            Constants.Turret.GLOBAL_ANGLE_OFFSET_DEG);
-        targetTurretAngle += calibrationOffset;
-        
-        // ----- Apply shooting training correction -----
-        trainingCorrection = trainingManager.getPredictedAngleCorrection(targetType, distanceToTarget);
-        trainingConfidence = trainingManager.getConfidence(targetType, distanceToTarget);
-        targetTurretAngle += trainingCorrection;
+        // ----- Read Pi solution -----
+        targetTurretAngle = piHelper.getTurretAngle();
+        distanceToTarget = piHelper.getDistance();
         
         // ----- Command turret to calculated angle -----
         turret.setTargetAngle(targetTurretAngle);
         
         // ----- Publish telemetry -----
-        SmartDashboard.putString("AimPose/Status", "Tracking " + targetName);
-        SmartDashboard.putString("AimPose/TargetMode", targetName);
-        SmartDashboard.putNumber("AimPose/TargetAngle", targetTurretAngle);
-        SmartDashboard.putNumber("AimPose/CurrentAngle", turret.getCurrentAngle());
-        SmartDashboard.putNumber("AimPose/Error", targetTurretAngle - turret.getCurrentAngle());
-        SmartDashboard.putNumber("AimPose/Distance", distanceToTarget);
-        SmartDashboard.putNumber("AimPose/TrainingCorrection", trainingCorrection);
-        SmartDashboard.putNumber("AimPose/TrainingConfidence", trainingConfidence);
-        SmartDashboard.putNumber("AimPose/RobotX", limelight.getRobotPose().getX());
-        SmartDashboard.putNumber("AimPose/RobotY", limelight.getRobotPose().getY());
-        SmartDashboard.putNumber("AimPose/RobotHeading", limelight.getRobotPose().getRotation().getDegrees());
-        SmartDashboard.putNumber("AimPose/TargetX", targetPosition.getX());
-        SmartDashboard.putNumber("AimPose/TargetY", targetPosition.getY());
-        
-        // Put calibration offset on dashboard (editable)
-        SmartDashboard.putNumber("AimPose/CalibrationOffset", calibrationOffset);
+        String fallbackTag = piHelper.isUsingFallback() ? "[FALLBACK] " : "";
+        SmartDashboard.putString("AimPose/Status", fallbackTag + "Tracking " + targetName);
     }
     
     // STATUS METHODS

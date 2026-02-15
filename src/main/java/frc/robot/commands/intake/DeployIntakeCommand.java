@@ -21,7 +21,7 @@ public class DeployIntakeCommand extends Command {
     
     @Override
     public void initialize() {
-        intake.deploy();
+        intake.deployAndIntake();
     }
     
     @Override

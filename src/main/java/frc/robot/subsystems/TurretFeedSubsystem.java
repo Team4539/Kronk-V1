@@ -7,6 +7,7 @@ import com.ctre.phoenix6.signals.NeutralModeValue;
 
 import frc.robot.util.DashboardHelper;
 import frc.robot.util.DashboardHelper.Category;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
 
@@ -70,14 +71,10 @@ public class TurretFeedSubsystem extends SubsystemBase {
         motor.getConfigurator().apply(config);
     }
 
-    // public boolean CheckHealth(){
-    //      if(motor.isAlive() && motor.getDeviceTemp().getValueAsDouble() !=0) {
-    //         return spindexerHealthy = true;
-    //     }
-    //     else
-    //         return spindexerHealthy = false;
-        
-    // }
+    /** Check if the turret feed motor is responding on the CAN bus. */
+    public boolean checkHealth() {
+        return motor.isAlive();
+    }
 
     // CONTROL METHODS
     
@@ -147,6 +144,13 @@ public class TurretFeedSubsystem extends SubsystemBase {
      */
     @Override
     public void periodic() {
+        // SAFETY: When robot is disabled, send zero power to motor.
+        if (DriverStation.isDisabled()) {
+            motor.setControl(control.withOutput(0));
+            updateDashboard();
+            return;
+        }
+        
         // Apply target speed to motor
         motor.setControl(control.withOutput(targetSpeed));
         

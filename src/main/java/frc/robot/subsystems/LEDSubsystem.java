@@ -10,12 +10,10 @@ import com.ctre.phoenix6.signals.StripTypeValue;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.Timer;
-import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
 import frc.robot.GameStateManager;
 import frc.robot.GameStateManager.GamePhase;
-import frc.robot.RobotContainer;
 import frc.robot.util.DashboardHelper;
 import frc.robot.util.DashboardHelper.Category;
 import frc.robot.util.Elastic;
@@ -38,6 +36,7 @@ public class LEDSubsystem extends SubsystemBase {
     
     // Hardware
     private final CANdle candle;
+    private final CANdleConfiguration candleConfig;
 
     // Animation control requests (reusable)
     private final SolidColor solidColorRequest;
@@ -53,16 +52,21 @@ public class LEDSubsystem extends SubsystemBase {
     // Test mode for animations
     private boolean testMode = false;
     private boolean lastTestMode = false; // Track previous state to detect transitions
-    private String testAnimation = "None";
+    
+    // CANdle boot readiness — hardware isn't responsive until fully booted
+    private boolean candleReady = false;
+    private boolean configApplied = false;
+    private double bootStartTime = 0;
+    private static final double CANDLE_MIN_BOOT_SECONDS = 1.5; // Minimum wait before checking
+    
+    // Current pattern name for dashboard visibility
+    private String currentPatternName = "Waiting for CANdle...";
     
     // State tracking
     private LEDState currentState = LEDState.BOOT_WARMUP;
     private ActionState currentAction = ActionState.IDLE;
     private double stateStartTime = 0;
     private int[] allianceColor = Constants.LEDs.BLUE_ALLIANCE;
-    private boolean fmsConnected = false;
-    private boolean allSubsystemsHealthy = false;
-    private boolean autoSelected = false;
     private boolean isEStopped = false;
     private boolean matchWasActive = false;  // Track if we were in a match
     private double matchEndCelebrationDuration = 10.0;  // Celebrate for 10 seconds after match
@@ -87,9 +91,6 @@ public class LEDSubsystem extends SubsystemBase {
     private double lastFirstAllianceFlash = 0;
     private int[] firstActiveAllianceColor = null;
     
-    // Reference to robot container for diagnostics
-    private RobotContainer robotContainer = null;
-    
     // Game state manager for shift timing
     private final GameStateManager gameState;
     
@@ -97,16 +98,11 @@ public class LEDSubsystem extends SubsystemBase {
     private boolean hasNotifiedEStop = false;
     private boolean hasNotifiedEndgame = false;
     
-    // Telemetry throttling - LEDs don't need 50Hz updates for debug info
-    private int telemetryCounter = 0;
-    
     /**
      * LED states for the pre-match sequence and robot operation
      */
     public enum LEDState {
         BOOT_WARMUP,        // Team colors animation - CANdle warming up
-        DIAGNOSTIC_CHECK,   // Running through subsystem checks
-        //SUBSYSTEM_ERROR,    // Red strobe - subsystem failure detected
         NO_AUTO,            // Orange strobe - no auto routine selected
         FMS_WAIT,           // Yellow strobe - waiting for FMS connection
         ALL_SYSTEMS_GO,     // Green + team colors chase - ready to compete!
@@ -115,7 +111,6 @@ public class LEDSubsystem extends SubsystemBase {
         TELEOP,             // Breathing alliance color
         ENDGAME,            // Rapid strobe alliance color
         MATCH_END,          // Post-match team color celebration!
-        ERROR,               // Red flash - general error
         BROWNOUT            // Brown flash - brownout condition
     }
     
@@ -146,15 +141,16 @@ public class LEDSubsystem extends SubsystemBase {
         ledCount = Constants.LEDs.LED_COUNT;
         ledBuffer = new int[ledCount][3];  // RGB for each LED
         
-        // Configure the CANdle for Phoenix6
-        var config = new CANdleConfiguration();
-        config.LED.LossOfSignalBehavior = LossOfSignalBehaviorValue.KeepRunning;
-        config.FutureProofConfigs = true;
-        config.LED.StripType = StripTypeValue.GRB;  // Standard addressable RGB (ARGB) LEDs
-        candle.getConfigurator().apply(config);
+        // Build the CANdle config but DON'T apply yet —
+        // the CANdle hardware isn't responsive until ~1-2s after power-on.
+        // We'll apply it once the device is alive on the CAN bus.
+        candleConfig = new CANdleConfiguration();
+        candleConfig.LED.LossOfSignalBehavior = LossOfSignalBehaviorValue.KeepRunning;
+        candleConfig.FutureProofConfigs = true;
+        candleConfig.LED.StripType = StripTypeValue.GRB;  // Standard addressable RGB (ARGB) LEDs
         
-        
-        stateStartTime = Timer.getFPGATimestamp();
+        bootStartTime = Timer.getFPGATimestamp();
+        stateStartTime = bootStartTime;
         
         // Initialize SmartDashboard controls
         initializeSmartDashboard();
@@ -166,38 +162,6 @@ public class LEDSubsystem extends SubsystemBase {
     private void initializeSmartDashboard() {
         DashboardHelper.putNumber(Category.DEBUG, "LED/Master_Brightness", masterBrightness);
         DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_Mode", testMode);
-        DashboardHelper.putString(Category.DEBUG, "LED/Test_Animation", testAnimation);
-        
-        // All pattern tests - one button per actual pattern method
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_Solid_Orange", false);
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_Solid_Blue", false);
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_Breathing", false);
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_Strobe", false);
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_FastStrobe", false);
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_TeamColorFlow", false);
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_Victory", false);
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_Targeting", false);
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_PowerFill", false);
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_IntakeFlow", false);
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_ClimbRising", false);
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_ReadySplit", false);
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_Endgame", false);
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_Error", false);
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_Brownout", false);
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_Waiting", false);
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_ShootNow", false);
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_AutoMode", false);
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_TeleopMode", false);
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_EStop", false);
-        DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_ShiftWarning", false);
-    }
-    
-    /**
-     * Sets the robot container reference for diagnostic checks.
-     * Called from RobotContainer after subsystems are initialized.
-     */
-    public void setRobotContainer(RobotContainer container) {
-        this.robotContainer = container;
     }
     
     /**
@@ -354,15 +318,7 @@ public class LEDSubsystem extends SubsystemBase {
     }
     
     /**
-     * Checks FMS connection status.
-     */
-    private void checkFMSConnection() {
-        fmsConnected = DriverStation.isFMSAttached();
-    }
-    
-    /**
      * Checks if emergency stop is active.
-     * E-stop is indicated by DriverStation being in emergency stop mode.
      */
     private void checkEStop() {
         isEStopped = DriverStation.isEStopped();
@@ -370,56 +326,14 @@ public class LEDSubsystem extends SubsystemBase {
     
     /**
      * Gets the total duration of a shift phase.
-     * Used to calculate time elapsed since shift started.
      */
     private double getShiftDuration(GamePhase phase) {
         switch (phase) {
-            case SHIFT_1: return 25.0;  // Shift 1 lasts 25 seconds (2:10 to 1:45)
-            case SHIFT_2: return 25.0;  // Shift 2 lasts 25 seconds (1:45 to 1:20)
-            case SHIFT_3: return 25.0;  // Shift 3 lasts 25 seconds (1:20 to 0:55)
-            case SHIFT_4: return 25.0;  // Shift 4 lasts 25 seconds (0:55 to 0:30)
+            case SHIFT_1: return 25.0;
+            case SHIFT_2: return 25.0;
+            case SHIFT_3: return 25.0;
+            case SHIFT_4: return 25.0;
             default: return 0.0;
-        }
-    }
-    
-    /**
-     * Runs diagnostic checks on all subsystems.
-     * Returns true if all enabled subsystems are healthy.
-     */
-    private boolean runDiagnostics() {
-        if (robotContainer == null) {
-            return false; // Can't check without robot container reference
-        }
-        
-        // Check each enabled subsystem
-        boolean allHealthy = true;
-        
-        IntakeSubsystem intake = robotContainer.getIntake();
-        if (intake != null && !intake.isHealthy()) allHealthy = false;
-        
-        LimelightSubsystem limelight = robotContainer.getLimelight();
-        if (limelight != null && !limelight.isHealthy()) allHealthy = false;
-        
-        ShooterSubsystem shooter = robotContainer.getShooter();
-        if (shooter != null && !shooter.isHealthy()) allHealthy = false;
-        
-        SpindexerSubsystem spindexer = robotContainer.getSpindexer();
-        if (spindexer != null && !spindexer.isHealthy()) allHealthy = false;
-        
-        return allHealthy = true;
-        
-    }
-    
-    /**
-     * Checks if an autonomous routine is selected.
-     */
-    private void checkAutoSelected() {
-        // Check if an auto command exists
-        if (robotContainer != null) {
-            Command autoCommand = robotContainer.getAutonomousCommand();
-            autoSelected = (autoCommand != null);
-        } else {
-            autoSelected = false; 
         }
     }
     
@@ -1207,89 +1121,6 @@ public class LEDSubsystem extends SubsystemBase {
     }
     
     /**
-     * ERROR PATTERN - Dual red scanners crossing back and forth.
-     * Two red comets sweep in opposite directions. When they cross
-     * at the center, a bright white-red flash pulses outward.
-     * Like a Cylon eye but doubled — unmistakably "ERROR."
-     * Instantly says: "Something broke! Check me!"
-     */
-    private void setErrorPattern() {
-        double currentTime = Timer.getFPGATimestamp();
-        
-        int stripStart = Constants.LEDs.STRIP_START;
-        int stripCount = Constants.LEDs.STRIP_COUNT;
-        
-        // Scanner A: bounces left-to-right (1.2 sec cycle)
-        double scanPhaseA = (currentTime % 1.2) / 1.2;
-        int scanPosA;
-        if (scanPhaseA < 0.5) {
-            scanPosA = (int)(scanPhaseA * 2 * stripCount);
-        } else {
-            scanPosA = (int)((1.0 - scanPhaseA) * 2 * stripCount);
-        }
-        scanPosA = Math.min(scanPosA, stripCount - 1);
-        
-        // Scanner B: bounces right-to-left (offset by half)
-        double scanPhaseB = ((currentTime + 0.6) % 1.2) / 1.2;
-        int scanPosB;
-        if (scanPhaseB < 0.5) {
-            scanPosB = (int)(scanPhaseB * 2 * stripCount);
-        } else {
-            scanPosB = (int)((1.0 - scanPhaseB) * 2 * stripCount);
-        }
-        scanPosB = Math.min(scanPosB, stripCount - 1);
-        
-        clearBuffer();
-        
-        // Onboard LEDs: pulsing red
-        setOnboardBreathing(Constants.LEDs.SUBSYSTEM_ERROR_COLOR);
-        
-        // Dim red background
-        for (int i = 0; i < stripCount; i++) {
-            ledBuffer[stripStart + i][0] = (int)(25 * masterBrightness);
-        }
-        
-        int trailLength = 8;
-        int[] red = Constants.LEDs.SUBSYSTEM_ERROR_COLOR;
-        
-        // Scanner A comet
-        for (int t = 0; t < trailLength; t++) {
-            int pos = scanPosA - t;
-            if (pos >= 0 && pos < stripCount) {
-                double fade = 1.0 - ((double) t / trailLength);
-                fade = fade * fade;
-                int r = Math.max(ledBuffer[stripStart + pos][0], (int)(red[0] * fade * masterBrightness));
-                ledBuffer[stripStart + pos][0] = r;
-            }
-        }
-        
-        // Scanner B comet
-        for (int t = 0; t < trailLength; t++) {
-            int pos = scanPosB + t;
-            if (pos >= 0 && pos < stripCount) {
-                double fade = 1.0 - ((double) t / trailLength);
-                fade = fade * fade;
-                int r = Math.max(ledBuffer[stripStart + pos][0], (int)(red[0] * fade * masterBrightness));
-                ledBuffer[stripStart + pos][0] = r;
-            }
-        }
-        
-        // Flash when scanners cross (within 3 LEDs of each other)
-        if (Math.abs(scanPosA - scanPosB) < 4) {
-            int crossPos = (scanPosA + scanPosB) / 2;
-            for (int c = -3; c <= 3; c++) {
-                int idx = crossPos + c;
-                if (idx >= 0 && idx < stripCount) {
-                    double spread = 1.0 - Math.abs(c) * 0.2;
-                    setLED(stripStart + idx, new int[]{255, (int)(100 * spread), (int)(50 * spread)});
-                }
-            }
-        }
-        
-        pushBuffer();
-    }
-    
-    /**
      * BROWNOUT PATTERN - Dramatic power failure / sputtering.
      * LEDs flicker and sections randomly go dark then struggle back on,
      * like a dying lightbulb. The brown/amber color screams "low power."
@@ -1657,12 +1488,15 @@ public class LEDSubsystem extends SubsystemBase {
     
     /**
      * Updates LED pattern based on current state.
+     * Sets currentPatternName for dashboard visibility.
+     * checkEStop() is already called in periodic() — not duplicated here.
      */
     private void updateLEDPattern() {
         double timeSinceStateStart = Timer.getFPGATimestamp() - stateStartTime;
         
         // the most important thing, always check for brownout first
         if (currentAction == ActionState.BROWNOUT) {
+            currentPatternName = "Brownout";
             setBrownoutPattern();
             return;
         }
@@ -1670,18 +1504,21 @@ public class LEDSubsystem extends SubsystemBase {
         // When we first receive the game message, flash the first active alliance color
         // to alert drivers which alliance goes first. This is a quick 5-flash sequence.
         if (updateFirstAllianceFlash()) {
+            currentPatternName = "First Alliance Flash";
             return;  // Currently flashing first alliance, don't do anything else
         }
         
         // PRIORITY 1: E-stop - ALWAYS highest priority (safety)
-        checkEStop();
+        // Note: checkEStop() already called in periodic(), just check the flag here
         if (isEStopped) {
+            currentPatternName = "E-STOP";
             setEStopPattern();
             return;
         }
         
         // PRIORITY 2: Ready to shoot - Override everything (driver needs to know they can fire!)
         if (currentAction == ActionState.SHOOTING) {
+            currentPatternName = "SHOOT NOW";
             setShootNowPattern();  // Solid green strobe - 
             return;
         }
@@ -1696,22 +1533,22 @@ public class LEDSubsystem extends SubsystemBase {
         if (currentState == LEDState.AUTO || currentState == LEDState.TELEOP) {
             switch (currentAction) {
                 case AIMING:
-                    // Targeting pattern - edges closing in like a reticle!
+                    currentPatternName = "Targeting";
                     setTargetingPattern();
                     return;
                     
                 case SPOOLING:
-                    // Power filling up pattern - like a progress bar charging!
+                    currentPatternName = "Spooling Up";
                     setPowerFillPattern();
                     return;
                     
                 case CLIMBING:
-                    // Rising purple pattern - going UP!
+                    currentPatternName = "Climbing";
                     setClimbRisingPattern();
                     return;
                     
                 case INTAKING:
-                    // Flowing inward pattern - sucking in!
+                    currentPatternName = "Intaking";
                     setIntakeFlowPattern();
                     return;
                     
@@ -1725,6 +1562,7 @@ public class LEDSubsystem extends SubsystemBase {
                     // Already handled above
                     return;
                 case BROWNOUT:
+                    currentPatternName = "Brownout";
                     setBrownoutPattern();
                     return;
                     
@@ -1739,18 +1577,21 @@ public class LEDSubsystem extends SubsystemBase {
             
             // 10 second warning before endgame
             if (timeUntilEndgame > 7.0 && timeUntilEndgame <= 10.0) {
+                currentPatternName = "Endgame 10s Warning";
                 setBreathing(Constants.LEDs.ENDGAME_WARNING_10SEC);
                 return;
             }
             
             // 5 second warning before endgame
             if (timeUntilEndgame > 3.0 && timeUntilEndgame <= 5.0) {
+                currentPatternName = "Endgame 5s Warning";
                 setStrobe(Constants.LEDs.ENDGAME_WARNING_5SEC);
                 return;
             }
             
             // 3 second warning before endgame
             if (timeUntilEndgame > 0.0 && timeUntilEndgame <= 3.0) {
+                currentPatternName = "Endgame 3s Warning";
                 setStrobe(Constants.LEDs.ENDGAME_WARNING_3SEC);
                 return;
             }
@@ -1758,7 +1599,7 @@ public class LEDSubsystem extends SubsystemBase {
         
         // Once in endgame phase, show special endgame pattern (if idle)
         if (currentState == LEDState.TELEOP && phase == GamePhase.END_GAME && currentAction == ActionState.IDLE) {
-            // URGENCY pattern - fast pulse with periodic white flash!
+            currentPatternName = "Endgame Urgency";
             setEndgameUrgencyPattern();
             return;
         }
@@ -1769,6 +1610,7 @@ public class LEDSubsystem extends SubsystemBase {
             // 5 second warning - "HEAD BACK" - start returning to scoring position
             // White breathing = get ready, our shift is coming!
             if (gameState.isHeadBackWarning()) {
+                currentPatternName = "Head Back Warning";
                 setBreathing(Constants.LEDs.SHIFT_WARNING_5SEC);
                 return;
             }
@@ -1776,6 +1618,7 @@ public class LEDSubsystem extends SubsystemBase {
             // 3 second warning - "GREEN LIGHT" - can start shooting!
             // Green strobe = you're cleared to shoot, shift is about to start!
             if (gameState.isGreenLightPreShift()) {
+                currentPatternName = "Green Light Pre-Shift";
                 setStrobe(Constants.LEDs.GREEN);
                 return;
             }
@@ -1786,6 +1629,7 @@ public class LEDSubsystem extends SubsystemBase {
                 double timeRemainingActive = gameState.getTimeRemainingActive();
                 double timeSinceShiftStart = getShiftDuration(phase) - timeRemainingActive;
                 if (timeSinceShiftStart >= 0 && timeSinceShiftStart <= 2.0) {
+                    currentPatternName = "Shift Active Celebration";
                     setChase(Constants.LEDs.GREEN, allianceColor);
                     return;
                 }
@@ -1795,58 +1639,22 @@ public class LEDSubsystem extends SubsystemBase {
         // PRIORITY 6: Normal state patterns (pre-match sequence and basic operation)
         switch (currentState) {
             case BOOT_WARMUP:
-                // Team colors flowing during warmup - show off our identity!
+                currentPatternName = "Boot Warmup";
                 setTeamColorFlow();
                 
-                // After warmup duration, skip diagnostics and go straight to disabled
+                // After warmup duration, go straight to disabled
                 if (timeSinceStateStart > Constants.LEDs.BOOT_ANIMATION_DURATION) {
                     setState(LEDState.DISABLED);
                 }
                 break;
                 
-            case DIAGNOSTIC_CHECK:
-                // Diagnostics disabled - just go to disabled state
-                setState(LEDState.DISABLED);
-                break;
-            //     // Run diagnostics
-            //     allSubsystemsHealthy = runDiagnostics();
-            //     checkAutoSelected();
-            //     checkFMSConnection();
-                
-            //     // Yellow breathing while checking
-            //     setBreathing(Constants.LEDs.YELLOW);
-                
-            //     // After diagnostic interval, determine next state
-            //     if (timeSinceStateStart > Constants.LEDs.DIAGNOSTIC_CHECK_INTERVAL) {
-            //         if (allSubsystemsHealthy) {
-            //             //setState(LEDState.SUBSYSTEM_ERROR);
-            //         } else if (!fmsConnected) {
-            //             setState(LEDState.FMS_WAIT);
-            //         } else if (!autoSelected) {
-            //             setState(LEDState.NO_AUTO);
-            //         } else {
-            //             setState(LEDState.ALL_SYSTEMS_GO);
-            //         }
-            //     }
-            //     break;
-                
-            // case SUBSYSTEM_ERROR:
-            //     // ERROR pattern - clear visual that something is WRONG
-            //     setErrorPattern();
-                
-            //     // Re-check periodically
-            //     if (timeSinceStateStart > 2.0) {
-            //         setState(LEDState.DIAGNOSTIC_CHECK);
-            //     }
-            //     break;
-                
             case NO_AUTO:
-                // Orange strobe - no auto selected (still needs attention!)
+                currentPatternName = "No Auto Selected";
                 setStrobe(Constants.LEDs.NO_AUTO_COLOR);
                 break;
                 
             case FMS_WAIT:
-                // Yellow strobe - waiting for FMS
+                currentPatternName = "Waiting for FMS";
                 setStrobe(Constants.LEDs.FMS_DISCONNECTED_COLOR);
                 
                 // Re-check periodically - go to disabled instead of diagnostics
@@ -1856,32 +1664,32 @@ public class LEDSubsystem extends SubsystemBase {
                 break;
                 
             case ALL_SYSTEMS_GO:
-                // READY SPLIT pattern - Team colors alternating, "We're ready!"
+                currentPatternName = "All Systems Go";
                 setReadySplitPattern();
                 break;
                 
             case DISABLED:
-                // WAITING pattern - Calm team color breathing
+                currentPatternName = "Disabled (Waiting)";
                 setWaitingPattern();
                 break;
                 
             case AUTO:
-                // AUTO MODE pattern - Alliance color with white accents
+                currentPatternName = "Autonomous";
                 setAutoModePattern();
                 break;
                 
             case TELEOP:
-                // TELEOP MODE pattern - Breathing alliance color
+                currentPatternName = "Teleop";
                 setTeleopModePattern();
                 break;
                 
             case ENDGAME:
-                // ENDGAME URGENCY pattern - Fast pulse with white flashes!
+                currentPatternName = "Endgame";
                 setEndgameUrgencyPattern();
                 break;
                 
             case MATCH_END:
-                // Post-match celebration - fast team color strobe!
+                currentPatternName = "Victory Celebration";
                 setVictoryCelebration();
                 
                 // After celebration duration, go to normal disabled state
@@ -1890,12 +1698,8 @@ public class LEDSubsystem extends SubsystemBase {
                 }
                 break;
                 
-            case ERROR:
-                // Red strobe for errors
-                setStrobe(Constants.LEDs.SUBSYSTEM_ERROR_COLOR);
-                break;
             case BROWNOUT:
-                // Brownout pattern
+                currentPatternName = "Brownout";
                 setBrownoutPattern();
                 break;
         }
@@ -1903,6 +1707,29 @@ public class LEDSubsystem extends SubsystemBase {
     
     @Override
     public void periodic() {
+        // ─── CANdle Boot Readiness Gate ───
+        // The CANdle hardware needs ~1-2 seconds to initialize on the CAN bus after power-on.
+        // Any commands sent before it's ready are silently lost. We wait for the minimum
+        // boot time, then apply config on first ready detection.
+        if (!candleReady) {
+            double timeSinceBoot = Timer.getFPGATimestamp() - bootStartTime;
+            if (timeSinceBoot < CANDLE_MIN_BOOT_SECONDS) {
+                // Still in minimum boot window — don't send anything
+                DashboardHelper.putString(Category.DEBUG, "LED/Pattern", "Waiting for CANdle (" 
+                    + String.format("%.1f", timeSinceBoot) + "s)");
+                DashboardHelper.putString(Category.DEBUG, "LED/State", currentState.name());
+                DashboardHelper.putString(Category.DEBUG, "LED/Action", currentAction.name());
+                return;
+            }
+            // Minimum boot time elapsed — apply config now
+            candle.getConfigurator().apply(candleConfig);
+            configApplied = true;
+            candleReady = true;
+            // Reset state start time so BOOT_WARMUP animation starts fresh from now
+            stateStartTime = Timer.getFPGATimestamp();
+        }
+        
+        // ─── Dashboard Controls ───
         // Check for brightness updates from dashboard
         double newBrightness = DashboardHelper.getNumber(Category.DEBUG, "LED/Master_Brightness", masterBrightness);
         if (Math.abs(newBrightness - masterBrightness) > 0.01) {
@@ -1915,154 +1742,33 @@ public class LEDSubsystem extends SubsystemBase {
         
         // Detect transition into test mode - clear all running animations to prevent conflicts
         if (testMode && !lastTestMode) {
-            // Just entered test mode - turn off LEDs to clear any running animations
             setSolidColor(Constants.LEDs.OFF);
-            testAnimation = "None";
-            DashboardHelper.putString(Category.DEBUG, "LED/Test_Animation", "Mode Enabled - Select Test");
         }
+        lastTestMode = testMode;
         
-        lastTestMode = testMode; // Track for next cycle
-        
-        // If in test mode, check for test button presses
+        // If in test mode, skip normal LED operation
         if (testMode) {
-            handleTestMode();
-            return; // Skip normal LED operation when in test mode
+            currentPatternName = "Test Mode";
+            DashboardHelper.putString(Category.DEBUG, "LED/Pattern", currentPatternName);
+            return;
         }
         
-        // Update alliance color from DriverStation
+        // ─── State Updates ───
         updateAllianceColor();
-        
-        // Check for E-stop (this is critical safety info!)
         checkEStop();
         
-        // Update LED pattern based on state
+        // ─── Pattern Dispatch ───
         updateLEDPattern();
         
-        // Calculate match state info
+        // ─── Dashboard Telemetry ───
+        DashboardHelper.putString(Category.DEBUG, "LED/Pattern", currentPatternName);
+        DashboardHelper.putString(Category.DEBUG, "LED/State", currentState.name());
+        DashboardHelper.putString(Category.DEBUG, "LED/Action", currentAction.name());
+        
+        // ─── Critical Notifications ───
         double matchTime = DriverStation.getMatchTime();
         boolean inEndgame = (matchTime > 0 && matchTime <= 30.0);
-        
-        // Send critical notifications to drivers
         checkCriticalNotifications(matchTime, inEndgame);
-        
-        // Dashboard telemetry - throttle debug data to reduce NetworkTables traffic
-        telemetryCounter++;
-        
-        // Pre-match status always runs (critical for setup)
-        DashboardHelper.putBoolean(Category.PRE_MATCH, "LED/FMS_Connected", fmsConnected);
-        DashboardHelper.putBoolean(Category.PRE_MATCH, "LED/Subsystems_Healthy", allSubsystemsHealthy);
-        DashboardHelper.putBoolean(Category.PRE_MATCH, "LED/Auto_Selected", autoSelected);
-        
-        // Debug telemetry only every 10 cycles (200ms)
-        if (telemetryCounter >= 10) {
-            telemetryCounter = 0;
-            DashboardHelper.putString(Category.DEBUG, "LED/State", currentState.toString());
-            DashboardHelper.putString(Category.DEBUG, "LED/Action", currentAction.toString());
-            DashboardHelper.putString(Category.DEBUG, "LED/GamePhase", gameState.getGamePhase().toString());
-            DashboardHelper.putNumber(Category.DEBUG, "LED/TimeUntilActive", gameState.getTimeUntilActive());
-            DashboardHelper.putNumber(Category.DEBUG, "LED/MatchTime", matchTime);
-            DashboardHelper.putBoolean(Category.DEBUG, "LED/InEndgame", inEndgame);
-            DashboardHelper.putBoolean(Category.DEBUG, "LED/EStop", isEStopped);
-        }
-    }
-    
-    /**
-     * Handles test mode button presses for testing animations.
-     * Each button directly calls the corresponding pattern method.
-     */
-    private void handleTestMode() {
-        // Read all test buttons
-        boolean testSolidOrange = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_Solid_Orange", false);
-        boolean testSolidBlue = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_Solid_Blue", false);
-        boolean testBreathing = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_Breathing", false);
-        boolean testStrobe = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_Strobe", false);
-        boolean testFastStrobe = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_FastStrobe", false);
-        boolean testTeamColorFlow = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_TeamColorFlow", false);
-        boolean testVictory = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_Victory", false);
-        boolean testTargeting = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_Targeting", false);
-        boolean testPowerFill = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_PowerFill", false);
-        boolean testIntakeFlow = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_IntakeFlow", false);
-        boolean testClimbRising = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_ClimbRising", false);
-        boolean testReadySplit = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_ReadySplit", false);
-        boolean testEndgame = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_Endgame", false);
-        boolean testError = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_Error", false);
-        boolean testBrownout = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_Brownout", false);
-        boolean testWaiting = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_Waiting", false);
-        boolean testShootNow = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_ShootNow", false);
-        boolean testAutoMode = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_AutoMode", false);
-        boolean testTeleopMode = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_TeleopMode", false);
-        boolean testEStop = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_EStop", false);
-        boolean testShiftWarning = DashboardHelper.getBoolean(Category.DEBUG, "LED/Test_ShiftWarning", false);
-        
-        // Execute the corresponding pattern method directly
-        if (testSolidOrange) {
-            testAnimation = "setSolidColor(ORANGE)";
-            setSolidColor(Constants.LEDs.TEAM_SAFETY_ORANGE);
-        } else if (testSolidBlue) {
-            testAnimation = "setSolidColor(BLUE)";
-            setSolidColor(Constants.LEDs.TEAM_BLUE);
-        } else if (testBreathing) {
-            testAnimation = "setBreathing()";
-            setBreathing(Constants.LEDs.TEAM_SAFETY_ORANGE);
-        } else if (testStrobe) {
-            testAnimation = "setStrobe()";
-            setStrobe(Constants.LEDs.TEAM_SAFETY_ORANGE);
-        } else if (testFastStrobe) {
-            testAnimation = "setFastStrobe()";
-            setFastStrobe(Constants.LEDs.TEAM_SAFETY_ORANGE);
-        } else if (testTeamColorFlow) {
-            testAnimation = "setTeamColorFlow()";
-            setTeamColorFlow();
-        } else if (testVictory) {
-            testAnimation = "setVictoryCelebration()";
-            setVictoryCelebration();
-        } else if (testTargeting) {
-            testAnimation = "setTargetingPattern()";
-            setTargetingPattern();
-        } else if (testPowerFill) {
-            testAnimation = "setPowerFillPattern()";
-            setPowerFillPattern();
-        } else if (testIntakeFlow) {
-            testAnimation = "setIntakeFlowPattern()";
-            setIntakeFlowPattern();
-        } else if (testClimbRising) {
-            testAnimation = "setClimbRisingPattern()";
-            setClimbRisingPattern();
-        } else if (testReadySplit) {
-            testAnimation = "setReadySplitPattern()";
-            setReadySplitPattern();
-        } else if (testEndgame) {
-            testAnimation = "setEndgameUrgencyPattern()";
-            setEndgameUrgencyPattern();
-        } else if (testError) {
-            testAnimation = "setErrorPattern()"; 
-            setErrorPattern();
-        } else if (testBrownout) {
-            testAnimation = "setBrownoutPattern()";
-            setBrownoutPattern();
-        } else if (testWaiting) {
-            testAnimation = "setWaitingPattern()";
-            setWaitingPattern();
-        } else if (testShootNow) {
-            testAnimation = "setShootNowPattern()";
-            setShootNowPattern();
-        } else if (testAutoMode) {
-            testAnimation = "setAutoModePattern()";
-            setAutoModePattern();
-        } else if (testTeleopMode) {
-            testAnimation = "setTeleopModePattern()";
-            setTeleopModePattern();
-        } else if (testEStop) {
-            testAnimation = "setEStopPattern()";
-            setEStopPattern();
-        } else if (testShiftWarning) {
-            testAnimation = "setStrobe(SHIFT_WARNING)";
-            setStrobe(Constants.LEDs.SHIFT_WARNING_5SEC);
-        } else {
-            testAnimation = "None";
-        }
-        
-        DashboardHelper.putString(Category.DEBUG, "LED/Test_Animation", testAnimation);
     }
     
     /**

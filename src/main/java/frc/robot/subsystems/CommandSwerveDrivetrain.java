@@ -374,15 +374,6 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         
         // Draw shuttle boundary line
         drawShuttleBoundaryLine(alliance);
-        
-        // Publish telemetry
-        DashboardHelper.putNumber(Category.TELEOP, "Field/RobotX", currentPose.getX());
-        DashboardHelper.putNumber(Category.TELEOP, "Field/RobotY", currentPose.getY());
-        DashboardHelper.putNumber(Category.TELEOP, "Field/RobotHeading", currentPose.getRotation().getDegrees());
-        DashboardHelper.putNumber(Category.TELEOP, "Field/TurretX", turretPosition.getX());
-        DashboardHelper.putNumber(Category.TELEOP, "Field/TurretY", turretPosition.getY());
-        DashboardHelper.putString(Category.TELEOP, "Field/Alliance", alliance.toString());
-        DashboardHelper.putBoolean(Category.TELEOP, "Field/ShuttleMode", isShuttleMode);
     }
     
     /**

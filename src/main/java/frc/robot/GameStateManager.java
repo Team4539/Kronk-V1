@@ -1157,23 +1157,7 @@ public class GameStateManager {
      */
     @SuppressWarnings("unused")
     private void publishTelemetry() {
-        Alliance activeAlliance = getCurrentlyActiveAlliance();
-        
-        // Alliance info
-        DashboardHelper.putString(Category.TELEOP, "Game/RobotAlliance", robotAlliance.toString());
-        DashboardHelper.putString(Category.TELEOP, "Game/FirstActiveAlliance", firstActiveAlliance == null ? "UNKNOWN" : firstActiveAlliance.toString());
-        DashboardHelper.putString(Category.TELEOP, "Game/CurrentlyActiveAlliance", activeAlliance == null ? "BOTH" : activeAlliance.toString());
-        
-        // Phase and mode
-        DashboardHelper.putString(Category.TELEOP, "Game/Phase", currentPhase.toString());
-        DashboardHelper.putString(Category.TELEOP, "Game/TargetMode", currentTargetMode.toString());
-        
-        // Match status - BIG INDICATORS
-        DashboardHelper.putBoolean(Category.TELEOP, "Game/PreMatch", isPreMatch());
-        DashboardHelper.putBoolean(Category.TELEOP, "Game/PostMatch", isPostMatch());
-        DashboardHelper.putBoolean(Category.TELEOP, "Game/MatchActive", isMatchActive());
-        
-        // Friendly match status string
+        // Match status
         String matchStatus = "";
         if (isPreMatch()) {
             matchStatus = "[PRE-MATCH]";
@@ -1188,82 +1172,11 @@ public class GameStateManager {
         }
         DashboardHelper.putString(Category.HOME, "MATCH STATUS", matchStatus);
         
-        // Status flags
-        DashboardHelper.putBoolean(Category.TELEOP, "Game/CanShoot", canShoot());
-        DashboardHelper.putBoolean(Category.TELEOP, "Game/OurAllianceActive", isOurAllianceActive());
-        DashboardHelper.putBoolean(Category.TELEOP, "Game/ReceivedGameMessage", receivedGameMessage);
-        DashboardHelper.putBoolean(Category.TELEOP, "Game/ShuttleMode", shuttleMode);
-        DashboardHelper.putBoolean(Category.TELEOP, "Game/ForceShoot", forceShootEnabled);
-        
-        // Auto-shuttle info
-        DashboardHelper.putBoolean(Category.TELEOP, "Game/InShuttleZone", inShuttleZone);
-        DashboardHelper.putBoolean(Category.TELEOP, "Game/ShuttleManualOverride", shuttleModeManualOverride);
-        
-        // BIG INDICATORS FOR DRIVERS - Easy to see on dashboard
-        boolean shootUnlocked = canShoot();
-        DashboardHelper.putBoolean(Category.HOME, "SHOOT UNLOCKED", shootUnlocked);
-        DashboardHelper.putString(Category.HOME, "SHOOT STATUS", shootUnlocked ? "[UNLOCKED]" : "[LOCKED]");
-        
-        // Shuttle zone specific indicator
-        DashboardHelper.putBoolean(Category.HOME, "SHUTTLE ZONE ACTIVE", inShuttleZone);
-        
-        // Additional context for why shooting is unlocked/locked
-        String shootReason = "";
-        if (inShuttleZone) {
-            shootReason = "SHUTTLE ZONE";
-        } else if (forceShootEnabled) {
-            shootReason = "FORCE OVERRIDE";
-        } else if (isGreenLightPreShift()) {
-            shootReason = "GREEN LIGHT PRE-SHIFT";
-        } else if (isOurAllianceActive()) {
-            if (practiceMatchMode) {
-                shootReason = "PRACTICE - ALLIANCE ACTIVE";
-            } else {
-                shootReason = "ALLIANCE ACTIVE";
-            }
-        } else if (isHeadBackWarning()) {
-            shootReason = "HEAD BACK WARNING";
-        } else if (!practiceMatchMode && !DriverStation.isFMSAttached() && !Constants.Field.OVERRIDE_FMS_CHECK) {
-            shootReason = "FREE PRACTICE";
-        } else if (practiceMatchMode) {
-            shootReason = "PRACTICE - ALLIANCE INACTIVE";
-        } else {
-            shootReason = "ALLIANCE INACTIVE";
-        }
-        DashboardHelper.putString(Category.TELEOP, "Game/ShootReason", shootReason);
-        
-        // Pre-shift warning status
-        DashboardHelper.putBoolean(Category.TELEOP, "Game/HeadBackWarning", isHeadBackWarning());
-        DashboardHelper.putBoolean(Category.TELEOP, "Game/GreenLightPreShift", isGreenLightPreShift());
-        DashboardHelper.putNumber(Category.TELEOP, "Game/SecsUntilOurShift", getSecondsUntilOurNextShift());
-        
-        // BIG INDICATORS FOR DRIVERS
+        // Key indicators for drivers
+        DashboardHelper.putBoolean(Category.HOME, "SHOOT UNLOCKED", canShoot());
         DashboardHelper.putBoolean(Category.HOME, "HEAD BACK", isHeadBackWarning());
         DashboardHelper.putBoolean(Category.HOME, "GREEN LIGHT", isGreenLightPreShift());
-        
-        // Timing info
-        DashboardHelper.putNumber(Category.TELEOP, "Game/TimeUntilActive", getTimeUntilActive());
-        DashboardHelper.putNumber(Category.TELEOP, "Game/TimeRemainingActive", getTimeRemainingActive());
-        DashboardHelper.putNumber(Category.TELEOP, "Game/MatchTime", DriverStation.getMatchTime());
-        
-        // Debug info
-        DashboardHelper.putBoolean(Category.TELEOP, "Game/FMSAttached", DriverStation.isFMSAttached());
-        DashboardHelper.putBoolean(Category.TELEOP, "Game/OverrideFMSCheck", Constants.Field.OVERRIDE_FMS_CHECK);
-        
-        // Practice/Test Mode Status Summary
-        DashboardHelper.putBoolean(Category.HOME, "Status/PracticeMatchMode", practiceMatchMode);
-        DashboardHelper.putBoolean(Category.HOME, "Status/TestModeEnabled", testModeEnabled);
-        DashboardHelper.putBoolean(Category.HOME, "Status/SlowMotion", practiceSlowMotion);
-        DashboardHelper.putNumber(Category.HOME, "Status/SpeedLimit", practiceSpeedLimit);
-        
-        // Mechanism Status (what's currently enabled)
-        DashboardHelper.putBoolean(Category.HOME, "Status/ShooterEnabled", shouldShooterRun());
-        DashboardHelper.putBoolean(Category.HOME, "Status/TurretEnabled", shouldTurretRun());
-        DashboardHelper.putBoolean(Category.HOME, "Status/DriveEnabled", shouldDriveRun());
-        DashboardHelper.putBoolean(Category.HOME, "Status/IntakeEnabled", isIntakeEnabled());
-        DashboardHelper.putBoolean(Category.HOME, "Status/ClimberEnabled", isClimberEnabled());
-        DashboardHelper.putBoolean(Category.HOME, "Status/VisionEnabled", isVisionEnabled());
-        DashboardHelper.putBoolean(Category.HOME, "Status/AutoAimEnabled", isAutoAimEnabled());
+        DashboardHelper.putBoolean(Category.HOME, "SHUTTLE ZONE ACTIVE", inShuttleZone);
     }
 }
 

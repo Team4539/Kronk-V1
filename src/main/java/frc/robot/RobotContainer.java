@@ -15,9 +15,7 @@ import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import frc.robot.commands.turret.AimTurretToPoseCommand;
 import frc.robot.util.DashboardHelper;
 import frc.robot.util.DashboardHelper.Category;
-import frc.robot.commands.turret.AimTurretToTagsCommand;
 import frc.robot.commands.AutoShootCommand;
-import frc.robot.commands.calibrations.CalibrateIntakePivotsCommand;
 import frc.robot.commands.calibrations.CalibrateTurretGearRatioCommand;
 import frc.robot.commands.calibrations.DistanceOffsetCalibrationCommand;
 import frc.robot.commands.calibrations.FullShooterCalibrationCommand;
@@ -26,18 +24,17 @@ import frc.robot.commands.calibrations.ShootingCalibrationCommand;
 import frc.robot.commands.calibrations.TurretPIDCalibrationCommand;
 import frc.robot.commands.intake.DeployIntakeCommand;
 import frc.robot.commands.intake.RetractIntakeCommand;
-import frc.robot.commands.calibrations.PathPlannerTrainingCommand;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.IntakeSubsystem;
 import frc.robot.subsystems.LEDSubsystem;
 import frc.robot.subsystems.LimelightSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
-import frc.robot.subsystems.SpindexerSubsystem;
 import frc.robot.subsystems.TurretFeedSubsystem;
 import frc.robot.subsystems.TurretSubsystem;
 import frc.robot.util.Elastic;
 import frc.robot.util.Elastic.NotificationLevel;
+import frc.robot.util.PiShootingHelper;
 
 /**
  * Central hub that wires subsystems, commands, and controller bindings together.
@@ -52,8 +49,8 @@ public class RobotContainer {
   private final TurretSubsystem turret;
   private final LimelightSubsystem limelight;
   private final ShooterSubsystem shooter;
-  private final SpindexerSubsystem spindexer;
   private final TurretFeedSubsystem turretFeed;
+  private final PiShootingHelper piShootingHelper;
   @SuppressWarnings("unused")
   private final IntakeSubsystem intake;
   private final LEDSubsystem leds;
@@ -83,7 +80,6 @@ public class RobotContainer {
   private final AimTurretToPoseCommand aimToPoseDefaultCommand;
   private final AimTurretToPoseCommand aimToPoseButtonCommand;
   private final AutoShootCommand autoShootCommand;
-  private final CalibrateIntakePivotsCommand calibrateIntakePivotsCommand;
 
   // State
   private boolean isSlowMode = false;
@@ -96,15 +92,11 @@ public class RobotContainer {
     turret = Constants.SubsystemEnabled.TURRET ? new TurretSubsystem() : null;
     limelight = Constants.SubsystemEnabled.LIMELIGHT ? new LimelightSubsystem() : null;
     shooter = Constants.SubsystemEnabled.SHOOTER ? new ShooterSubsystem() : null;
-    spindexer = Constants.SubsystemEnabled.SPINDEXER ? new SpindexerSubsystem() : null;
     turretFeed = Constants.SubsystemEnabled.TURRET_FEED ? new TurretFeedSubsystem() : null;
     intake = Constants.SubsystemEnabled.INTAKE ? new IntakeSubsystem() : null;
     leds = Constants.SubsystemEnabled.LEDS ? new LEDSubsystem() : null;
     calibrationManager = CalibrationManager.getInstance();
-    
-    if (leds != null) {
-      leds.setRobotContainer(this);
-    }
+    piShootingHelper = PiShootingHelper.getInstance();
     
     // Log enabled subsystems
     logSubsystemStatus();
@@ -119,11 +111,7 @@ public class RobotContainer {
     }
     
     autoShootCommand = (turret != null && shooter != null && limelight != null)
-        ? new AutoShootCommand(turret, shooter, limelight, leds, spindexer, turretFeed, drivetrain)
-        : null;
-    
-    calibrateIntakePivotsCommand = (intake != null)
-        ? new CalibrateIntakePivotsCommand(intake)
+        ? new AutoShootCommand(turret, shooter, limelight, leds, turretFeed, drivetrain)
         : null;
     
     registerNamedCommands();
@@ -142,7 +130,6 @@ public class RobotContainer {
     System.out.println("[Subsystems] Turret: " + (turret != null ? "ON" : "OFF"));
     System.out.println("[Subsystems] Limelight: " + (limelight != null ? "ON" : "OFF"));
     System.out.println("[Subsystems] Shooter: " + (shooter != null ? "ON" : "OFF"));
-    System.out.println("[Subsystems] Spindexer: " + (spindexer != null ? "ON" : "OFF"));
     System.out.println("[Subsystems] TurretFeed: " + (turretFeed != null ? "ON" : "OFF"));
     System.out.println("[Subsystems] Intake: " + (intake != null ? "ON" : "OFF"));
     System.out.println("[Subsystems] LEDs: " + (leds != null ? "ON" : "OFF"));
@@ -159,22 +146,29 @@ public class RobotContainer {
     // Shooting
     if (turret != null && shooter != null && limelight != null) {
       NamedCommands.registerCommand("autoShoot", 
-          new AutoShootCommand(turret, shooter, limelight, leds, spindexer, turretFeed, drivetrain).withTimeout(3.0));
+          new AutoShootCommand(turret, shooter, limelight, leds, turretFeed, drivetrain).withTimeout(3.0));
       NamedCommands.registerCommand("quickShoot", 
-          new AutoShootCommand(turret, shooter, limelight, leds, spindexer, turretFeed, drivetrain).withTimeout(1.5));
+          new AutoShootCommand(turret, shooter, limelight, leds, turretFeed, drivetrain).withTimeout(1.5));
     }
     
     // Aiming
     if (turret != null && limelight != null) {
       NamedCommands.registerCommand("aimAtPose", new AimTurretToPoseCommand(turret, limelight).withTimeout(2.0));
-      NamedCommands.registerCommand("aimAtTags", new AimTurretToTagsCommand(turret, limelight).withTimeout(2.0));
     }
     
     // Shooter control
     if (shooter != null && limelight != null) {
       NamedCommands.registerCommand("spinUpShooter", Commands.run(() -> {
-        double distance = limelight.hasPoseEstimate() ? limelight.getDistanceToHub() : 3.0;
-        shooter.setForDistance(distance);
+        // Use Pi shooting helper for shooter power - it has the full shooting solution
+        PiShootingHelper piHelper = PiShootingHelper.getInstance();
+        double topPower = piHelper.getTopSpeed();
+        double bottomPower = piHelper.getBottomSpeed();
+        // If Pi hasn't calculated yet (both zero), use default idle power
+        if (topPower == 0.0 && bottomPower == 0.0) {
+          topPower = Constants.Shooter.DEFAULT_IDLE_POWER;
+          bottomPower = Constants.Shooter.DEFAULT_IDLE_POWER;
+        }
+        shooter.setManualPower(topPower, bottomPower);
       }, shooter));
       NamedCommands.registerCommand("stopShooter", Commands.runOnce(() -> shooter.stop(), shooter));
     }
@@ -193,13 +187,6 @@ public class RobotContainer {
     NamedCommands.registerCommand("wait1.0", Commands.waitSeconds(1.0));
     NamedCommands.registerCommand("wait2.0", Commands.waitSeconds(2.0));
     NamedCommands.registerCommand("printMarker", Commands.print("PathPlanner Marker"));
-    // TrainingShot: PathPlanner training stop - dashboard-only adjustments, no controller
-    if (turret != null && shooter != null && limelight != null) {
-      NamedCommands.registerCommand("TrainingShot", 
-          new PathPlannerTrainingCommand(turret, shooter, limelight));
-    } else {
-      NamedCommands.registerCommand("TrainingShot", Commands.none());
-    }
   }
 
   // Control Bindings
@@ -239,7 +226,7 @@ public class RobotContainer {
     
     // X: Intake deploy/stow
     if (intake != null) {
-      operatorController.x().whileTrue(new DeployIntakeCommand(intake));
+      operatorController.x().onTrue(new DeployIntakeCommand(intake));
       operatorController.x().onFalse(new RetractIntakeCommand(intake));
     }
 
@@ -250,12 +237,19 @@ public class RobotContainer {
       operatorController.y().whileTrue(new ShootingCalibrationCommand(shooter, limelight));
     }
     
-    // Right Trigger: Manual shooter spin-up
+    // Right Trigger: Manual shooter spin-up (uses Pi shooting solution)
     if (shooter != null && limelight != null) {
       operatorController.rightTrigger(0.5).whileTrue(
           Commands.run(() -> {
-            double distance = limelight.hasPoseEstimate() ? limelight.getDistanceToHub() : 3.0;
-            shooter.setForDistance(distance);
+            PiShootingHelper piHelper = PiShootingHelper.getInstance();
+            double topPower = piHelper.getTopSpeed();
+            double bottomPower = piHelper.getBottomSpeed();
+            // If Pi hasn't calculated yet (both zero), use default idle power
+            if (topPower == 0.0 && bottomPower == 0.0) {
+              topPower = Constants.Shooter.DEFAULT_IDLE_POWER;
+              bottomPower = Constants.Shooter.DEFAULT_IDLE_POWER;
+            }
+            shooter.setManualPower(topPower, bottomPower);
           }, shooter).finallyDo(() -> shooter.stop()));
     }
     
@@ -374,10 +368,9 @@ public class RobotContainer {
       DashboardHelper.putData(Category.SETTINGS, "Cal/Shooting", new ShootingCalibrationCommand(shooter, limelight));
     }
     
-    // Aim mode commands
+    // Aim mode command
     if (turret != null && limelight != null) {
       DashboardHelper.putData(Category.SETTINGS, "AimMode/Pose", new AimTurretToPoseCommand(turret, limelight));
-      DashboardHelper.putData(Category.SETTINGS, "AimMode/Tags", new AimTurretToTagsCommand(turret, limelight));
     }
     if (autoShootCommand != null) {
       DashboardHelper.putData(Category.SETTINGS, "AutoShoot", autoShootCommand);
@@ -397,12 +390,21 @@ public class RobotContainer {
     // Always update calibration manager regardless of subsystem state
     calibrationManager.update();
     
+    // Always send data to Pi (even when disabled, so Pi can stay connected)
+    if (drivetrain != null && piShootingHelper != null) {
+      piShootingHelper.update(
+        drivetrain.getState().Pose,
+        drivetrain.getState().Speeds,
+        gameState.getTargetMode()
+      );
+    }
+    
     if (limelight == null || drivetrain == null) return;
     
     limelight.setDrivetrainPose(drivetrain.getState().Pose);
     gameState.update(calculateShuttleZone());
     
-    if (limelight.hasPoseEstimate()) {
+    if (limelight.hasVisionPose()) {
       double[] stdDevs = limelight.getVisionStdDevs();
       drivetrain.addVisionMeasurement(
           limelight.getRobotPose(),
@@ -432,7 +434,7 @@ public class RobotContainer {
   
   public Command getAimTurretCommand() {
     return (turret != null && limelight != null) 
-        ? new AimTurretToTagsCommand(turret, limelight) 
+        ? new AimTurretToPoseCommand(turret, limelight) 
         : Commands.none();
   }
 
@@ -468,7 +470,23 @@ public class RobotContainer {
   public ShooterSubsystem getShooter() {
     return shooter;
   }
-  public SpindexerSubsystem getSpindexer(){
-    return spindexer;
+  public PiShootingHelper getPiShootingHelper() {
+    return piShootingHelper;
+  }
+
+  /**
+   * Explicitly stops all motor subsystems. Called from Robot.disabledInit()
+   * as a belt-and-suspenders safety measure — subsystem periodic() methods
+   * also guard against disabled-state motor commands individually.
+   */
+  public void stopAllMotors() {
+    if (shooter != null) shooter.stop();
+    if (turretFeed != null) turretFeed.stop();
+    if (intake != null) {
+      intake.stopRollers();
+      intake.retract();
+    }
+    // Turret: brake mode holds position passively, no explicit stop needed.
+    // Drivetrain: WPILib command scheduler cancels drive commands on disable.
   }
 }

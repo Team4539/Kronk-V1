@@ -24,7 +24,6 @@ public class DashboardHelper {
         TEST("Test/"),
         DEBUG("Debug/"),
         MISC("Misc/"),
-        SPINDEXER("Spindexer/"),
         TURRET_FEED("Turret Feed/");
         
         private final String prefix;

@@ -11,13 +11,11 @@ import frc.robot.subsystems.LEDSubsystem;
 import frc.robot.subsystems.LEDSubsystem.ActionState;
 import frc.robot.subsystems.LimelightSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
-import frc.robot.subsystems.SpindexerSubsystem;
 import frc.robot.subsystems.TurretFeedSubsystem;
 import frc.robot.subsystems.TurretSubsystem;
 import frc.robot.util.Elastic;
 import frc.robot.util.Elastic.NotificationLevel;
-import frc.robot.util.ShootingTrainingManager;
-import frc.robot.util.ShootingTrainingManager.TargetType;
+import frc.robot.util.PiShootingHelper;
 
 /**
  * The big one! This command handles everything needed for fully automated shooting.
@@ -26,8 +24,8 @@ import frc.robot.util.ShootingTrainingManager.TargetType;
  * operation. The command is alliance-aware (only shoots when our window is active)
  * and can even do SHOOTING ON THE FLY with velocity-based lead compensation!
  * 
- * The ShootingTrainingManager provides learned corrections from practice sessions
- * to improve accuracy over time.
+ * All turret/shooter calculations are offloaded to the Raspberry Pi coprocessor
+ * via PiShootingHelper. Falls back to calibration tables if Pi is unreachable.
  */
 public class AutoShootCommand extends Command {
     
@@ -39,9 +37,8 @@ public class AutoShootCommand extends Command {
     private final CommandSwerveDrivetrain drivetrain; // For velocity data
     private final GameStateManager gameState;
     private final LEDSubsystem leds; // Optional - can be null
-    private final SpindexerSubsystem spindexer; // Optional - can be null
     private final TurretFeedSubsystem turretFeed; // Optional - can be null
-    private final ShootingTrainingManager trainingManager;
+    private final PiShootingHelper piHelper;
     
     // STATE TRACKING
     
@@ -63,20 +60,6 @@ public class AutoShootCommand extends Command {
     /** Current target mode from game state manager */
     private TargetMode currentTargetMode = TargetMode.DISABLED;
     
-    /** Training corrections applied this frame */
-    private double trainingAngleCorrection = 0.0;
-    private double trainingTopPowerCorrection = 0.0;
-    private double trainingBottomPowerCorrection = 0.0;
-    private double trainingConfidence = 0.0;
-    
-    /** Current robot velocity for shooting on the fly */
-    private double robotVX = 0.0;
-    private double robotVY = 0.0;
-    private double robotOmega = 0.0;
-    
-    /** Calculated lead angle for moving shots */
-    private double leadAngle = 0.0;
-    
     /** Whether currently moving fast enough to need lead compensation */
     private boolean isMoving = false;
     
@@ -86,10 +69,6 @@ public class AutoShootCommand extends Command {
     private boolean hasNotifiedHeadBack = false;
     private boolean hasNotifiedGreenLight = false;
     
-    /** Real-time shot prediction (0-100%) */
-    private double shotPrediction = 0.0;
-    private String shotPredictionBreakdown = "";
-
     // CONSTRUCTOR
     
     /**
@@ -101,7 +80,7 @@ public class AutoShootCommand extends Command {
      * @param limelight The limelight subsystem for distance/angle calculation
      */
     public AutoShootCommand(TurretSubsystem turret, ShooterSubsystem shooter, LimelightSubsystem limelight) {
-        this(turret, shooter, limelight, null, null, null, null);
+        this(turret, shooter, limelight, null, null, null);
     }
     
     /**
@@ -113,24 +92,23 @@ public class AutoShootCommand extends Command {
      * @param leds The LED subsystem for visual feedback (optional, can be null)
      */
     public AutoShootCommand(TurretSubsystem turret, ShooterSubsystem shooter, LimelightSubsystem limelight, LEDSubsystem leds) {
-        this(turret, shooter, limelight, leds, null, null, null);
+        this(turret, shooter, limelight, leds, null, null);
     }
     
     /**
      * Creates the full auto shoot command with LED feedback and ball handling.
-     * When spindexer and turretFeed are provided, balls are automatically fed when ready.
+     * When turretFeed is provided, balls are automatically fed when ready.
      * NOTE: For shooting on the fly, pass drivetrain to get velocity data.
      * 
      * @param turret The turret subsystem for aiming
      * @param shooter The shooter subsystem for launching
      * @param limelight The limelight subsystem for distance/angle calculation
      * @param leds The LED subsystem for visual feedback (optional, can be null)
-     * @param spindexer The spindexer subsystem for ball staging (optional, can be null)
      * @param turretFeed The turret feed subsystem for ball feeding (optional, can be null)
      */
     public AutoShootCommand(TurretSubsystem turret, ShooterSubsystem shooter, LimelightSubsystem limelight, 
-                           LEDSubsystem leds, SpindexerSubsystem spindexer, TurretFeedSubsystem turretFeed) {
-        this(turret, shooter, limelight, leds, spindexer, turretFeed, null);
+                           LEDSubsystem leds, TurretFeedSubsystem turretFeed) {
+        this(turret, shooter, limelight, leds, turretFeed, null);
     }
     
     /**
@@ -141,28 +119,23 @@ public class AutoShootCommand extends Command {
      * @param shooter The shooter subsystem for launching
      * @param limelight The limelight subsystem for distance/angle calculation
      * @param leds The LED subsystem for visual feedback (optional, can be null)
-     * @param spindexer The spindexer subsystem for ball staging (optional, can be null)
      * @param turretFeed The turret feed subsystem for ball feeding (optional, can be null)
      * @param drivetrain The swerve drivetrain for velocity data (optional, can be null for no lead compensation)
      */
     public AutoShootCommand(TurretSubsystem turret, ShooterSubsystem shooter, LimelightSubsystem limelight, 
-                           LEDSubsystem leds, SpindexerSubsystem spindexer, TurretFeedSubsystem turretFeed,
+                           LEDSubsystem leds, TurretFeedSubsystem turretFeed,
                            CommandSwerveDrivetrain drivetrain) {
         this.turret = turret;
         this.shooter = shooter;
         this.limelight = limelight;
         this.drivetrain = drivetrain;
         this.leds = leds;
-        this.spindexer = spindexer;
         this.turretFeed = turretFeed;
         this.gameState = GameStateManager.getInstance();
-        this.trainingManager = ShootingTrainingManager.getInstance();
+        this.piHelper = PiShootingHelper.getInstance();
         
         // Requires turret and shooter, plus ball handling if provided
         addRequirements(turret, shooter);
-        if (spindexer != null) {
-            addRequirements(spindexer);
-        }
         if (turretFeed != null) {
             addRequirements(turretFeed);
         }
@@ -233,9 +206,6 @@ public class AutoShootCommand extends Command {
         // ----- Set shooter power with training corrections -----
         setShooterWithTraining();
         
-        // ----- Calculate real-time shot prediction -----
-        calculateShotPrediction();
-        
         // ----- Check turret on-target status -----
         double turretError = Math.abs(turretTargetAngle - turret.getCurrentAngle());
         turretOnTarget = turretError < Constants.Turret.ON_TARGET_TOLERANCE_DEG;
@@ -247,9 +217,6 @@ public class AutoShootCommand extends Command {
         // Only feed balls when turret is aimed, shooter is ready, and alliance is active
         if (isReadyToFire()) {
             // Fire the balls!
-            if (spindexer != null) {
-                spindexer.setShoot();
-            }
             if (turretFeed != null) {
                 turretFeed.setShoot();
             }
@@ -365,9 +332,6 @@ public class AutoShootCommand extends Command {
      * Sets ball handling subsystems to idle mode (staging balls).
      */
     private void idleBallHandling() {
-        if (spindexer != null) {
-            spindexer.setIdle();
-        }
         if (turretFeed != null) {
             turretFeed.setIdle();
         }
@@ -377,9 +341,6 @@ public class AutoShootCommand extends Command {
      * Stops ball handling subsystems completely.
      */
     private void stopBallHandling() {
-        if (spindexer != null) {
-            spindexer.stop();
-        }
         if (turretFeed != null) {
             turretFeed.stop();
         }
@@ -388,122 +349,51 @@ public class AutoShootCommand extends Command {
     // AIMING LOGIC
     
     /**
-     * Aims at the current target (hub or trench based on mode).
-     * Applies learned training corrections for turret angle.
-     * When moving, calculates and applies lead angle compensation.
+     * Aims at the current target using the Raspberry Pi coprocessor.
+     * The Pi calculates turret angle, lead compensation, and training corrections.
+     * Falls back to local calculation if Pi is unreachable.
      */
     private void aimAtTarget() {
-        // Get robot velocity for shooting on the fly
-        updateRobotVelocity();
-        
-        // Determine target type for training lookup
-        TargetType targetType = (currentTargetMode == TargetMode.TRENCH || gameState.isShuttleMode()) 
-            ? TargetType.TRENCH : TargetType.HUB;
-        
-        // Get distance and angle based on target mode
-        double angleToTarget = 0.0;
-        if (targetType == TargetType.TRENCH) {
-            distanceToTarget = limelight.getDistanceToTrench();
-            turretTargetAngle = limelight.getTurretAngleToTrench();
-            angleToTarget = limelight.getAngleToTrench();
-        } else {
-            distanceToTarget = limelight.getDistanceToHub();
-            turretTargetAngle = limelight.getTurretAngleToHub();
-            angleToTarget = limelight.getAngleToHub();
+        // Update Pi with current robot state
+        if (drivetrain != null && limelight != null && limelight.hasPoseEstimate()) {
+            ChassisSpeeds speeds = drivetrain.getState().Speeds;
+            double hubOffsetX = SmartDashboard.getNumber("Aim/HubOffsetX", 0.0);
+            double hubOffsetY = SmartDashboard.getNumber("Aim/HubOffsetY", 0.0);
+            double trenchOffsetX = SmartDashboard.getNumber("Aim/TrenchOffsetX", 0.0);
+            double trenchOffsetY = SmartDashboard.getNumber("Aim/TrenchOffsetY", 0.0);
+            
+            piHelper.update(drivetrain.getState().Pose, speeds, currentTargetMode,
+                           hubOffsetX, hubOffsetY, trenchOffsetX, trenchOffsetY);
+        } else if (limelight != null && limelight.hasPoseEstimate()) {
+            piHelper.update(limelight.getRobotPose(), new ChassisSpeeds(), currentTargetMode);
         }
+        
+        // Read Pi results (or fallback values)
+        turretTargetAngle = piHelper.getTurretAngle();
+        distanceToTarget = piHelper.getDistance();
+        isMoving = piHelper.isMoving();
         
         // Apply global calibration offset (tunable via SmartDashboard)
         double calibrationOffset = SmartDashboard.getNumber("AutoShoot/TurretOffset", 
                                                             Constants.Turret.GLOBAL_ANGLE_OFFSET_DEG);
         turretTargetAngle += calibrationOffset;
         
-        // Calculate lead angle for shooting on the fly
-        isMoving = ShootingTrainingManager.isMovingForShot(robotVX, robotVY);
-        if (isMoving) {
-            leadAngle = ShootingTrainingManager.calculateLeadAngle(distanceToTarget, robotVX, robotVY, angleToTarget);
-            turretTargetAngle += leadAngle;
-        } else {
-            leadAngle = 0.0;
-        }
-        
-        // Apply learned training correction for turret angle (with velocity context)
-        trainingAngleCorrection = trainingManager.getPredictedAngleCorrection(
-            targetType, distanceToTarget, turret.getCurrentAngle(), angleToTarget, robotVX, robotVY);
-        trainingConfidence = trainingManager.getConfidence(
-            targetType, distanceToTarget, turret.getCurrentAngle(), angleToTarget, robotVX, robotVY);
-        turretTargetAngle += trainingAngleCorrection;
-        
         // Command turret
         turret.setTargetAngle(turretTargetAngle);
-        
-        // Update SmartDashboard for training data capture
-        updateTrainingInputs(targetType, angleToTarget);
     }
     
     /**
-     * Updates robot velocity from drivetrain (field-relative).
-     * If drivetrain is null, assumes stationary.
-     */
-    private void updateRobotVelocity() {
-        if (drivetrain != null) {
-            ChassisSpeeds speeds = drivetrain.getState().Speeds;
-            // Convert to field-relative using robot heading
-            double headingRad = Math.toRadians(drivetrain.getState().Pose.getRotation().getDegrees());
-            robotVX = speeds.vxMetersPerSecond * Math.cos(headingRad) - speeds.vyMetersPerSecond * Math.sin(headingRad);
-            robotVY = speeds.vxMetersPerSecond * Math.sin(headingRad) + speeds.vyMetersPerSecond * Math.cos(headingRad);
-            robotOmega = speeds.omegaRadiansPerSecond;
-        } else {
-            robotVX = 0.0;
-            robotVY = 0.0;
-            robotOmega = 0.0;
-        }
-    }
-    
-    /**
-     * Updates SmartDashboard inputs for training data capture.
-     * AutoShootCommand automatically fills in current state for easy recording.
-     */
-    private void updateTrainingInputs(TargetType targetType, double angleToTarget) {
-        SmartDashboard.putString("ShootingTraining/Input/Target", targetType.name());
-        SmartDashboard.putNumber("ShootingTraining/Input/Distance", distanceToTarget);
-        SmartDashboard.putNumber("ShootingTraining/Input/VelocityX", robotVX);
-        SmartDashboard.putNumber("ShootingTraining/Input/VelocityY", robotVY);
-        SmartDashboard.putNumber("ShootingTraining/Input/Omega", robotOmega);
-        SmartDashboard.putNumber("ShootingTraining/Input/TurretAngle", turret.getCurrentAngle());
-        SmartDashboard.putNumber("ShootingTraining/Input/AngleToTarget", angleToTarget);
-        
-        if (drivetrain != null) {
-            SmartDashboard.putNumber("ShootingTraining/Input/RobotX", drivetrain.getState().Pose.getX());
-            SmartDashboard.putNumber("ShootingTraining/Input/RobotY", drivetrain.getState().Pose.getY());
-            SmartDashboard.putNumber("ShootingTraining/Input/RobotHeading", drivetrain.getState().Pose.getRotation().getDegrees());
-        }
-    }
-    
-    /**
-     * Sets shooter power with learned training corrections applied.
+     * Sets shooter power using the Pi coprocessor results.
+     * The Pi provides final top and bottom motor power directly.
+     * Falls back to calibration table interpolation if Pi is unreachable.
      */
     private void setShooterWithTraining() {
-        // Determine target type for training lookup
-        TargetType targetType = (currentTargetMode == TargetMode.TRENCH || gameState.isShuttleMode()) 
-            ? TargetType.TRENCH : TargetType.HUB;
+        // Pi already calculated final power values (including training corrections)
+        double topPower = piHelper.getTopSpeed();
+        double bottomPower = piHelper.getBottomSpeed();
         
-        // Get field-relative angle to target for velocity context
-        double angleToTarget = (targetType == TargetType.TRENCH) 
-            ? limelight.getAngleToTrench() 
-            : limelight.getAngleToHub();
-        
-        // Get learned power corrections from training (with velocity context)
-        trainingTopPowerCorrection = trainingManager.getPredictedTopPowerCorrection(
-            targetType, distanceToTarget, turret.getCurrentAngle(), angleToTarget, robotVX, robotVY);
-        trainingBottomPowerCorrection = trainingManager.getPredictedBottomPowerCorrection(
-            targetType, distanceToTarget, turret.getCurrentAngle(), angleToTarget, robotVX, robotVY);
-        
-        // Set shooter power with training corrections applied (use correct calibration table)
-        if (targetType == TargetType.TRENCH) {
-            shooter.setForDistanceTrenchWithOffset(distanceToTarget, trainingTopPowerCorrection, trainingBottomPowerCorrection);
-        } else {
-            shooter.setForDistanceWithOffset(distanceToTarget, trainingTopPowerCorrection, trainingBottomPowerCorrection);
-        }
+        // Set shooter power directly
+        shooter.setManualPower(topPower, bottomPower);
     }
     
     // STATUS DETERMINATION
@@ -515,7 +405,7 @@ public class AutoShootCommand extends Command {
         // Handle green light pre-shift (3 sec before our shift)
         if (gameState.isGreenLightPreShift()) {
             double secsUntil = gameState.getSecondsUntilOurNextShift();
-            return String.format("GREEN LIGHT! Shift in %.1fs (%.0f%%)", secsUntil, shotPrediction);
+            return String.format("GREEN LIGHT! Shift in %.1fs", secsUntil);
         }
         
         // Handle head-back warning (5 sec before our shift)
@@ -527,212 +417,39 @@ public class AutoShootCommand extends Command {
         // Handle alliance inactive
         if (!allianceActive && !gameState.isForceShootEnabled()) {
             double timeUntil = gameState.getTimeUntilActive();
-            return String.format("WAITING - Active in %.1fs (%.0f%% if now)", timeUntil, shotPrediction);
+            return String.format("WAITING - Active in %.1fs", timeUntil);
         }
         
-        // Show target type, moving status, and prediction
+        // Show target type and moving status
         String targetStr = (currentTargetMode == TargetMode.TRENCH) ? "[TRENCH] " : "[HUB] ";
         String movingStr = isMoving ? "[MOVING] " : "";
-        String predStr = String.format(" [%.0f%%]", shotPrediction);
+        String piStr = piHelper.isUsingFallback() ? "[FALLBACK] " : "";
         
         // Show progress toward ready
         if (!turretOnTarget && !shooterReady) {
-            return targetStr + movingStr + "Aiming + Spinning Up" + predStr;
+            return targetStr + piStr + movingStr + "Aiming + Spinning Up";
         } else if (!turretOnTarget) {
-            return targetStr + movingStr + "Aiming..." + predStr;
+            return targetStr + piStr + movingStr + "Aiming...";
         } else if (!shooterReady) {
-            return targetStr + movingStr + "Spinning Up..." + predStr;
+            return targetStr + piStr + movingStr + "Spinning Up...";
         } else {
-            return targetStr + movingStr + "READY!" + predStr;
+            return targetStr + piStr + movingStr + "READY!";
         }
     }
     
     // TELEMETRY
     
     /**
-     * Calculates real-time shot success prediction (0-100%).
-     * This runs continuously and shows "if you shot right now, here's your chance of making it."
-     * 
-     * Factors considered:
-     * - Turret alignment (how close to target angle)
-     * - Shooter readiness (speed at target)
-     * - Training confidence (how much data we have for this situation)
-     * - Robot stability (movement speed and rotation)
-     * - Distance (optimal vs edge of range)
-     */
-    private void calculateShotPrediction() {
-        StringBuilder breakdown = new StringBuilder();
-        double totalScore = 0.0;
-        
-        // 1. TURRET ALIGNMENT (0-100%) - most important
-        double turretError = Math.abs(turretTargetAngle - turret.getCurrentAngle());
-        double turretScore;
-        if (turretError < 0.5) {
-            turretScore = 100.0; // Dead on
-        } else if (turretError < Constants.Turret.ON_TARGET_TOLERANCE_DEG) {
-            turretScore = 95.0 - (turretError * 2); // Small penalty
-        } else if (turretError < 5.0) {
-            turretScore = 80.0 - (turretError * 5); // Moderate penalty
-        } else if (turretError < 15.0) {
-            turretScore = 50.0 - (turretError * 2); // Large penalty
-        } else {
-            turretScore = 0.0; // Way off
-        }
-        turretScore = Math.max(0, Math.min(100, turretScore));
-        breakdown.append(String.format("Aim:%.0f%% ", turretScore));
-        totalScore += turretScore * 1.5; // Weight: 1.5x
-        
-        // 2. SHOOTER READINESS (0-100%)
-        double shooterScore;
-        if (shooter.isReady()) {
-            shooterScore = 100.0;
-        } else if (shooter.getTopPower() > 0.05) {
-            shooterScore = 60.0; // Spinning up but not ready
-        } else {
-            shooterScore = 0.0; // Not running
-        }
-        breakdown.append(String.format("Shooter:%.0f%% ", shooterScore));
-        totalScore += shooterScore * 1.2; // Weight: 1.2x
-        
-        // 3. TRAINING CONFIDENCE (0-100%) - how much we know about this shot
-        double trainingScore = trainingConfidence * 100.0;
-        // Even with no training, base accuracy from calibration tables
-        trainingScore = Math.max(50, trainingScore); // At least 50% from calibration
-        breakdown.append(String.format("Data:%.0f%% ", trainingScore));
-        totalScore += trainingScore * 0.8; // Weight: 0.8x
-        
-        // 4. ROBOT STABILITY (0-100%) - penalize high speed/rotation
-        double robotSpeed = Math.sqrt(robotVX * robotVX + robotVY * robotVY);
-        double stabilityScore;
-        if (robotSpeed < 0.1 && Math.abs(robotOmega) < 0.1) {
-            stabilityScore = 100.0; // Stationary = best
-        } else if (robotSpeed < 0.5) {
-            stabilityScore = 95.0; // Barely moving
-        } else if (robotSpeed < 1.0) {
-            stabilityScore = 85.0; // Slow
-        } else if (robotSpeed < 2.0) {
-            stabilityScore = 70.0; // Medium - lead angle helps but adds uncertainty
-        } else if (robotSpeed < 3.0) {
-            stabilityScore = 55.0; // Fast
-        } else {
-            stabilityScore = 40.0; // Very fast - harder shot
-        }
-        // Penalize high rotation rate
-        if (Math.abs(robotOmega) > 0.5) {
-            stabilityScore -= 15;
-        } else if (Math.abs(robotOmega) > 0.2) {
-            stabilityScore -= 5;
-        }
-        stabilityScore = Math.max(0, stabilityScore);
-        breakdown.append(String.format("Stable:%.0f%% ", stabilityScore));
-        totalScore += stabilityScore * 1.0; // Weight: 1.0x
-        
-        // 5. DISTANCE QUALITY (0-100%) - optimal range vs too close/far
-        double distanceScore;
-        TargetType targetType = (currentTargetMode == TargetMode.TRENCH) ? TargetType.TRENCH : TargetType.HUB;
-        if (targetType == TargetType.HUB) {
-            // Hub optimal: 3-5m, acceptable: 2-7m
-            if (distanceToTarget >= 3.0 && distanceToTarget <= 5.0) {
-                distanceScore = 100.0;
-            } else if (distanceToTarget >= 2.0 && distanceToTarget <= 7.0) {
-                distanceScore = 80.0;
-            } else if (distanceToTarget >= 1.5 && distanceToTarget <= 9.0) {
-                distanceScore = 50.0;
-            } else {
-                distanceScore = 20.0; // Out of reliable range
-            }
-        } else {
-            // Trench optimal: 4-6m, acceptable: 3-8m
-            if (distanceToTarget >= 4.0 && distanceToTarget <= 6.0) {
-                distanceScore = 100.0;
-            } else if (distanceToTarget >= 3.0 && distanceToTarget <= 8.0) {
-                distanceScore = 80.0;
-            } else if (distanceToTarget >= 2.5 && distanceToTarget <= 10.0) {
-                distanceScore = 50.0;
-            } else {
-                distanceScore = 20.0;
-            }
-        }
-        breakdown.append(String.format("Dist:%.0f%%", distanceScore));
-        totalScore += distanceScore * 0.5; // Weight: 0.5x
-        
-        // Calculate weighted average (weights sum to 5.0)
-        double weightSum = 1.5 + 1.2 + 0.8 + 1.0 + 0.5;
-        shotPrediction = totalScore / weightSum;
-        shotPrediction = Math.max(0, Math.min(100, shotPrediction));
-        
-        shotPredictionBreakdown = breakdown.toString();
-    }
-    
-    /**
-     * Gets a human-readable prediction message.
-     */
-    private String getShotPredictionMessage() {
-        if (shotPrediction >= 90) {
-            return " EXCELLENT - Take the shot!";
-        } else if (shotPrediction >= 75) {
-            return "GOOD - High chance of success";
-        } else if (shotPrediction >= 60) {
-            return " FAIR - Might make it";
-        } else if (shotPrediction >= 40) {
-            return " RISKY - Consider repositioning";
-        } else {
-            return "POOR - Not recommended";
-        }
-    }
-
-    /**
-     * Publishes all auto-shoot data to SmartDashboard.
+     * Publishes essential auto-shoot data to SmartDashboard.
      */
     private void publishTelemetry() {
-        // Main status indicators
         SmartDashboard.putBoolean("AutoShoot/ReadyToFire", isReadyToFire());
-        SmartDashboard.putBoolean("AutoShoot/TurretOnTarget", turretOnTarget);
-        SmartDashboard.putBoolean("AutoShoot/ShooterReady", shooterReady);
-        SmartDashboard.putBoolean("AutoShoot/AllianceActive", allianceActive);
-        
-        // Target info
-        SmartDashboard.putString("AutoShoot/TargetMode", currentTargetMode.toString());
         SmartDashboard.putNumber("AutoShoot/Distance", distanceToTarget);
-        
-        // Turret info
-        SmartDashboard.putNumber("AutoShoot/TurretTarget", turretTargetAngle);
-        SmartDashboard.putNumber("AutoShoot/TurretCurrent", turret.getCurrentAngle());
-        SmartDashboard.putNumber("AutoShoot/TurretError", Math.abs(turretTargetAngle - turret.getCurrentAngle()));
-        
-        // Shooter info
-        SmartDashboard.putNumber("AutoShoot/TopPower", shooter.getTopPower());
-        SmartDashboard.putNumber("AutoShoot/BottomPower", shooter.getBottomPower());
-        
-        // Shooting on the fly info
-        SmartDashboard.putBoolean("AutoShoot/IsMoving", isMoving);
-        SmartDashboard.putNumber("AutoShoot/LeadAngle", leadAngle);
-        SmartDashboard.putNumber("AutoShoot/RobotVX", robotVX);
-        SmartDashboard.putNumber("AutoShoot/RobotVY", robotVY);
-        SmartDashboard.putNumber("AutoShoot/RobotSpeed", Math.sqrt(robotVX * robotVX + robotVY * robotVY));
-        
-        // Training corrections applied (power corrections include voltage compensation)
-        SmartDashboard.putNumber("AutoShoot/Training/AngleCorrection", trainingAngleCorrection);
-        SmartDashboard.putNumber("AutoShoot/Training/TopPowerCorrection", trainingTopPowerCorrection);
-        SmartDashboard.putNumber("AutoShoot/Training/BottomPowerCorrection", trainingBottomPowerCorrection);
-        SmartDashboard.putNumber("AutoShoot/Training/Confidence", trainingConfidence);
-        
-        // Voltage compensation info
-        SmartDashboard.putNumber("AutoShoot/Voltage/Current", ShootingTrainingManager.getCurrentVoltage());
-        SmartDashboard.putNumber("AutoShoot/Voltage/Compensation", ShootingTrainingManager.getVoltageCompensation());
-        
-        // Timing info
-        SmartDashboard.putNumber("AutoShoot/TimeRemainingActive", gameState.getTimeRemainingActive());
         
         // Editable turret offset
         double calibrationOffset = SmartDashboard.getNumber("AutoShoot/TurretOffset", 
                                                             Constants.Turret.GLOBAL_ANGLE_OFFSET_DEG);
         SmartDashboard.putNumber("AutoShoot/TurretOffset", calibrationOffset);
-        
-        // SHOT PREDICTION - "If you shoot now, here's your chance of making it"
-        SmartDashboard.putNumber("AutoShoot/Prediction/Chance", shotPrediction);
-        SmartDashboard.putString("AutoShoot/Prediction/Breakdown", shotPredictionBreakdown);
-        SmartDashboard.putString("AutoShoot/Prediction/Message", getShotPredictionMessage());
     }
     
     // STATUS METHODS
@@ -752,23 +469,6 @@ public class AutoShootCommand extends Command {
      */
     public double getDistanceToTarget() {
         return distanceToTarget;
-    }
-    
-    /**
-     * Get the current shot prediction percentage.
-     * This is continuously calculated based on aim, shooter, stability, distance, and training data.
-     * @return Prediction 0-100% of making the shot if fired now
-     */
-    public double getShotPrediction() {
-        return shotPrediction;
-    }
-    
-    /**
-     * Get the breakdown of shot prediction factors.
-     * @return String like "Aim:95% Shooter:100% Data:80% Stable:100% Dist:100%"
-     */
-    public String getShotPredictionBreakdown() {
-        return shotPredictionBreakdown;
     }
 
     // COMMAND LIFECYCLE (continued)

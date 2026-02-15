@@ -25,7 +25,6 @@ public final class Constants {
     public static final int TURRET_MOTOR = 13;
     public static final int SHOOTER_TOP_MOTOR = 20;
     public static final int SHOOTER_BOTTOM_MOTOR = 21;
-    public static final int SPINDEXER_MOTOR = 22;
     public static final int TURRET_FEED_MOTOR = 23;
     public static final int INTAKE_LEFT_PIVOT_MOTOR = 24;
     public static final int INTAKE_RIGHT_PIVOT_MOTOR = 25;
@@ -41,7 +40,6 @@ public final class Constants {
     public static final boolean TURRET = false;
     public static final boolean SHOOTER = false;
     public static final boolean LIMELIGHT = false;
-    public static final boolean SPINDEXER = false;
     public static final boolean TURRET_FEED = false;
     public static final boolean INTAKE = true;
     public static final boolean LEDS = true;
@@ -97,6 +95,16 @@ public final class Constants {
     /** Default idle power (87%) - keeps shooter ready to fire */
     public static final double DEFAULT_IDLE_POWER = 0.87;
     
+    // RPM recovery compensation (auto-boost power when balls sap flywheel speed)
+    /** Free speed of the motor in rotations per second (Kraken X60 ~100 rps) */
+    public static final double MOTOR_FREE_SPEED_RPS = 100.0;
+    /** If actual RPM drops below this fraction of expected, start compensating (e.g. 0.95 = 95%) */
+    public static final double RPM_RECOVERY_THRESHOLD = 0.95;
+    /** Proportional gain for RPM recovery (how aggressively to boost power per unit of RPM deficit) */
+    public static final double RPM_RECOVERY_GAIN = 1.5;
+    /** Maximum extra power the RPM recovery can add (prevents runaway) */
+    public static final double RPM_RECOVERY_MAX_BOOST = 0.15;
+    
     // Hub calibration: distance (m) -> {TopPower, BottomPower}
     public static final TreeMap<Double, double[]> SHOOTING_CALIBRATION = new TreeMap<>() {{
       put(1.5, new double[]{0.30, 0.40}); put(2.0, new double[]{0.35, 0.45});
@@ -116,19 +124,11 @@ public final class Constants {
     }};
   }
 
-  public static final class Spindexer {
-    public static final int MOTOR_ID = CANIds.SPINDEXER_MOTOR;
-    public static final boolean MOTOR_INVERTED = false;
-    public static final double IDLE_SPEED = 0.15;
-    public static final double SHOOT_SPEED = 0.85;
-    public static final double STOP_SPEED = 0.0;
-  }
-
   public static final class TurretFeed {
     public static final int MOTOR_ID = CANIds.TURRET_FEED_MOTOR;
     public static final boolean MOTOR_INVERTED = false;
     public static final double IDLE_SPEED = -0.15;
-    public static final double SHOOT_SPEED = 100;
+    public static final double SHOOT_SPEED = 1.0;
     public static final double STOP_SPEED = 0.0;
   }
 
@@ -155,7 +155,7 @@ public final class Constants {
     public static final double MIN_PIVOT_ANGLE_DEG = 0.0;
     public static final double MAX_PIVOT_ANGLE_DEG = 90.0;
     public static final double RETRACTED_ANGLE_DEG = 0.0;
-    public static final double DEPLOYED_ANGLE_DEG = 104.0;
+    public static final double DEPLOYED_ANGLE_DEG = 90.0;
     public static final double IDLE_ANGLE_DEG = 35;
     public static final double PIVOT_MAX_OUTPUT = 0.2;
     // Wide tolerance to stop before chain slop causes bouncing
@@ -192,11 +192,10 @@ public final class Constants {
     public static final double GEAR_RATIO = 10.00537109375; // Calibrate with CalibrateTurretGearRatioCommand
     public static final boolean MOTOR_INVERTED = false;
     
-    // Motion limits (270 degree range from hardstop)
-    // Motion limits (270° range)
-    public static final double MIN_ANGLE_DEG = 0.0;
-    public static final double MAX_ANGLE_DEG = 270.0;
-    public static final double LIMIT_SAFETY_MARGIN_DEG = 45.0;
+    // Motion limits (270° range, centered at 0°)
+    public static final double MIN_ANGLE_DEG = -135.0;
+    public static final double MAX_ANGLE_DEG = 135.0;
+    public static final double LIMIT_SAFETY_MARGIN_DEG = 10.0;
     
     // PID
     public static final double PID_P = 0.2;
@@ -235,7 +234,6 @@ public final class Constants {
     public static final int STRIP_START = 8;          // External strip starts at index 8
     public static final int STRIP_COUNT = LED_COUNT - ONBOARD_LED_COUNT;  // 60 strip LEDs
     public static final double BOOT_ANIMATION_DURATION = 2.0;
-    public static final double DIAGNOSTIC_CHECK_INTERVAL = 0.5;
     public static final double CHASE_SPEED = 0.15;
     public static final double BRIGHTNESS = 0.8;
     
@@ -262,10 +260,8 @@ public final class Constants {
     public static final int[] PINK = {255, 105, 180};
     
     // Status colors
-    public static final int[] SUBSYSTEM_ERROR_COLOR = {255, 0, 0};
     public static final int[] NO_AUTO_COLOR = {255, 165, 0};
     public static final int[] FMS_DISCONNECTED_COLOR = {255, 255, 0};
-    public static final int[] WARMING_UP_COLOR = {128, 0, 128};
     
     // Action colors
     public static final int[] SHOOTING_COLOR = {0, 255, 0};

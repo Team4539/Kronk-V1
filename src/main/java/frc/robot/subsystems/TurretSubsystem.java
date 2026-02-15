@@ -10,12 +10,15 @@ import frc.robot.util.DashboardHelper;
 import frc.robot.util.DashboardHelper.Category;
 import frc.robot.util.Elastic;
 import frc.robot.util.Elastic.NotificationLevel;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
 import frc.robot.GameStateManager;
 
 /**
- * Turret subsystem - 270° rotation range with PID position control.
+ * Turret subsystem - 270° rotation range centered at 0° (-135° to +135°) with PID position control.
+ * Positive angles are counterclockwise, negative angles are clockwise (from top view).
+ * Motor position 0 corresponds to turret facing forward (0°).
  */
 public class TurretSubsystem extends SubsystemBase {
     
@@ -114,6 +117,15 @@ public class TurretSubsystem extends SubsystemBase {
             commandedAngle = currentAbsoluteAngle;
             targetAbsoluteAngle = currentAbsoluteAngle;
             initialized = true;
+        }
+        
+        // SAFETY: When robot is disabled, do NOT command any motor outputs.
+        // Brake mode will hold position passively without drawing current.
+        if (DriverStation.isDisabled()) {
+            telemetryCounter++;
+            DashboardHelper.putNumber(Category.TELEOP, "Turret/Angle", getCurrentAngle());
+            DashboardHelper.putBoolean(Category.TELEOP, "Turret/OnTarget", isOnTarget());
+            return;
         }
         
         if (gameState.isManualTurretControl()) {

@@ -11,6 +11,7 @@ import com.ctre.phoenix6.signals.SensorDirectionValue;
 import edu.wpi.first.math.controller.PIDController;
 import frc.robot.util.DashboardHelper;
 import frc.robot.util.DashboardHelper.Category;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
 
@@ -95,8 +96,8 @@ public class IntakeSubsystem extends SubsystemBase {
     // Health
 
     public boolean checkHealth() {
-        boolean pivotHealthy = (pivotMotor.isAlive() && pivotMotor.getDeviceTemp() != null);
-        boolean rollerHealthy = (rollerMotor.isAlive() && rollerMotor.getDeviceTemp() != null);
+        boolean pivotHealthy = pivotMotor.isAlive();
+        boolean rollerHealthy = rollerMotor.isAlive();
         boolean cancoderHealthy = pivotCANcoder.isConnected();
         isHealthy = pivotHealthy && rollerHealthy && cancoderHealthy;
         return isHealthy;
@@ -109,13 +110,17 @@ public class IntakeSubsystem extends SubsystemBase {
     // Pivot control
 
     public void deploy() {
-        targetPivotAngle = Constants.Intake.DEPLOYED_ANGLE_DEG;
+        targetPivotAngle = clamp(Constants.Intake.DEPLOYED_ANGLE_DEG,
+                                 Constants.Intake.MIN_PIVOT_ANGLE_DEG,
+                                 Constants.Intake.MAX_PIVOT_ANGLE_DEG);
         isDeployed = true;
         isIdle = false;
     }
     
     public void retract() {
-        targetPivotAngle = Constants.Intake.IDLE_ANGLE_DEG;
+        targetPivotAngle = clamp(Constants.Intake.IDLE_ANGLE_DEG,
+                                 Constants.Intake.MIN_PIVOT_ANGLE_DEG,
+                                 Constants.Intake.MAX_PIVOT_ANGLE_DEG);
         isDeployed = false;
         isIdle = true;
     }
@@ -216,6 +221,15 @@ public class IntakeSubsystem extends SubsystemBase {
     public void periodic() {
         // 1. Read current angle directly from CANcoder in degrees
         currentPivotAngle = pivotCANcoder.getAbsolutePosition().getValueAsDouble() * 360.0;
+        
+        // SAFETY: When robot is disabled, send zero to all motors.
+        // No PID, no roller - just read sensors for telemetry.
+        if (DriverStation.isDisabled()) {
+            pivotMotor.setControl(pivotControl.withOutput(0));
+            rollerMotor.setControl(rollerControl.withOutput(0));
+            updateDashboard();
+            return;
+        }
         
         // 2. PID: current degrees → target degrees → duty cycle output
         double pidOutput = pivotPID.calculate(currentPivotAngle, targetPivotAngle);

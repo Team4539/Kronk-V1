@@ -37,18 +37,28 @@ public class Robot extends TimedRobot {
   public void robotPeriodic() {
     m_robotContainer.updateVisionPose();
     CommandScheduler.getInstance().run();
+    LEDSubsystem leds = m_robotContainer.getLEDs();
     if (RobotController.getBatteryVoltage() < 7.0) {
-      LEDSubsystem leds = m_robotContainer.getLEDs();
       if (leds != null) leds.setAction(LEDSubsystem.ActionState.BROWNOUT);
-    } 
+    } else {
+      if (leds != null && leds.getAction() == LEDSubsystem.ActionState.BROWNOUT) {
+        leds.clearAction();
+      }
+    }
   }
 
   @Override
   public void disabledInit() {
+    // SAFETY: Explicitly stop all motor subsystems immediately on disable.
+    // This is a belt-and-suspenders approach — each subsystem's periodic()
+    // also guards against disabled-state motor commands individually.
+    m_robotContainer.stopAllMotors();
+    
     setLEDState(LEDState.DISABLED);
     LEDSubsystem leds = m_robotContainer.getLEDs();
     if (leds != null) leds.clearAction();
     notify("Robot Disabled", "Safe to approach");
+    
   }
 
   @Override
@@ -60,7 +70,7 @@ public class Robot extends TimedRobot {
     setLEDState(LEDState.AUTO);
     
     String autoName = m_autonomousCommand != null ? m_autonomousCommand.getName() : "None";
-    notify("⚡ AUTO STARTED", "Running: " + autoName);
+    notify(" AUTO STARTED", "Running: " + autoName);
     
     if (m_autonomousCommand != null) {
       CommandScheduler.getInstance().schedule(m_autonomousCommand);
@@ -76,7 +86,7 @@ public class Robot extends TimedRobot {
       m_autonomousCommand.cancel();
     }
     setLEDState(LEDState.TELEOP);
-    notify("🎮 TELEOP STARTED", "Driver control active");
+    notify(" TELEOP STARTED", "Driver control active");
   }
 
   @Override

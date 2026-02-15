@@ -122,13 +122,11 @@ public class LimelightSubsystem extends SubsystemBase {
     }
 
     // Diagnostic checks
-    /** check if the limelight is reachable */
+    /** Check if the Limelight is reachable by verifying we've received data. */
     public boolean isHealthy() {
-        
-        if (table == null) {
-            return false;
-        }
-        return true;
+        // Check if we've ever received a valid target detection
+        // tv entry defaults to 0.0 if never written - checking the entry exists on the table
+        return table.containsKey("tv");
     }
 
 
@@ -328,12 +326,6 @@ public class LimelightSubsystem extends SubsystemBase {
         
         // Normalize to -180 to +180 using modulo for robustness
         turretAngle = ((turretAngle + 180) % 360 + 360) % 360 - 180;
-        
-        // Debug: Publish intermediate values
-        DashboardHelper.putNumber(Category.DEBUG, "FieldAngleToHub", fieldAngleToHub);
-        DashboardHelper.putNumber(Category.DEBUG, "RobotHeading", robotHeading);
-        DashboardHelper.putNumber(Category.DEBUG, "TurretAngleRaw", fieldAngleToHub - robotHeading);
-        DashboardHelper.putNumber(Category.DEBUG, "TurretAngleNormalized", turretAngle);
         
         return turretAngle;
     }
@@ -587,40 +579,14 @@ public class LimelightSubsystem extends SubsystemBase {
     private void publishTelemetry() {
         telemetryCounter++;
         
-        // Essential target info every cycle (needed for aiming)
+        // Essential target info every cycle
         DashboardHelper.putBoolean(Category.TELEOP, "Limelight/HasTarget", hasTarget());
-        DashboardHelper.putNumber(Category.TELEOP, "Limelight/TargetID", getTargetId());
-        DashboardHelper.putNumber(Category.TELEOP, "Limelight/HorizontalOffset", getHorizontalOffset());
+        DashboardHelper.putBoolean(Category.TELEOP, "Limelight/HasPose", hasPoseEstimate());
         
-        // Distance info needed for shooting (every cycle if we have pose)
-        if (hasPoseEstimate()) {
-            DashboardHelper.putNumber(Category.TELEOP, "Limelight/DistanceToHub", getDistanceToHub());
-            DashboardHelper.putNumber(Category.TELEOP, "Limelight/TurretAngleToHub", getTurretAngleToHub());
-        }
-        
-        // Less critical telemetry every 5 cycles (100ms)
-        if (telemetryCounter >= 5) {
+        // Less critical telemetry every 10 cycles (200ms)
+        if (telemetryCounter >= 10) {
             telemetryCounter = 0;
-            
-            DashboardHelper.putNumber(Category.TELEOP, "Limelight/TargetArea", getTargetArea());
-            
-            // Pose info
-            Pose2d currentPose = getRobotPose();
-            DashboardHelper.putBoolean(Category.TELEOP, "Limelight/HasPose", hasPoseEstimate());
-            DashboardHelper.putNumber(Category.TELEOP, "Limelight/PoseX", currentPose.getX());
-            DashboardHelper.putNumber(Category.TELEOP, "Limelight/PoseY", currentPose.getY());
-            DashboardHelper.putNumber(Category.TELEOP, "Limelight/PoseYaw", currentPose.getRotation().getDegrees());
-            
-            // Latency info
-            DashboardHelper.putNumber(Category.TELEOP, "Limelight/PipelineLatency", tlEntry.getDouble(0.0));
-            DashboardHelper.putNumber(Category.TELEOP, "Limelight/CaptureLatency", clEntry.getDouble(0.0));
-            
-            // Aim info
             updateAimTelemetry();
-            
-            if (hasPoseEstimate()) {
-                DashboardHelper.putNumber(Category.TELEOP, "Limelight/AngleToHub", getAngleToHub());
-            }
         }
     }
 
@@ -629,38 +595,9 @@ public class LimelightSubsystem extends SubsystemBase {
      * Field visualization is now in CommandSwerveDrivetrain.
      */
     private void updateAimTelemetry() {
-        // Use cached gameState reference
         boolean isShuttleMode = gameState.isShuttleMode();
-        
-        // Get target positions
-        Translation2d hubPosition = getHubPosition();
-        Translation2d trenchPosition = getTrenchPosition();
-        
-        // Determine which target we're aiming at
-        Translation2d currentTarget;
-        String targetName;
-        
-        if (isShuttleMode) {
-            currentTarget = trenchPosition;
-            targetName = "TRENCH";
-        } else {
-            currentTarget = hubPosition;
-            targetName = "HUB";
-        }
-        
+        String targetName = isShuttleMode ? "TRENCH" : "HUB";
         DashboardHelper.putString(Category.SETTINGS, "Aim/CurrentTarget", targetName);
-        DashboardHelper.putNumber(Category.SETTINGS, "Aim/TargetX", currentTarget.getX());
-        DashboardHelper.putNumber(Category.SETTINGS, "Aim/TargetY", currentTarget.getY());
-
-        // Publish which trench is closest
-        Translation2d trenchRotating = getTrenchRotatingPosition();
-        Translation2d trenchFixed = getTrenchFixedPosition();
-        Pose2d currentPose = getRobotPose();
-        double distToRotating = currentPose.getTranslation().getDistance(trenchRotating);
-        double distToFixed = currentPose.getTranslation().getDistance(trenchFixed);
-        DashboardHelper.putString(Category.SETTINGS, "Aim/ClosestTrench", distToRotating <= distToFixed ? "ROTATING" : "FIXED");
-
-        // Publish auto-shuttle status
         DashboardHelper.putBoolean(Category.SETTINGS, "Aim/InShuttleZone", isInShuttleZone());
     }
 
