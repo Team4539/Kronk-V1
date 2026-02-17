@@ -16,9 +16,9 @@ import frc.robot.Constants;
 import frc.robot.GameStateManager;
 
 /**
- * Turret subsystem - 270° rotation range centered at 0° (-135° to +135°) with PID position control.
+ * Turret subsystem - 270 deg rotation range centered at 0 deg (-135 deg to +135 deg) with PID position control.
  * Positive angles are counterclockwise, negative angles are clockwise (from top view).
- * Motor position 0 corresponds to turret facing forward (0°).
+ * Motor position 0 corresponds to turret facing forward (0 deg).
  */
 public class TurretSubsystem extends SubsystemBase {
     

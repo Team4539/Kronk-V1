@@ -5,6 +5,7 @@ import edu.wpi.first.wpilibj2.command.Command;
 import frc.robot.CalibrationManager;
 import frc.robot.subsystems.LimelightSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
+import frc.robot.subsystems.TurretFeedSubsystem;
 import frc.robot.subsystems.TurretSubsystem;
 
 /**
@@ -34,6 +35,16 @@ import frc.robot.subsystems.TurretSubsystem;
  * 6. Move to a new distance and repeat
  * 7. When done, click "Cal/PrintShooterTable" to get Java code
  * 
+ * DASHBOARD BUTTONS AVAILABLE DURING CALIBRATION:
+ * 
+ * - Cal/Turret/ManualAngle: Aim turret (slider)
+ * - Cal/Shooter/TopPower: Shot arc/height (slider)
+ * - Cal/Shooter/BottomPower: Shot distance (slider)
+ * - Cal/FeedBall: Feed a ball into the shooter (button)
+ * - Cal/RecordShootingPoint: Record current shot as calibration point (button)
+ * - Cal/PrintShooterTable: Export all recorded points as Java code (button)
+ * - Cal/PrintAllConstants: Export all calibration values (button)
+ * 
  * ADVANTAGESCOPE INTEGRATION:
  * 
  * All values are logged to NetworkTables under /Calibration/:
@@ -59,6 +70,7 @@ public class FullShooterCalibrationCommand extends Command {
     private final TurretSubsystem turret;
     private final ShooterSubsystem shooter;
     private final LimelightSubsystem limelight;
+    private final TurretFeedSubsystem turretFeed; // Optional - can be null
     
     // CALIBRATION MANAGER
     
@@ -67,7 +79,7 @@ public class FullShooterCalibrationCommand extends Command {
     // CONSTRUCTOR
     
     /**
-     * Creates a full shooter calibration command.
+     * Creates a full shooter calibration command (without ball feeding).
      * 
      * @param turret The turret subsystem (for angle control)
      * @param shooter The shooter subsystem (for power control)
@@ -77,13 +89,33 @@ public class FullShooterCalibrationCommand extends Command {
             TurretSubsystem turret, 
             ShooterSubsystem shooter, 
             LimelightSubsystem limelight) {
+        this(turret, shooter, limelight, null);
+    }
+    
+    /**
+     * Creates a full shooter calibration command with ball feeding support.
+     * 
+     * @param turret The turret subsystem (for angle control)
+     * @param shooter The shooter subsystem (for power control)
+     * @param limelight The limelight subsystem (for target detection)
+     * @param turretFeed The turret feed subsystem for feeding balls (optional, can be null)
+     */
+    public FullShooterCalibrationCommand(
+            TurretSubsystem turret, 
+            ShooterSubsystem shooter, 
+            LimelightSubsystem limelight,
+            TurretFeedSubsystem turretFeed) {
         this.turret = turret;
         this.shooter = shooter;
         this.limelight = limelight;
+        this.turretFeed = turretFeed;
         this.calibration = CalibrationManager.getInstance();
         
         // We require both turret and shooter for full control
         addRequirements(turret, shooter);
+        if (turretFeed != null) {
+            addRequirements(turretFeed);
+        }
     }
     
     // COMMAND LIFECYCLE
@@ -94,12 +126,16 @@ public class FullShooterCalibrationCommand extends Command {
         SmartDashboard.putBoolean("Cal/Turret/UseManual", true);
         SmartDashboard.putBoolean("Cal/Shooter/UseManual", true);
         
+        // Feed ball button
+        SmartDashboard.putBoolean("Cal/FeedBall", false);
+        
         // Display instructions
         SmartDashboard.putString("Cal/Status", "FULL CALIBRATION MODE - Adjust sliders and shoot!");
         SmartDashboard.putString("Cal/Instructions", 
             "1. Use Cal/Turret/ManualAngle to aim. " +
             "2. Use Cal/Shooter/Top/BottomPower to tune shot. " +
-            "3. Click Cal/RecordShootingPoint after a good shot.");
+            "3. Click Cal/FeedBall to feed a ball. " +
+            "4. Click Cal/RecordShootingPoint after a good shot.");
         
         // Notify via Elastic
         calibration.logInfo("Calibration Started", 
@@ -125,14 +161,27 @@ public class FullShooterCalibrationCommand extends Command {
             shooter.setManualPower(topPower, bottomPower);
         }
         
+        // ----- Handle feed ball button -----
+        if (turretFeed != null) {
+            if (SmartDashboard.getBoolean("Cal/FeedBall", false)) {
+                turretFeed.setShoot();
+            } else {
+                turretFeed.setIdle();
+            }
+        }
+        
         // ----- Update status display -----
         updateStatusDisplay();
     }
     
     @Override
     public void end(boolean interrupted) {
-        // Stop shooter
+        // Stop shooter and feed
         shooter.stop();
+        if (turretFeed != null) {
+            turretFeed.stop();
+        }
+        SmartDashboard.putBoolean("Cal/FeedBall", false);
         
         // Reset to auto mode
         SmartDashboard.putBoolean("Cal/Turret/UseManual", false);

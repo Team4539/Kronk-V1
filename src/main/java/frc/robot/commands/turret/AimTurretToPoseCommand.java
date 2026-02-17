@@ -19,7 +19,7 @@ import frc.robot.util.PiShootingHelper;
  * If the Pi is unreachable, PiShootingHelper provides a fallback angle based
  * on pose geometry and the Constants calibration tables.
  * 
- * This is the DEFAULT turret command — it runs continuously when no other
+ * This is the DEFAULT turret command -- it runs continuously when no other
  * turret command (like AutoShootCommand) is active.
  */
 public class AimTurretToPoseCommand extends Command {

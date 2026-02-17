@@ -28,13 +28,13 @@ public class GameStateManager {
      */
     public enum GamePhase {
         PRE_MATCH,   // Before match starts
-        AUTO,        // Autonomous period (0:20 → 0:00)
-        TRANSITION,  // Buffer between auto and teleop (2:20 → 2:10, 10 sec)
-        SHIFT_1,     // First active alliance (2:10 → 1:45, 25 sec)
-        SHIFT_2,     // Other alliance (1:45 → 1:20, 25 sec)
-        SHIFT_3,     // First active alliance again (1:20 → 0:55, 25 sec)
-        SHIFT_4,     // Other alliance again (0:55 → 0:30, 25 sec)
-        END_GAME,    // Both alliances active (0:30 → 0:00, 30 sec)
+        AUTO,        // Autonomous period (0:20 -> 0:00)
+        TRANSITION,  // Buffer between auto and teleop (2:20 -> 2:10, 10 sec)
+        SHIFT_1,     // First active alliance (2:10 -> 1:45, 25 sec)
+        SHIFT_2,     // Other alliance (1:45 -> 1:20, 25 sec)
+        SHIFT_3,     // First active alliance again (1:20 -> 0:55, 25 sec)
+        SHIFT_4,     // Other alliance again (0:55 -> 0:30, 25 sec)
+        END_GAME,    // Both alliances active (0:30 -> 0:00, 30 sec)
         POST_MATCH   // After match ends
     }
     
@@ -82,7 +82,6 @@ public class GameStateManager {
     private boolean practiceDriveOnly = false;
     private boolean practiceVisionOnly = false;
     private boolean practiceDisableIntake = false;
-    private boolean practiceDisableClimber = false;
     private boolean practiceSlowMotion = false;
     private double practiceSpeedLimit = 1.0;
     
@@ -92,7 +91,6 @@ public class GameStateManager {
     private boolean testTurretEnabled = true;
     private boolean testDriveEnabled = true;
     private boolean testIntakeEnabled = true;
-    private boolean testClimberEnabled = true;
     private boolean testVisionEnabled = true;
     private boolean testAutoAimEnabled = true;
     private boolean testAutoShuttleEnabled = true;
@@ -127,7 +125,6 @@ public class GameStateManager {
         DashboardHelper.putBoolean(Category.PRACTICE, "DisableTurret", false);
         DashboardHelper.putBoolean(Category.PRACTICE, "DisableDrive", false);
         DashboardHelper.putBoolean(Category.PRACTICE, "DisableIntake", false);
-        DashboardHelper.putBoolean(Category.PRACTICE, "DisableClimber", false);
         
         // Speed/Safety Limits
         DashboardHelper.putBoolean(Category.PRACTICE, "SlowMotion", false);
@@ -147,7 +144,6 @@ public class GameStateManager {
         DashboardHelper.putBoolean(Category.TEST, "TurretEnabled", true);
         DashboardHelper.putBoolean(Category.TEST, "DriveEnabled", true);
         DashboardHelper.putBoolean(Category.TEST, "IntakeEnabled", true);
-        DashboardHelper.putBoolean(Category.TEST, "ClimberEnabled", true);
         DashboardHelper.putBoolean(Category.TEST, "VisionEnabled", true);
         
         DashboardHelper.putBoolean(Category.TEST, "AutoAimEnabled", true);
@@ -159,8 +155,6 @@ public class GameStateManager {
         DashboardHelper.putNumber(Category.TEST, "ManualShooterRPM", 0);
         DashboardHelper.putBoolean(Category.TEST, "ManualTurretControl", false);
         DashboardHelper.putNumber(Category.TEST, "ManualTurretAngle", 0);
-        DashboardHelper.putBoolean(Category.TEST, "ManualHoodControl", false);
-        DashboardHelper.putNumber(Category.TEST, "ManualHoodAngle", 0);
         
         DashboardHelper.putNumber(Category.TEST, "ShooterTestRPM", 3000);
         DashboardHelper.putBoolean(Category.TEST, "RunShooterAtTestRPM", false);
@@ -246,7 +240,6 @@ public class GameStateManager {
         practiceDriveOnly = DashboardHelper.getBoolean(Category.PRACTICE, "DriveOnly", false);
         practiceVisionOnly = DashboardHelper.getBoolean(Category.PRACTICE, "VisionOnly", false);
         practiceDisableIntake = DashboardHelper.getBoolean(Category.PRACTICE, "DisableIntake", false);
-        practiceDisableClimber = DashboardHelper.getBoolean(Category.PRACTICE, "DisableClimber", false);
         practiceSlowMotion = DashboardHelper.getBoolean(Category.PRACTICE, "SlowMotion", false);
         practiceSpeedLimit = DashboardHelper.getNumber(Category.PRACTICE, "SpeedLimit", 1.0);
         
@@ -256,7 +249,6 @@ public class GameStateManager {
         testTurretEnabled = DashboardHelper.getBoolean(Category.TEST, "TurretEnabled", true);
         testDriveEnabled = DashboardHelper.getBoolean(Category.TEST, "DriveEnabled", true);
         testIntakeEnabled = DashboardHelper.getBoolean(Category.TEST, "IntakeEnabled", true);
-        testClimberEnabled = DashboardHelper.getBoolean(Category.TEST, "ClimberEnabled", true);
         testVisionEnabled = DashboardHelper.getBoolean(Category.TEST, "VisionEnabled", true);
         testAutoAimEnabled = DashboardHelper.getBoolean(Category.TEST, "AutoAimEnabled", true);
         testAutoShuttleEnabled = DashboardHelper.getBoolean(Category.TEST, "AutoShuttleEnabled", true);
@@ -297,7 +289,6 @@ public class GameStateManager {
             DashboardHelper.putBoolean(Category.PRACTICE, "DisableShooter", true);
             DashboardHelper.putBoolean(Category.PRACTICE, "DisableTurret", true);
             DashboardHelper.putBoolean(Category.PRACTICE, "DisableIntake", true);
-            DashboardHelper.putBoolean(Category.PRACTICE, "DisableClimber", true);
             DashboardHelper.putBoolean(Category.SETTINGS, "Presets/DriveOnlyMode", false); // Auto-reset
             System.out.println("=== PRESET: Drive Only Mode Activated ===");
         }
@@ -447,17 +438,17 @@ public class GameStateManager {
             double matchTime = DriverStation.getMatchTime();
             
             // Determine phase based on time remaining (Table 6-2 boundaries)
-            if (matchTime > 130) {           // 2:20 → 2:10 (TRANSITION SHIFT, 10 sec)
+            if (matchTime > 130) {           // 2:20 -> 2:10 (TRANSITION SHIFT, 10 sec)
                 currentPhase = GamePhase.TRANSITION;
-            } else if (matchTime > 105) {    // 2:10 → 1:45 (SHIFT 1, 25 sec)
+            } else if (matchTime > 105) {    // 2:10 -> 1:45 (SHIFT 1, 25 sec)
                 currentPhase = GamePhase.SHIFT_1;
-            } else if (matchTime > 80) {     // 1:45 → 1:20 (SHIFT 2, 25 sec)
+            } else if (matchTime > 80) {     // 1:45 -> 1:20 (SHIFT 2, 25 sec)
                 currentPhase = GamePhase.SHIFT_2;
-            } else if (matchTime > 55) {     // 1:20 → 0:55 (SHIFT 3, 25 sec)
+            } else if (matchTime > 55) {     // 1:20 -> 0:55 (SHIFT 3, 25 sec)
                 currentPhase = GamePhase.SHIFT_3;
-            } else if (matchTime > 30) {     // 0:55 → 0:30 (SHIFT 4, 25 sec)
+            } else if (matchTime > 30) {     // 0:55 -> 0:30 (SHIFT 4, 25 sec)
                 currentPhase = GamePhase.SHIFT_4;
-            } else if (matchTime > 0) {      // 0:30 → 0:00 (END GAME, 30 sec)
+            } else if (matchTime > 0) {      // 0:30 -> 0:00 (END GAME, 30 sec)
                 currentPhase = GamePhase.END_GAME;
             } else {
                 // Match time hit zero - match is over
@@ -548,14 +539,9 @@ public class GameStateManager {
             canScore = true;
         }
         
-        // SHUTTLE ZONE OVERRIDE: If in shuttle zone, ALWAYS allow shooting
-        // This takes priority over all other checks
+        // SHUTTLE ZONE: If in shuttle zone, always allow shooting (shuttling to trench)
         if (inShuttleZone) {
             canScore = true;
-            // In shuttle zone, default to shuttle mode if not manually overridden
-            if (!shuttleModeManualOverride && !shuttleMode) {
-                shuttleMode = true;
-            }
         }
         
         // PRACTICE MATCH MODE: Use alliance timing logic (canScore already set correctly above)
@@ -567,6 +553,8 @@ public class GameStateManager {
         // If practiceMatchMode is true, we use the alliance timing logic even without FMS
         
         // Determine target mode
+        // NOTE: shuttleMode is managed exclusively by updateAutoShuttleMode() and setShuttleMode().
+        // This method only READS shuttleMode to determine the target, never writes it.
         if (!canScore && !forceShootEnabled) {
             currentTargetMode = TargetMode.DISABLED;
         } else if (shuttleMode) {
@@ -834,16 +822,6 @@ public class GameStateManager {
         if (practiceDisableIntake) return false;
         if (!testModeEnabled) return true;
         return testIntakeEnabled;
-    }
-    
-    /**
-     * Check if climber is enabled.
-     * Considers both practice disable and test mode settings.
-     */
-    public boolean isClimberEnabled() {
-        if (practiceDisableClimber) return false;
-        if (!testModeEnabled) return true;
-        return testClimberEnabled;
     }
     
     /**

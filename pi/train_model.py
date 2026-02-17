@@ -278,7 +278,7 @@ def train_model(csv_path: str, evaluate: bool = False):
             ])
             cv_folds = min(5, len(hit_points))
             scores = cross_val_score(single_model, X, y[:, i], cv=cv_folds, scoring="r2")
-            print(f"  {name}: R² = {scores.mean():.3f} (+/- {scores.std():.3f})")
+            print(f"  {name}: R^2 = {scores.mean():.3f} (+/- {scores.std():.3f})")
     
     # Show prediction stats on training data
     predictions = model.predict(X)

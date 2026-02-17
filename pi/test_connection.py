@@ -10,9 +10,9 @@ import sys
 # Check if ntcore is installed
 try:
     import ntcore
-    print("✅ ntcore is installed")
+    print("[OK] ntcore is installed")
 except ImportError:
-    print("❌ ntcore not installed!")
+    print("[FAIL] ntcore not installed!")
     print("   Run: pip3 install robotpy-ntcore")
     sys.exit(1)
 
@@ -52,7 +52,7 @@ def main():
             
             if connected != last_state:
                 if connected:
-                    print(f"✅ CONNECTED to NetworkTables! (after {connection_attempts} attempts)")
+                    print(f"[OK] CONNECTED to NetworkTables! (after {connection_attempts} attempts)")
                     print()
                     
                     # Test reading/writing
@@ -60,7 +60,7 @@ def main():
                     test_table = inst.getTable("Pi/Status")
                     pub = test_table.getDoubleTopic("test_value").publish()
                     pub.set(123.45)
-                    print("✅ Published test value to Pi/Status/test_value")
+                    print("[OK] Published test value to Pi/Status/test_value")
                     
                     # Show server info
                     print()
@@ -70,7 +70,7 @@ def main():
                         print(f"  Connected to: {conn.remote_id}")
                     
                 else:
-                    print(f"❌ Disconnected from NetworkTables")
+                    print(f"[FAIL] Disconnected from NetworkTables")
                 
                 last_state = connected
             

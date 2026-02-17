@@ -44,9 +44,11 @@ public class LimelightSubsystem extends SubsystemBase {
     private final NetworkTableEntry botposeRedEntry;
     
     /** Pipeline processing latency (ms) */
+    @SuppressWarnings("unused")
     private final NetworkTableEntry tlEntry;
     
     /** Capture latency (ms) */
+    @SuppressWarnings("unused")
     private final NetworkTableEntry clEntry;
 
     // Cached pose data
@@ -186,10 +188,10 @@ public class LimelightSubsystem extends SubsystemBase {
             return 0.0;
         }
         
-        // Rough formula: distance ≈ k / sqrt(area)
+        // Rough formula: distance ~ k / sqrt(area)
         // where k is calibrated based on known measurements
         // For a standard AprilTag at ~3m, area might be ~1%
-        // So k ≈ 3 * sqrt(1) = 3
+        // So k ~ 3 * sqrt(1) = 3
         double k = 3.0;  // Calibration constant - adjust based on testing
         return k / Math.sqrt(area);
     }

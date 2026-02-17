@@ -37,6 +37,7 @@ import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import frc.robot.Constants;
 import frc.robot.GameStateManager;
 import frc.robot.generated.TunerConstants.TunerSwerveDrivetrain;
+import frc.robot.util.PiShootingHelper;
 @SuppressWarnings("unused")
 
 /**
@@ -81,6 +82,12 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     /** Auto-shuttle boundary line */
     private final FieldObject2d m_shuttleBoundaryObject;
 
+    /** Pi-computed target point (where Pi says turret is aiming) */
+    private final FieldObject2d m_piTargetObject;
+
+    /** Pi-computed aim line (from turret to Pi's calculated target) */
+    private final FieldObject2d m_piAimLineObject;
+
     // FIELD INITIALIZATION HELPER - Initializes field objects (must be called in constructor)
     
     {
@@ -92,6 +99,8 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         m_aimTargetObject = m_field2d.getObject("Current Target");
         m_aimLineObject = m_field2d.getObject("Aim Line");
         m_shuttleBoundaryObject = m_field2d.getObject("Shuttle Boundary");
+        m_piTargetObject = m_field2d.getObject("Pi Target");
+        m_piAimLineObject = m_field2d.getObject("Pi Aim Line");
         
         // Publish to SmartDashboard at top-level "Field"
         DashboardHelper.putData(Category.TELEOP, "Field", m_field2d);
@@ -372,6 +381,9 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         Translation2d turretPosition = getTurretFieldPosition(currentPose);
         drawAimLine(turretPosition, currentTarget);
         
+        // Draw Pi-based aim line using actual Pi shooting solution (turret angle + distance)
+        drawPiAimLine(currentPose, turretPosition);
+        
         // Draw shuttle boundary line
         drawShuttleBoundaryLine(alliance);
     }
@@ -432,6 +444,66 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         }
         
         m_aimLineObject.setPoses(linePoints);
+    }
+
+    /**
+     * Draws the Pi-computed aim line on the field.
+     * Uses the Pi's turret angle and distance to show exactly where the Pi
+     * thinks the robot should shoot, rather than just a line to the target position.
+     * This gives a visual representation of lead angle, angle corrections, etc.
+     * 
+     * @param robotPose Current robot pose
+     * @param turretPosition Turret position in field coordinates
+     */
+    private void drawPiAimLine(Pose2d robotPose, Translation2d turretPosition) {
+        PiShootingHelper pi = PiShootingHelper.getInstance();
+        
+        double piTurretAngle = pi.getTurretAngle();  // degrees, robot-relative
+        double piDistance = pi.getDistance();          // meters to target
+        
+        // If distance is zero or very small, nothing to draw
+        if (piDistance < 0.1) {
+            m_piAimLineObject.setPoses(new Pose2d[0]);
+            m_piTargetObject.setPoses(new Pose2d[0]);
+            return;
+        }
+        
+        // Convert Pi turret angle (robot-relative) to field angle
+        double robotHeadingDeg = robotPose.getRotation().getDegrees();
+        double fieldAngleDeg = robotHeadingDeg + piTurretAngle;
+        double fieldAngleRad = Math.toRadians(fieldAngleDeg);
+        
+        // Calculate the Pi's computed target point
+        double targetX = turretPosition.getX() + piDistance * Math.cos(fieldAngleRad);
+        double targetY = turretPosition.getY() + piDistance * Math.sin(fieldAngleRad);
+        Translation2d piTarget = new Translation2d(targetX, targetY);
+        
+        // Set Pi target marker
+        m_piTargetObject.setPose(new Pose2d(piTarget, Rotation2d.fromDegrees(fieldAngleDeg)));
+        
+        // Draw line from turret to Pi's target point
+        int numPoints = 10;
+        Pose2d[] linePoints = new Pose2d[numPoints];
+        Rotation2d lineRotation = Rotation2d.fromDegrees(fieldAngleDeg);
+        
+        for (int i = 0; i < numPoints; i++) {
+            double t = (double) i / (numPoints - 1);
+            double x = turretPosition.getX() + t * (targetX - turretPosition.getX());
+            double y = turretPosition.getY() + t * (targetY - turretPosition.getY());
+            linePoints[i] = new Pose2d(x, y, lineRotation);
+        }
+        
+        m_piAimLineObject.setPoses(linePoints);
+        
+        // Publish Pi aim data to dashboard for debugging
+        DashboardHelper.putNumber(Category.DEBUG, "PiAim/FieldAngleDeg", fieldAngleDeg);
+        DashboardHelper.putNumber(Category.DEBUG, "PiAim/Distance", piDistance);
+        DashboardHelper.putNumber(Category.DEBUG, "PiAim/TurretAngle", piTurretAngle);
+        DashboardHelper.putNumber(Category.DEBUG, "PiAim/TargetX", targetX);
+        DashboardHelper.putNumber(Category.DEBUG, "PiAim/TargetY", targetY);
+        DashboardHelper.putBoolean(Category.DEBUG, "PiAim/UsingFallback", pi.isUsingFallback());
+        DashboardHelper.putNumber(Category.DEBUG, "PiAim/Confidence", pi.getConfidence());
+        DashboardHelper.putNumber(Category.DEBUG, "PiAim/LeadAngle", pi.getLeadAngle());
     }
     
     /**

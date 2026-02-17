@@ -18,7 +18,7 @@ import frc.robot.Constants;
 /**
  * Controls the intake mechanism with a single pivot motor and a roller motor.
  * Uses a CANcoder for absolute position feedback and a WPILib PID controller
- * that works directly in degrees — no gear ratio math needed.
+ * that works directly in degrees -- no gear ratio math needed.
  */
 public class IntakeSubsystem extends SubsystemBase {
     
@@ -27,7 +27,7 @@ public class IntakeSubsystem extends SubsystemBase {
     private final TalonFX rollerMotor;
     private final CANcoder pivotCANcoder;
     
-    // Control — just duty cycle, PID runs in our code in degrees
+    // Control -- just duty cycle, PID runs in our code in degrees
     private final DutyCycleOut pivotControl;
     private final DutyCycleOut rollerControl;
     private final PIDController pivotPID;
@@ -48,7 +48,7 @@ public class IntakeSubsystem extends SubsystemBase {
         pivotControl = new DutyCycleOut(0);
         rollerControl = new DutyCycleOut(0);
         
-        // PID works in degrees: error in degrees → output in duty cycle
+        // PID works in degrees: error in degrees -> output in duty cycle
         pivotPID = new PIDController(
             Constants.Intake.PIVOT_PID_P,
             Constants.Intake.PIVOT_PID_I,
@@ -231,13 +231,13 @@ public class IntakeSubsystem extends SubsystemBase {
             return;
         }
         
-        // 2. PID: current degrees → target degrees → duty cycle output
+        // 2. PID: current degrees -> target degrees -> duty cycle output
         double pidOutput = pivotPID.calculate(currentPivotAngle, targetPivotAngle);
         
         // 3. Clamp so it doesn't go full send
         pidOutput = clamp(pidOutput, -Constants.Intake.PIVOT_MAX_OUTPUT, Constants.Intake.PIVOT_MAX_OUTPUT);
         
-        // 4. If at target, just stop — don't fight with tiny oscillations
+        // 4. If at target, just stop -- don't fight with tiny oscillations
         if (pivotPID.atSetpoint()) {
             pidOutput = 0.0;
         }

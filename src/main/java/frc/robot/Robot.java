@@ -50,7 +50,7 @@ public class Robot extends TimedRobot {
   @Override
   public void disabledInit() {
     // SAFETY: Explicitly stop all motor subsystems immediately on disable.
-    // This is a belt-and-suspenders approach — each subsystem's periodic()
+    // This is a belt-and-suspenders approach -- each subsystem's periodic()
     // also guards against disabled-state motor commands individually.
     m_robotContainer.stopAllMotors();
     
@@ -70,7 +70,7 @@ public class Robot extends TimedRobot {
     setLEDState(LEDState.AUTO);
     
     String autoName = m_autonomousCommand != null ? m_autonomousCommand.getName() : "None";
-    notify(" AUTO STARTED", "Running: " + autoName);
+    notify("AUTO STARTED", "Running: " + autoName);
     
     if (m_autonomousCommand != null) {
       CommandScheduler.getInstance().schedule(m_autonomousCommand);
@@ -86,7 +86,7 @@ public class Robot extends TimedRobot {
       m_autonomousCommand.cancel();
     }
     setLEDState(LEDState.TELEOP);
-    notify(" TELEOP STARTED", "Driver control active");
+    notify("TELEOP STARTED", "Driver control active");
   }
 
   @Override

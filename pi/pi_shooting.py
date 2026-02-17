@@ -506,7 +506,8 @@ class PiShootingCoprocessor:
         # Setup NetworkTables
         self.nt_inst = ntcore.NetworkTableInstance.getDefault()
         self.nt_inst.setServerTeam(TEAM_NUMBER)
-        self.nt_inst.setServer("localhost")
+        # NOTE: Do NOT call setServer("localhost") here -- it overrides setServerTeam()
+        # and prevents the Pi from connecting to the roboRIO on the robot network.
         self.nt_inst.startClient4("Pi Shooting Coprocessor")
         
         # Input table (robot publishes, Pi reads)
@@ -530,6 +531,24 @@ class PiShootingCoprocessor:
         # Training input (robot reports shot results)
         self.sub_record_shot = input_table.getBooleanTopic("record_shot").subscribe(False)
         self.sub_shot_result = input_table.getStringTopic("shot_result").subscribe("MISS")
+        
+        # Snapshot table -- frozen state from the moment the ball was fired (robot publishes)
+        # The robot captures these at the exact instant the ball is launched,
+        # so they reflect the true firing conditions, not the current robot state.
+        snapshot_table = self.nt_inst.getTable("Pi/Snapshot")
+        self.sub_snap_robot_x = snapshot_table.getDoubleTopic("robot_x").subscribe(0.0)
+        self.sub_snap_robot_y = snapshot_table.getDoubleTopic("robot_y").subscribe(0.0)
+        self.sub_snap_robot_heading = snapshot_table.getDoubleTopic("robot_heading").subscribe(0.0)
+        self.sub_snap_robot_vx = snapshot_table.getDoubleTopic("robot_vx").subscribe(0.0)
+        self.sub_snap_robot_vy = snapshot_table.getDoubleTopic("robot_vy").subscribe(0.0)
+        self.sub_snap_robot_omega = snapshot_table.getDoubleTopic("robot_omega").subscribe(0.0)
+        self.sub_snap_turret_angle = snapshot_table.getDoubleTopic("turret_angle").subscribe(0.0)
+        self.sub_snap_top_speed = snapshot_table.getDoubleTopic("top_speed").subscribe(0.0)
+        self.sub_snap_bottom_speed = snapshot_table.getDoubleTopic("bottom_speed").subscribe(0.0)
+        self.sub_snap_distance = snapshot_table.getDoubleTopic("distance").subscribe(0.0)
+        self.sub_snap_battery_voltage = snapshot_table.getDoubleTopic("battery_voltage").subscribe(12.5)
+        self.sub_snap_target_mode = snapshot_table.getStringTopic("target_mode").subscribe("HUB")
+        self.sub_snap_valid = snapshot_table.getBooleanTopic("valid").subscribe(False)
         
         # Output table (Pi publishes, robot reads)
         output_table = self.nt_inst.getTable(PI_OUTPUT_TABLE)
@@ -596,8 +615,72 @@ class PiShootingCoprocessor:
         return False
     
     def _record_shot(self, result: str):
-        """Record a shot to the training CSV."""
+        """Record a shot to the training CSV using the frozen snapshot data.
+        
+        The roboRIO captures a snapshot of all robot/shooter state at the exact
+        moment the ball is fired (Pi/Snapshot table). When the operator later
+        confirms HIT/MISS, this method reads that frozen snapshot and writes it
+        to CSV. This ensures training data reflects the true firing conditions,
+        not whatever the robot is doing when the operator presses the button.
+        """
         try:
+            # Validate that we have a valid snapshot
+            if not self.sub_snap_valid.get():
+                print("[Pi] WARNING: No valid snapshot! Using last_shot_state as fallback.")
+                state = self.last_shot_state
+            else:
+                # Read the frozen snapshot from NetworkTables
+                robot_x = self.sub_snap_robot_x.get()
+                robot_y = self.sub_snap_robot_y.get()
+                robot_heading = self.sub_snap_robot_heading.get()
+                robot_vx = self.sub_snap_robot_vx.get()
+                robot_vy = self.sub_snap_robot_vy.get()
+                robot_omega = self.sub_snap_robot_omega.get()
+                turret_angle = self.sub_snap_turret_angle.get()
+                top_speed = self.sub_snap_top_speed.get()
+                bottom_speed = self.sub_snap_bottom_speed.get()
+                snap_distance = self.sub_snap_distance.get()
+                battery_voltage = self.sub_snap_battery_voltage.get()
+                target_mode = self.sub_snap_target_mode.get()
+                
+                # Calculate angle_to_target from snapshot pose
+                is_blue = self.sub_is_blue.get()
+                if target_mode == "TRENCH":
+                    target_x, target_y = get_closest_trench(robot_x, robot_y, is_blue)
+                else:
+                    target_x, target_y = get_hub_position(is_blue)
+                
+                turret_x, turret_y = get_turret_field_position(robot_x, robot_y, robot_heading)
+                dx = target_x - turret_x
+                dy = target_y - turret_y
+                angle_to_target = math.degrees(math.atan2(dy, dx))
+                
+                # Calculate angle correction: difference between commanded turret angle
+                # and the base geometric angle. This is what the model learns to predict.
+                base_turret_angle = angle_to_target - robot_heading
+                # Normalize to -180..180
+                base_turret_angle = ((base_turret_angle + 180) % 360) - 180
+                angle_correction_val = turret_angle - base_turret_angle
+                
+                state = {
+                    "robot_x": robot_x,
+                    "robot_y": robot_y,
+                    "robot_heading": robot_heading,
+                    "robot_vx": robot_vx,
+                    "robot_vy": robot_vy,
+                    "robot_omega": robot_omega,
+                    "target_mode": target_mode,
+                    "battery_voltage": battery_voltage,
+                    "turret_angle": turret_angle,
+                    "top_speed": top_speed,
+                    "bottom_speed": bottom_speed,
+                    "distance": snap_distance,
+                    "angle_to_target": angle_to_target,
+                    "angle_correction": angle_correction_val,
+                }
+                
+                print(f"[Pi] Using snapshot data (frozen at fire time)")
+            
             csv_path = get_csv_path()
             
             # Create CSV if it doesn't exist
@@ -610,8 +693,6 @@ class PiShootingCoprocessor:
                     f.write("angle_correction,top_power_correction,bottom_power_correction,")
                     f.write("battery_voltage,result\n")
                 print(f"[Pi] Created new CSV: {csv_path}")
-            
-            state = self.last_shot_state
             
             # Calculate power corrections (actual - base)
             target_mode = state["target_mode"]
@@ -661,9 +742,9 @@ class PiShootingCoprocessor:
             time.sleep(1)
         
         if self.nt_inst.isConnected():
-            print("[Pi] ✅ Connected to NetworkTables!")
+            print("[Pi] [OK] Connected to NetworkTables!")
         else:
-            print("[Pi] ⚠️  No NetworkTables connection yet, will continue trying...")
+            print("[Pi] [WARN]  No NetworkTables connection yet, will continue trying...")
             print("[Pi] Make sure:")
             print(f"[Pi]   - roboRIO is on and connected to team {TEAM_NUMBER} network")
             print("[Pi]   - This Pi is on the same network")
@@ -682,9 +763,9 @@ class PiShootingCoprocessor:
             current_connection = self.nt_inst.isConnected()
             if current_connection != last_connection_state:
                 if current_connection:
-                    print("[Pi] ✅ NetworkTables connected!")
+                    print("[Pi] [OK] NetworkTables connected!")
                 else:
-                    print("[Pi] ❌ NetworkTables disconnected!")
+                    print("[Pi] [FAIL] NetworkTables disconnected!")
                 last_connection_state = current_connection
             
             # Read inputs

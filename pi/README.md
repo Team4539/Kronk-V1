@@ -6,16 +6,53 @@ The Pi autonomously:
 - Loads `shooting_training_data.csv` from the deploy directory
 - Trains a machine learning model on startup (if CSV exists)
 - Calculates optimal turret angle & shooter speeds in real-time
-- Retrains automatically when requested via NetworkTables
+- Records training data when robot sends snapshot confirmations
+- Retrains automatically when new HITs are recorded
 
 The roboRIO simply sends robot state and receives shooting commands.
 
-## Setup on Raspberry Pi
+## Quick Start: Deployment
+
+**From your development computer (project root):**
+
+```powershell
+# Launch the Pi management tool
+.\pi-tool.bat
+```
+
+This gives you a menu with options to deploy code, pull data, clear the model, and more.
+See **PI_GUIDE.md** in the project root for the full deployment guide.
+
+## Recording Training Data (Two-Phase System)
+
+Training data is recorded using a **two-phase snapshot + confirm** workflow:
+
+### Phase 1: Automatic Snapshot
+When the robot fires a shot (via AutoShootCommand), the system automatically
+captures a snapshot of the current robot state -- pose, velocity, turret angle,
+shooter speeds, distance, etc. This is published to the `Pi/Snapshot` NetworkTables table.
+
+### Phase 2: Operator Confirmation
+After observing whether the shot scored, the **operator** presses:
+- **D-pad Up** = HIT (shot scored -- used for ML training)
+- **D-pad Down** = MISS (shot missed -- logged but not used for training)
+- **D-pad Left** = DISCARD (bad data, not recorded at all)
+
+The Pi receives the confirmation, combines it with the snapshot data, and appends
+a row to `shooting_training_data.csv`. HIT shots trigger an automatic retrain.
+
+### Why Two Phases?
+The old system required the operator to press a button at the exact moment of
+firing, which was unreliable and led to bad training data. The new system
+captures state automatically at the moment of firing and lets the operator
+calmly confirm the result afterward.
+
+## Manual Setup on Raspberry Pi
 
 ### 1. Install Python & dependencies
 ```bash
 sudo apt update && sudo apt install python3 python3-pip -y
-cd /home/pi/kronk  # or wherever you put this
+cd /home/kaotic/kronk
 pip3 install -r requirements.txt
 ```
 
@@ -49,9 +86,9 @@ After=network.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/kronk
-ExecStart=/usr/bin/python3 /home/pi/kronk/pi_shooting.py
+User=kaotic
+WorkingDirectory=/home/kaotic/kronk
+ExecStart=/usr/bin/python3 /home/kaotic/kronk/pi_shooting.py
 Restart=always
 RestartSec=3
 StandardOutput=journal
@@ -95,90 +132,60 @@ If the Pi isn't connecting to NetworkTables:
 
 ## How It Works
 
-### Autonomous Training & Recording Flow
+### Recording Flow (Two-Phase)
 
-The Pi is **fully autonomous** and handles everything:
-
-1. **On Startup**: 
-   - Looks for `shooting_training_data.csv` 
-   - If found but no model exists → auto-train
-   - If no CSV exists → creates one and uses interpolation tables
-
-2. **During Operation**:
-   - Calculates shooting solutions at 50 Hz
-   - Listens for shot recording requests from robot
-   - When robot reports a shot result → appends to CSV automatically
-
-3. **Auto-Retrain**:
-   - Every 10 seconds, checks if CSV was modified
-   - If modified (or new HIT recorded) → retrains model automatically
-   - Can also be triggered manually via NetworkTables
-
-4. **Continuous Learning**:
-   - Each successful (HIT) shot improves the model
-   - Model gets better over time without any manual intervention
-   - Failed shots are recorded too (for analysis) but not used in training
-
-### Recording Shots from Robot
-
-The robot sends shot results to the Pi via NetworkTables:
-
-```java
-// In your robot code - after taking a shot
-NetworkTableEntry recordShot = input_table.getEntry("record_shot");
-NetworkTableEntry shotResult = input_table.getEntry("shot_result");
-
-shotResult.setString("HIT");  // or "MISS" or "PARTIAL"
-recordShot.setBoolean(true);  // Trigger recording
-recordShot.setBoolean(false); // Reset for next shot
-```
-
-The Pi will:
-1. Capture the last calculated shooting solution
-2. Combine with robot state (position, velocity, etc.)
-3. Append a line to `shooting_training_data.csv`
-4. If result was "HIT" → trigger auto-retrain
+1. **Robot fires a shot** -> AutoShootCommand detects the firing edge
+2. **Snapshot captured** -> Robot state published to `Pi/Snapshot` table
+3. **Operator confirms** -> D-pad Up (HIT), Down (MISS), or Left (DISCARD)
+4. **Pi records** -> Appends row to CSV with result
+5. **Auto-retrain** -> If result was HIT, model retrains within 10 seconds
 
 ### Data Flow
 ```
 Robot (roboRIO)                    Raspberry Pi
-─────────────                      ────────────
+-----------------                  ------------
                   NetworkTables
-Robot pose      ──────────────►  Pi reads inputs
-Robot velocity  ──────────────►  Calculates solution
-Alliance color  ──────────────►  (interpolation + ML model)
-Target mode     ──────────────►
-Battery voltage ──────────────►
-                                 
-                ◄──────────────  turret_angle (degrees)
-                ◄──────────────  top_speed (0.0-1.0)
-                ◄──────────────  bottom_speed (0.0-1.0)
-                ◄──────────────  distance, confidence, etc.
+Robot pose      ---------------->  Pi reads inputs
+Robot velocity  ---------------->  Calculates solution
+Alliance color  ---------------->  (interpolation + ML model)
+Target mode     ---------------->
+Battery voltage ---------------->
+
+                <----------------  turret_angle (degrees)
+                <----------------  top_speed (0.0-1.0)
+                <----------------  bottom_speed (0.0-1.0)
+                <----------------  distance, confidence, etc.
+
+Shot snapshot   ---------------->  (captured at moment of firing)
+Confirm result  ---------------->  Records to CSV, retrains on HIT
 ```
 
 ### NetworkTables Layout
+
 | Table | Key | Direction | Description |
 |-------|-----|-----------|-------------|
-| `Pi/Input` | `robot_x`, `robot_y` | Robot → Pi | Robot position (meters) |
-| `Pi/Input` | `robot_heading` | Robot → Pi | Robot heading (degrees) |
-| `Pi/Input` | `robot_vx`, `robot_vy` | Robot → Pi | Velocity (m/s, field-relative) |
-| `Pi/Input` | `robot_omega` | Robot → Pi | Rotation rate (rad/s) |
-| `Pi/Input` | `is_blue_alliance` | Robot → Pi | Alliance color |
-| `Pi/Input` | `target_mode` | Robot → Pi | "HUB" or "TRENCH" |
-| `Pi/Input` | `battery_voltage` | Robot → Pi | Current voltage |
-| `Pi/Input` | `enabled` | Robot → Pi | Whether to calculate |
-| `Pi/Input` | `record_shot` | Robot → Pi | Trigger shot recording |
-| `Pi/Input` | `shot_result` | Robot → Pi | "HIT", "MISS", or "PARTIAL" |
-| `Pi/Output` | `turret_angle` | Pi → Robot | Turret angle to command |
-| `Pi/Output` | `top_speed` | Pi → Robot | Top motor power |
-| `Pi/Output` | `bottom_speed` | Pi → Robot | Bottom motor power |
-| `Pi/Output` | `distance` | Pi → Robot | Distance to target |
-| `Pi/Output` | `confidence` | Pi → Robot | Prediction confidence |
-| `Pi/Status` | `connected` | Pi → Robot | Pi alive flag |
-| `Pi/Status` | `heartbeat` | Pi → Robot | Incrementing counter |
-| `Pi/Status` | `model_loaded` | Pi → Robot | Has trained model |
+| `Pi/Input` | `robot_x`, `robot_y` | Robot -> Pi | Robot position (meters) |
+| `Pi/Input` | `robot_heading` | Robot -> Pi | Robot heading (degrees) |
+| `Pi/Input` | `robot_vx`, `robot_vy` | Robot -> Pi | Velocity (m/s, field-relative) |
+| `Pi/Input` | `robot_omega` | Robot -> Pi | Rotation rate (rad/s) |
+| `Pi/Input` | `is_blue_alliance` | Robot -> Pi | Alliance color |
+| `Pi/Input` | `target_mode` | Robot -> Pi | "HUB" or "TRENCH" |
+| `Pi/Input` | `battery_voltage` | Robot -> Pi | Current voltage |
+| `Pi/Input` | `enabled` | Robot -> Pi | Whether to calculate |
+| `Pi/Snapshot` | `snapshot_ready` | Robot -> Pi | New snapshot available |
+| `Pi/Snapshot` | `confirm_result` | Robot -> Pi | "HIT", "MISS", or "DISCARD" |
+| `Pi/Snapshot` | `robot_x`, `robot_y`, ... | Robot -> Pi | Frozen state at shot time |
+| `Pi/Output` | `turret_angle` | Pi -> Robot | Turret angle to command |
+| `Pi/Output` | `top_speed` | Pi -> Robot | Top motor power |
+| `Pi/Output` | `bottom_speed` | Pi -> Robot | Bottom motor power |
+| `Pi/Output` | `distance` | Pi -> Robot | Distance to target |
+| `Pi/Output` | `confidence` | Pi -> Robot | Prediction confidence |
+| `Pi/Status` | `connected` | Pi -> Robot | Pi alive flag |
+| `Pi/Status` | `heartbeat` | Pi -> Robot | Incrementing counter |
+| `Pi/Status` | `model_loaded` | Pi -> Robot | Has trained model |
 
 ### Fallback Behavior
+
 If the Pi doesn't send a heartbeat for 500ms, the robot automatically falls back to:
 - **Turret angle**: Calculated locally from robot pose and target position
 - **Shooter powers**: Interpolated from the Constants.java calibration tables
@@ -186,66 +193,6 @@ If the Pi doesn't send a heartbeat for 500ms, the robot automatically falls back
 
 The fallback ensures the robot can still shoot (with reduced accuracy) even if the Pi
 crashes, loses network, or is physically disconnected.
-
-## Training Workflow
-
-### Autonomous Recording (New!)
-
-The Pi now records shots automatically! No need to manually copy CSV files.
-
-**On the robot** (you need to add this code):
-```java
-// After shooting, determine if shot was successful
-String result = detectShotResult(); // "HIT", "MISS", or "PARTIAL"
-
-// Send to Pi for recording
-NetworkTable inputTable = NetworkTableInstance.getDefault().getTable("Pi/Input");
-inputTable.getEntry("shot_result").setString(result);
-inputTable.getEntry("record_shot").setBoolean(true);
-
-// Reset trigger (important!)
-try { Thread.sleep(50); } catch (Exception e) {}
-inputTable.getEntry("record_shot").setBoolean(false);
-```
-
-**The Pi automatically**:
-1. Captures the shooting solution it calculated
-2. Records robot state (position, velocity, heading, etc.)
-3. Appends to `shooting_training_data.csv`
-4. If result was "HIT" → triggers retrain within 10 seconds
-
-### Manual CSV Editing (Optional)
-
-If you want to manually edit training data or import from elsewhere:
-
-#### Quick Deploy
-Use the deployment scripts to automatically sync code and data to the Pi:
-
-**Windows (PowerShell):**
-```powershell
-.\deploy_to_pi.ps1 [pi_hostname_or_ip]
-```
-
-**Linux/Mac:**
-```bash
-./deploy_to_pi.sh [pi_hostname_or_ip]
-```
-
-This will:
-- Copy all Python files to the Pi
-- Copy the latest `shooting_training_data.csv` from the deploy directory
-- Optionally install dependencies
-- Restart the shooting service if it's running
-
-### Old Manual Workflow (Not Needed Anymore)
-
-For reference, the old workflow was:
-1. Drive robot, manually adjust turret/shooter until shots hit
-2. Press record button on SmartDashboard
-3. Copy line to CSV manually
-4. Re-deploy CSV to Pi
-
-**Now the Pi does all of this automatically!** Just implement shot detection on the robot and send the result via NetworkTables.
 
 ### Model Training Details
 
@@ -286,7 +233,7 @@ The robot publishes Pi status to NetworkTables:
 
 **View live logs** (if running as service):
 ```bash
-ssh pi@raspberrypi.local 'journalctl -u kronk-shooting -f'
+ssh kaotic@10.45.39.11 'journalctl -u kronk-shooting -f'
 ```
 
 **View status** (if running manually):
@@ -298,14 +245,14 @@ The Pi prints status every 5 seconds:
 ### Troubleshooting
 
 **Pi not connecting?**
-- Check network: `ping raspberrypi.local`
-- Check service: `ssh pi@raspberrypi.local 'systemctl status kronk-shooting'`
+- Check network: `ping 10.45.39.11`
+- Check service: `ssh kaotic@10.45.39.11 'systemctl status kronk-shooting'`
 - Check team number: Ensure `TEAM_NUMBER = 4539` in `pi_shooting.py`
 
 **Model not loading?**
-- Check CSV exists: `ssh pi@raspberrypi.local 'ls -l ~/kronk/*.csv'`
-- Check model file: `ssh pi@raspberrypi.local 'ls -l ~/kronk/*.pkl'`
-- Manually train: `ssh pi@raspberrypi.local 'cd ~/kronk && python3 train_model.py --evaluate'`
+- Check CSV exists: `ssh kaotic@10.45.39.11 'ls -l ~/kronk/*.csv'`
+- Check model file: `ssh kaotic@10.45.39.11 'ls -l ~/kronk/*.pkl'`
+- Manually train: `ssh kaotic@10.45.39.11 'cd ~/kronk && python3 train_model.py --evaluate'`
 
 **Fallback mode constantly active?**
 - Pi heartbeat timeout is 500ms
@@ -321,6 +268,8 @@ You can also request a retrain from the robot by setting `Pi/Training/retrain_re
 |------|-------------|
 | `pi_shooting.py` | Main coprocessor script (runs on Pi) |
 | `train_model.py` | Trains ML model from CSV data |
+| `test_connection.py` | NetworkTables connection diagnostic |
+| `test_recording.py` | Recording system diagnostic |
 | `requirements.txt` | Python dependencies |
 | `shooting_model.pkl` | Trained model (auto-generated) |
 | `shooting_training_data.csv` | Training data (copy from deploy) |
@@ -329,5 +278,6 @@ You can also request a retrain from the robot by setting `Pi/Training/retrain_re
 
 | File | Description |
 |------|-------------|
-| `util/PiShootingHelper.java` | NT communication + fallback logic |
-| `commands/AutoShootCommand.java` | Uses PiShootingHelper for aiming/shooting |
+| `util/PiShootingHelper.java` | NT communication, snapshot capture, fallback logic |
+| `commands/AutoShootCommand.java` | Uses PiShootingHelper for aiming/shooting, triggers snapshots |
+| `commands/calibrations/RecordShotCommand.java` | Sends HIT/MISS/DISCARD confirmations to Pi |

@@ -30,7 +30,7 @@ import frc.robot.GameStateManager.TargetMode;
  * 
  * FALLBACK BEHAVIOR:
  * If the Pi hasn't sent a heartbeat in the last 500ms, the robot uses a simple
- * fallback: a fixed turret angle (0° = forward) and interpolated shooter powers
+ * fallback: a fixed turret angle (0 deg = forward) and interpolated shooter powers
  * from the calibration tables in Constants.java. This ensures the robot can still
  * shoot even if the Pi dies mid-match.
  */
@@ -73,6 +73,25 @@ public class PiShootingHelper {
     private final BooleanPublisher pubEnabled;
     private final BooleanPublisher pubRobotEnabled;
     
+    // Training data recording (two-phase: snapshot at fire, confirm later)
+    private final BooleanPublisher pubRecordShot;
+    private final StringPublisher pubShotResult;
+    
+    // Snapshot publishers -- frozen state from the moment the ball was fired
+    private final DoublePublisher pubSnapRobotX;
+    private final DoublePublisher pubSnapRobotY;
+    private final DoublePublisher pubSnapRobotHeading;
+    private final DoublePublisher pubSnapRobotVX;
+    private final DoublePublisher pubSnapRobotVY;
+    private final DoublePublisher pubSnapRobotOmega;
+    private final DoublePublisher pubSnapTurretAngle;
+    private final DoublePublisher pubSnapTopSpeed;
+    private final DoublePublisher pubSnapBottomSpeed;
+    private final DoublePublisher pubSnapDistance;
+    private final DoublePublisher pubSnapBatteryVoltage;
+    private final StringPublisher pubSnapTargetMode;
+    private final BooleanPublisher pubSnapValid;
+    
     // --- NetworkTables subscribers (Pi -> robot) ---
     
     private final DoubleSubscriber subTurretAngle;
@@ -89,6 +108,7 @@ public class PiShootingHelper {
     private final BooleanSubscriber subPiConnected;
     private final IntegerSubscriber subHeartbeat;
     private final BooleanSubscriber subModelLoaded;
+    @SuppressWarnings("unused")
     private final DoubleSubscriber subLoopTimeMs;
     
     // --- Cached output values ---
@@ -102,6 +122,15 @@ public class PiShootingHelper {
     private double confidence = 0.0;
     private double angleCorrection = 0.0;
     private boolean usingFallback = false;
+    
+    // --- Cached input values (for snapshot at fire time) ---
+    
+    private double lastRobotX = 0.0;
+    private double lastRobotY = 0.0;
+    private double lastRobotHeading = 0.0;
+    private double lastFieldVX = 0.0;
+    private double lastFieldVY = 0.0;
+    private double lastOmega = 0.0;
     
     // --- References ---
     
@@ -138,6 +167,28 @@ public class PiShootingHelper {
         pubTrenchOffsetY = inputTable.getDoubleTopic("trench_offset_y").publish();
         pubEnabled = inputTable.getBooleanTopic("enabled").publish();
         pubRobotEnabled = inputTable.getBooleanTopic("robot_enabled").publish();
+        
+        // Training recording
+        pubRecordShot = inputTable.getBooleanTopic("record_shot").publish();
+        pubShotResult = inputTable.getStringTopic("shot_result").publish();
+        
+        // Snapshot table -- frozen state from the moment the ball was fired
+        // The Pi reads these when record_shot fires, instead of using its own last_shot_state
+        NetworkTable snapTable = ntInst.getTable("Pi/Snapshot");
+        pubSnapRobotX = snapTable.getDoubleTopic("robot_x").publish();
+        pubSnapRobotY = snapTable.getDoubleTopic("robot_y").publish();
+        pubSnapRobotHeading = snapTable.getDoubleTopic("robot_heading").publish();
+        pubSnapRobotVX = snapTable.getDoubleTopic("robot_vx").publish();
+        pubSnapRobotVY = snapTable.getDoubleTopic("robot_vy").publish();
+        pubSnapRobotOmega = snapTable.getDoubleTopic("robot_omega").publish();
+        pubSnapTurretAngle = snapTable.getDoubleTopic("turret_angle").publish();
+        pubSnapTopSpeed = snapTable.getDoubleTopic("top_speed").publish();
+        pubSnapBottomSpeed = snapTable.getDoubleTopic("bottom_speed").publish();
+        pubSnapDistance = snapTable.getDoubleTopic("distance").publish();
+        pubSnapBatteryVoltage = snapTable.getDoubleTopic("battery_voltage").publish();
+        pubSnapTargetMode = snapTable.getStringTopic("target_mode").publish();
+        pubSnapValid = snapTable.getBooleanTopic("valid").publish();
+        pubSnapValid.set(false);
         
         // Output table (Pi publishes, robot reads)
         NetworkTable outputTable = ntInst.getTable("Pi/Output");
@@ -181,6 +232,12 @@ public class PiShootingHelper {
                        double hubOffsetX, double hubOffsetY,
                        double trenchOffsetX, double trenchOffsetY) {
         
+        // Clear the record-shot pulse from the previous cycle
+        if (needsClearRecordFlag) {
+            pubRecordShot.set(false);
+            needsClearRecordFlag = false;
+        }
+        
         boolean enabled = (targetMode != TargetMode.DISABLED);
         boolean robotenabled = DriverStation.isEnabled();
         
@@ -190,6 +247,14 @@ public class PiShootingHelper {
         double sinH = Math.sin(headingRad);
         double fieldVX = chassisSpeeds.vxMetersPerSecond * cosH - chassisSpeeds.vyMetersPerSecond * sinH;
         double fieldVY = chassisSpeeds.vxMetersPerSecond * sinH + chassisSpeeds.vyMetersPerSecond * cosH;
+        
+        // Cache input values for snapshot at fire time
+        lastRobotX = robotPose.getX();
+        lastRobotY = robotPose.getY();
+        lastRobotHeading = robotPose.getRotation().getDegrees();
+        lastFieldVX = fieldVX;
+        lastFieldVY = fieldVY;
+        lastOmega = chassisSpeeds.omegaRadiansPerSecond;
         
         // Publish inputs to Pi
         pubRobotX.set(robotPose.getX());
@@ -224,7 +289,13 @@ public class PiShootingHelper {
             usingFallback = false;
             fallbackCycleCount = 0;
         } else if (enabled) {
-            // Pi is down - use fallback
+            // Pi is down OR specifically requested - use fallback
+            // IMPORTANT: Reset advanced tracking variables to prevent "ghost" moving shots
+            isMoving = false;
+            leadAngle = 0.0;
+            angleCorrection = 0.0;
+            confidence = 0.3; // Low confidence in fallback mode
+            
             calculateFallback(robotPose, targetMode);
             usingFallback = true;
             fallbackCycleCount++;
@@ -408,6 +479,182 @@ public class PiShootingHelper {
     
     /** Whether the Pi has a trained model loaded. */
     public boolean isPiModelLoaded() { return subModelLoaded.get(); }
+
+    // ========================================================================
+    // TRAINING DATA RECORDING (Two-Phase: Snapshot -> Confirm)
+    // ========================================================================
+    //
+    // Phase 1: snapshotShotData() -- called automatically when ball is fired.
+    //   Freezes all robot/shooter state at the exact moment of firing and
+    //   publishes it to Pi/Snapshot. This data won't change until the next shot.
+    //
+    // Phase 2: confirmShot(result) -- called by operator AFTER watching the shot.
+    //   Sends the result (HIT/MISS/LEFT/RIGHT/SHORT/LONG) to the Pi along with
+    //   the frozen snapshot. The Pi writes the snapshot + result to CSV.
+    //
+    // This ensures training data always reflects the state at the moment the ball
+    // left the shooter, not whenever the operator happened to press the button.
+    // ========================================================================
+    
+    /** Whether there is a pending snapshot waiting for operator confirmation */
+    private boolean hasPendingSnapshot = false;
+    
+    /** Timestamp when the snapshot was taken (for timeout/display) */
+    private double snapshotTimestamp = 0.0;
+    
+    /** Flag to auto-clear the record shot pulse after one cycle */
+    private boolean needsClearRecordFlag = false;
+    
+    /** How long a snapshot stays valid before expiring (seconds) */
+    private static final double SNAPSHOT_TIMEOUT_SECONDS = 15.0;
+    
+    /**
+     * Phase 1: Capture a snapshot of the current shooting state.
+     * Called automatically by AutoShootCommand when the turret feed fires.
+     * Freezes robot pose, shooter power, turret angle, etc. into Pi/Snapshot.
+     * 
+     * The snapshot stays valid until confirmed, discarded, or timed out.
+     */
+    public void snapshotShotData() {
+        // Publish the frozen state to Pi/Snapshot table using cached values
+        // from the most recent update() call (same 20ms cycle as the fire command)
+        pubSnapRobotX.set(lastRobotX);
+        pubSnapRobotY.set(lastRobotY);
+        pubSnapRobotHeading.set(lastRobotHeading);
+        pubSnapRobotVX.set(lastFieldVX);
+        pubSnapRobotVY.set(lastFieldVY);
+        pubSnapRobotOmega.set(lastOmega);
+        
+        // Use cached values (these are what the robot is actually commanding right now)
+        pubSnapTurretAngle.set(turretAngle);
+        pubSnapTopSpeed.set(topSpeed);
+        pubSnapBottomSpeed.set(bottomSpeed);
+        pubSnapDistance.set(distance);
+        pubSnapBatteryVoltage.set(RobotController.getBatteryVoltage());
+        pubSnapTargetMode.set(gameState.getTargetMode() == TargetMode.TRENCH ? "TRENCH" : "HUB");
+        pubSnapValid.set(true);
+        
+        hasPendingSnapshot = true;
+        snapshotTimestamp = Timer.getFPGATimestamp();
+        
+        // Also publish to dashboard so operator sees "Shot pending confirmation"
+        SmartDashboard.putBoolean("Training/PendingShot", true);
+        SmartDashboard.putNumber("Training/PendingDistance", distance);
+        SmartDashboard.putString("Training/PendingMode", 
+            gameState.getTargetMode() == TargetMode.TRENCH ? "TRENCH" : "HUB");
+        
+        System.out.println("[PiShootingHelper] Shot snapshot captured at d=" + 
+            String.format("%.2f", distance) + "m -- waiting for operator confirmation");
+    }
+    
+    /**
+     * Overload that captures the snapshot using explicit pose/speed values.
+     * Used when the caller has the exact pose at fire time.
+     */
+    public void snapshotShotData(Pose2d robotPose,
+                                  ChassisSpeeds chassisSpeeds) {
+        // Convert to field-relative velocities
+        double headingRad = robotPose.getRotation().getRadians();
+        double cosH = Math.cos(headingRad);
+        double sinH = Math.sin(headingRad);
+        double fieldVX = chassisSpeeds.vxMetersPerSecond * cosH - chassisSpeeds.vyMetersPerSecond * sinH;
+        double fieldVY = chassisSpeeds.vxMetersPerSecond * sinH + chassisSpeeds.vyMetersPerSecond * cosH;
+        
+        pubSnapRobotX.set(robotPose.getX());
+        pubSnapRobotY.set(robotPose.getY());
+        pubSnapRobotHeading.set(robotPose.getRotation().getDegrees());
+        pubSnapRobotVX.set(fieldVX);
+        pubSnapRobotVY.set(fieldVY);
+        pubSnapRobotOmega.set(chassisSpeeds.omegaRadiansPerSecond);
+        
+        pubSnapTurretAngle.set(turretAngle);
+        pubSnapTopSpeed.set(topSpeed);
+        pubSnapBottomSpeed.set(bottomSpeed);
+        pubSnapDistance.set(distance);
+        pubSnapBatteryVoltage.set(RobotController.getBatteryVoltage());
+        pubSnapTargetMode.set(gameState.getTargetMode() == TargetMode.TRENCH ? "TRENCH" : "HUB");
+        pubSnapValid.set(true);
+        
+        hasPendingSnapshot = true;
+        snapshotTimestamp = Timer.getFPGATimestamp();
+        
+        SmartDashboard.putBoolean("Training/PendingShot", true);
+        SmartDashboard.putNumber("Training/PendingDistance", distance);
+        SmartDashboard.putString("Training/PendingMode", 
+            gameState.getTargetMode() == TargetMode.TRENCH ? "TRENCH" : "HUB");
+        
+        System.out.println("[PiShootingHelper] Shot snapshot captured at d=" + 
+            String.format("%.2f", distance) + "m -- waiting for operator confirmation");
+    }
+    
+    /**
+     * Phase 2: Confirm the pending shot with a result.
+     * Called by operator after visually verifying the shot outcome.
+     * Sends the result to the Pi, which pairs it with the frozen snapshot.
+     * 
+     * @param result Result string: "HIT", "MISS", "LEFT", "RIGHT", "SHORT", "LONG"
+     * @return true if a pending snapshot was confirmed, false if nothing was pending
+     */
+    public boolean confirmShot(String result) {
+        if (!hasPendingSnapshot) {
+            System.out.println("[PiShootingHelper] No pending shot to confirm! Fire first, then confirm.");
+            return false;
+        }
+        
+        // Check for timeout
+        double age = Timer.getFPGATimestamp() - snapshotTimestamp;
+        if (age > SNAPSHOT_TIMEOUT_SECONDS) {
+            System.out.println("[PiShootingHelper] Pending shot expired (" + 
+                String.format("%.1f", age) + "s old). Discarding.");
+            discardPendingShot();
+            return false;
+        }
+        
+        // Send result + trigger recording on Pi
+        pubShotResult.set(result.toUpperCase());
+        pubRecordShot.set(true);
+        needsClearRecordFlag = true;
+        
+        hasPendingSnapshot = false;
+        SmartDashboard.putBoolean("Training/PendingShot", false);
+        
+        System.out.println("[PiShootingHelper] Confirmed " + result.toUpperCase() + 
+            " shot (" + String.format("%.1f", age) + "s after firing)");
+        return true;
+    }
+    
+    /**
+     * Discard the pending snapshot without recording.
+     * Use when operator decides not to log the shot (e.g., it was invalid).
+     */
+    public void discardPendingShot() {
+        hasPendingSnapshot = false;
+        pubSnapValid.set(false);
+        SmartDashboard.putBoolean("Training/PendingShot", false);
+        System.out.println("[PiShootingHelper] Pending shot discarded");
+    }
+    
+    /** Whether there is a pending shot waiting for operator confirmation. */
+    public boolean hasPendingShot() {
+        // Auto-expire old snapshots
+        if (hasPendingSnapshot && 
+            (Timer.getFPGATimestamp() - snapshotTimestamp) > SNAPSHOT_TIMEOUT_SECONDS) {
+            discardPendingShot();
+        }
+        return hasPendingSnapshot;
+    }
+    
+    /** Get seconds since the pending snapshot was taken. */
+    public double getPendingShotAge() {
+        return hasPendingSnapshot ? Timer.getFPGATimestamp() - snapshotTimestamp : 0.0;
+    }
+    
+    /**
+     * Clear the recording flag. Called automatically by update().
+     */
+    public void clearRecordFlag() {
+        pubRecordShot.set(false);
+    }
 
     // ========================================================================
     // TELEMETRY

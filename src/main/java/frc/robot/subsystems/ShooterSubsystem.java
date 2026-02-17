@@ -39,6 +39,7 @@ public class ShooterSubsystem extends SubsystemBase {
 
     // Cached reference to avoid repeated getInstance() calls
     private final GameStateManager gameState = GameStateManager.getInstance();
+    private final frc.robot.CalibrationManager calibrationManager = frc.robot.CalibrationManager.getInstance();
     
     // State
     private double targetTopPower = 0.0;
@@ -56,8 +57,8 @@ public class ShooterSubsystem extends SubsystemBase {
     private double topRpmBoost = 0.0;
     private double bottomRpmBoost = 0.0;
     
-    // Reusable array to avoid allocations in interpolatePowers
-    private final double[] interpolatedPowers = new double[2];
+    // Reusable array not safe for potential multi-threaded/command usage, switching to local
+    // private final double[] interpolatedPowers = new double[2];
 
     /**
      * Sets up the shooter motors in coast mode (flywheels spin freely).
@@ -262,30 +263,33 @@ public class ShooterSubsystem extends SubsystemBase {
     // INTERPOLATION
     
     /**
-     * Interpolates motor powers from calibration table. Reuses internal array to avoid allocations.
+     * Interpolates motor powers from calibration table. 
      */
     private double[] interpolatePowers(double distance, TreeMap<Double, double[]> calibration) {
+        // Create local array to avoid concurrency issues
+        double[] result = new double[2];
+
         // Get surrounding entries
         Map.Entry<Double, double[]> lower = calibration.floorEntry(distance);
         Map.Entry<Double, double[]> upper = calibration.ceilingEntry(distance);
         
         // Edge cases - use boundary values
         if (lower == null && upper == null) {
-            interpolatedPowers[0] = 0.5;
-            interpolatedPowers[1] = 0.5;
-            return interpolatedPowers;
+            result[0] = 0.5;
+            result[1] = 0.5;
+            return result;
         }
         if (lower == null) {
             double[] vals = upper.getValue();
-            interpolatedPowers[0] = vals[0];
-            interpolatedPowers[1] = vals[1];
-            return interpolatedPowers;
+            result[0] = vals[0];
+            result[1] = vals[1];
+            return result;
         }
         if (upper == null) {
             double[] vals = lower.getValue();
-            interpolatedPowers[0] = vals[0];
-            interpolatedPowers[1] = vals[1];
-            return interpolatedPowers;
+            result[0] = vals[0];
+            result[1] = vals[1];
+            return result;
         }
         
         // Linear interpolation
@@ -293,15 +297,15 @@ public class ShooterSubsystem extends SubsystemBase {
         double[] hi = upper.getValue();
         double range = upper.getKey() - lower.getKey();
         if (range == 0) {
-            // Same key — just use the value
-            interpolatedPowers[0] = lo[0];
-            interpolatedPowers[1] = lo[1];
-            return interpolatedPowers;
+            // Same key -- just use the value
+            result[0] = lo[0];
+            result[1] = lo[1];
+            return result;
         }
         double t = (distance - lower.getKey()) / range;
-        interpolatedPowers[0] = lo[0] + (hi[0] - lo[0]) * t;
-        interpolatedPowers[1] = lo[1] + (hi[1] - lo[1]) * t;
-        return interpolatedPowers;
+        result[0] = lo[0] + (hi[0] - lo[0]) * t;
+        result[1] = lo[1] + (hi[1] - lo[1]) * t;
+        return result;
     }
     
     private double clamp(double value, double min, double max) {
@@ -315,9 +319,9 @@ public class ShooterSubsystem extends SubsystemBase {
      * This compensates for energy loss when balls hit the flywheels during rapid fire.
      * 
      * How it works:
-     *   1. Expected RPM = targetPower × motor free speed
+     *   1. Expected RPM = targetPower x motor free speed
      *   2. Actual RPM = read from motor velocity sensor
-     *   3. If actual < threshold% of expected → boost proportionally to the deficit
+     *   3. If actual < threshold% of expected -> boost proportionally to the deficit
      *   4. Boost is clamped to RPM_RECOVERY_MAX_BOOST to prevent runaway
      * 
      * @param targetPower The desired power (0.0 to 1.0)
@@ -373,6 +377,12 @@ public class ShooterSubsystem extends SubsystemBase {
             double manualPower = gameState.getManualShooterRPM() / 6000.0;
             targetTopPower = clamp(manualPower * speedLimit, 0, 1.0);
             targetBottomPower = targetTopPower;
+        }
+        
+        // CalibrationManager manual override (for tuning shot power)
+        if (calibrationManager.useManualShooterPower()) {
+            targetTopPower = calibrationManager.getShooterTopPower();
+            targetBottomPower = calibrationManager.getShooterBottomPower();
         }
         
         // Calculate effective power

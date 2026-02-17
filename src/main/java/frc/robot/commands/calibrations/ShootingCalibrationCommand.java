@@ -2,20 +2,22 @@ package frc.robot.commands.calibrations;
 
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
+import frc.robot.CalibrationManager;
 import frc.robot.subsystems.LimelightSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
 
 /**
  * Interactive command for building the shooter power calibration table.
+ * All controls are on SmartDashboard -- no controller buttons needed.
  * 
  * HOW TO USE:
- * 1. Position robot at known distance from hub
- * 2. Run this command
- * 3. Adjust "Calibration/TopPower" and "Calibration/BottomPower" in SmartDashboard
- * 4. Shoot until you find good settings
- * 5. Toggle "RecordShot" to log the calibration point
- * 6. Move to new distance and repeat
- * 7. Copy logged values to Constants.Shooter.SHOOTING_CALIBRATION
+ * 1. Click "Cal/Shooting" on SmartDashboard to start
+ * 2. Adjust "Cal/Shooter/TopPower" and "Cal/Shooter/BottomPower" sliders
+ * 3. Shooter spins at the set power so you can shoot
+ * 4. Click "Cal/RecordShootingPoint" to log the calibration point
+ * 5. Move to new distance and repeat
+ * 6. Click "Cal/PrintShooterTable" to export ready-to-paste Java code
+ * 7. Click the command button again to stop
  */
 public class ShootingCalibrationCommand extends Command {
     
@@ -24,19 +26,9 @@ public class ShootingCalibrationCommand extends Command {
     private final ShooterSubsystem shooter;
     private final LimelightSubsystem limelight;
     
-    // State
+    // Calibration Manager
     
-    /** Current top motor power setting (0.0 - 1.0) */
-    private double topPower = 0.5;
-    
-    /** Current bottom motor power setting (0.0 - 1.0) */
-    private double bottomPower = 0.5;
-    
-    /** Flag indicating user wants to record current point */
-    private boolean shouldRecord = false;
-    
-    /** Count of calibration points recorded */
-    private int recordCount = 0;
+    private final CalibrationManager calibration;
     
     // Constructor
 
@@ -49,6 +41,7 @@ public class ShootingCalibrationCommand extends Command {
     public ShootingCalibrationCommand(ShooterSubsystem shooter, LimelightSubsystem limelight) {
         this.shooter = shooter;
         this.limelight = limelight;
+        this.calibration = CalibrationManager.getInstance();
         addRequirements(shooter);
     }
 
@@ -56,90 +49,49 @@ public class ShootingCalibrationCommand extends Command {
 
     @Override
     public void initialize() {
-        // ----- Set up SmartDashboard controls -----
-        SmartDashboard.putNumber("Calibration/TopPower", topPower);
-        SmartDashboard.putNumber("Calibration/BottomPower", bottomPower);
-        SmartDashboard.putBoolean("Calibration/RecordShot", false);
-        SmartDashboard.putString("Calibration/Status", "Ready - Adjust powers and shoot");
-        SmartDashboard.putNumber("Calibration/RecordCount", recordCount);
+        // Set calibration mode to manual
+        SmartDashboard.putBoolean("Cal/Shooter/UseManual", true);
         
-        // ----- Display instructions -----
-        SmartDashboard.putString("Calibration/Instructions", 
-            "1. Adjust TopPower (height) and BottomPower (distance). " +
-            "2. Check 'RecordShot' after a good shot to log values.");
+        // Display instructions
+        SmartDashboard.putString("Cal/Status", "SHOOTING CALIBRATION - Adjust powers and shoot!");
+        SmartDashboard.putString("Cal/Instructions", 
+            "1. Adjust Cal/Shooter/TopPower (height) and BottomPower (distance). " +
+            "2. Click Cal/RecordShootingPoint after a good shot. " +
+            "3. Click Cal/PrintShooterTable when done.");
         
-        System.out.println("=== SHOOTER CALIBRATION STARTED ===");
-        System.out.println("Adjust powers via SmartDashboard");
+        // Notify via Elastic
+        calibration.logInfo("Shooting Calibration Started", 
+            "Adjust shooter power sliders on SmartDashboard. Record good shots.");
     }
 
     @Override
     public void execute() {
-        // ----- Read power settings from dashboard -----
-        topPower = SmartDashboard.getNumber("Calibration/TopPower", topPower);
-        bottomPower = SmartDashboard.getNumber("Calibration/BottomPower", bottomPower);
-        
-        // ----- Apply power to shooter motors -----
+        // ----- Apply power from CalibrationManager (reads Cal/Shooter/ sliders) -----
+        double topPower = calibration.getShooterTopPower();
+        double bottomPower = calibration.getShooterBottomPower();
         shooter.setManualPower(topPower, bottomPower);
         
-        // ----- Check for record request -----
-        shouldRecord = SmartDashboard.getBoolean("Calibration/RecordShot", false);
-        
-        if (shouldRecord) {
-            recordCalibrationPoint();
-            SmartDashboard.putBoolean("Calibration/RecordShot", false);  // Reset toggle
+        // ----- Update CalibrationManager with sensor data -----
+        if (limelight.hasPoseEstimate()) {
+            calibration.setCurrentDistance(limelight.getDistanceToHub());
+        }
+        calibration.setHasTarget(limelight.hasTarget());
+        if (limelight.hasTarget()) {
+            calibration.setCurrentTagId(limelight.getTargetId());
         }
         
         // ----- Update status display -----
         double distance = limelight.hasPoseEstimate() ? limelight.getDistanceToHub() : -1;
-        SmartDashboard.putNumber("Calibration/CurrentDistance", distance);
-        SmartDashboard.putBoolean("Calibration/ShooterReady", shooter.isReady());
+        SmartDashboard.putBoolean("Cal/Shooter/ShooterReady", shooter.isReady());
         
         if (distance < 0) {
-            SmartDashboard.putString("Calibration/Status", "WARNING: No pose - distance unknown");
+            SmartDashboard.putString("Cal/Status", "WARNING: No pose - distance unknown");
         } else {
-            SmartDashboard.putString("Calibration/Status", 
-                String.format("Distance: %.2fm | Top: %.2f | Bottom: %.2f", distance, topPower, bottomPower));
+            SmartDashboard.putString("Cal/Status", 
+                String.format("Distance: %.2fm | Top: %.2f | Bottom: %.2f | %s", 
+                    distance, topPower, bottomPower,
+                    shooter.isReady() ? "READY" : "Spinning..."));
         }
-    }
-    
-    // CALIBRATION RECORDING
-    
-    /**
-     * Records the current distance and motor powers as a calibration point.
-     * Outputs ready-to-paste Java code to the console and SmartDashboard.
-     */
-    private void recordCalibrationPoint() {
-        // Validate that we have distance data
-        double distance = limelight.hasPoseEstimate() ? limelight.getDistanceToHub() : -1;
-        
-        if (distance < 0) {
-            SmartDashboard.putString("Calibration/LastRecord", "FAILED - No pose estimate!");
-            System.out.println("!!! RECORD FAILED - No pose estimate available !!!");
-            return;
-        }
-        
-        recordCount++;
-        
-        // Format as ready-to-paste Java code
-        String record = String.format("put(%.1f, new double[]{%.2f, %.2f});  // Record #%d", 
-                                      distance, topPower, bottomPower, recordCount);
-        
-        // Update dashboard
-        SmartDashboard.putString("Calibration/LastRecord", record);
-        SmartDashboard.putNumber("Calibration/RecordCount", recordCount);
-        SmartDashboard.putString("Calibration/Record" + recordCount, record);
-        
-        // Log to console for easy copy/paste
-        System.out.println("+===============================================+");
-        System.out.println("|       CALIBRATION POINT RECORDED (#" + recordCount + ")        |");
-        System.out.println("+===============================================+");
-        System.out.println("|  Distance:    " + String.format("%-10.2f", distance) + " meters          |");
-        System.out.println("|  Top Power:   " + String.format("%-10.2f", topPower) + "                 |");
-        System.out.println("|  Bottom Power:" + String.format("%-10.2f", bottomPower) + "                 |");
-        System.out.println("+===============================================+");
-        System.out.println("|  Add to Constants.java:                       |");
-        System.out.println("|  " + record);
-        System.out.println("+===============================================+");
     }
 
     // CLEANUP
@@ -147,15 +99,23 @@ public class ShootingCalibrationCommand extends Command {
     @Override
     public void end(boolean interrupted) {
         shooter.stop();
-        SmartDashboard.putString("Calibration/Status", "Calibration ended - " + recordCount + " points recorded");
+        SmartDashboard.putBoolean("Cal/Shooter/UseManual", false);
         
-        System.out.println("=== SHOOTER CALIBRATION ENDED ===");
-        System.out.println("Total points recorded: " + recordCount);
+        int points = calibration.getRecordCount();
+        SmartDashboard.putString("Cal/Status", "Shooting calibration ended - " + points + " points recorded");
+        
+        if (points > 0) {
+            calibration.logSuccess("Shooting Calibration Complete", 
+                "Recorded " + points + " points. Click Cal/PrintShooterTable to export.");
+        } else {
+            calibration.logWarning("Shooting Calibration Ended", 
+                "No points recorded. Run again and record some shots!");
+        }
     }
 
     @Override
     public boolean isFinished() {
-        // Runs until manually canceled
+        // Runs until manually canceled via dashboard button
         return false;
     }
 }

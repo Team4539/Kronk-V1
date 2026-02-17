@@ -2,15 +2,24 @@ package frc.robot.commands.calibrations;
 
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
+import frc.robot.CalibrationManager;
 import frc.robot.subsystems.TurretSubsystem;
 
 /**
  * Determines the correct turret gear ratio by measuring motor rotations per full turret rotation.
- * Run command, manually rotate turret exactly 360 degrees, then check SmartDashboard for calculated ratio.
+ * All controls are on SmartDashboard -- no controller buttons needed.
+ * 
+ * HOW TO USE:
+ * 1. Click "Cal/TurretGearRatio" on SmartDashboard to start
+ * 2. Manually rotate turret exactly 360 degrees by hand
+ * 3. Watch "Cal/GearRatio/PreviewGearRatio" update live
+ * 4. Click the command button again to stop and get the final ratio
+ * 5. Copy CalculatedGearRatio to Constants.Turret.GEAR_RATIO
  */
 public class CalibrateTurretGearRatioCommand extends Command {
     
     private final TurretSubsystem turret;
+    private final CalibrationManager calibration;
     
     // STATE
     
@@ -29,6 +38,7 @@ public class CalibrateTurretGearRatioCommand extends Command {
      */
     public CalibrateTurretGearRatioCommand(TurretSubsystem turret) {
         this.turret = turret;
+        this.calibration = CalibrationManager.getInstance();
         // NOTE: We intentionally don't add requirements
         // This allows the motor to be moved freely by hand during calibration
     }
@@ -42,16 +52,19 @@ public class CalibrateTurretGearRatioCommand extends Command {
         calibrationStarted = true;
         
         // Set up dashboard display
-        SmartDashboard.putNumber("Calibration/StartMotorRotations", startMotorRotations);
-        SmartDashboard.putString("Calibration/Status", "CALIBRATING - Rotate turret 360 degrees by hand, then end command");
-        SmartDashboard.putNumber("Calibration/CalculatedGearRatio", 0.0);
-        SmartDashboard.putNumber("Calibration/MotorRotationsFor360", 0.0);
+        SmartDashboard.putNumber("Cal/GearRatio/StartMotorRotations", startMotorRotations);
+        SmartDashboard.putNumber("Cal/GearRatio/CalculatedGearRatio", 0.0);
+        SmartDashboard.putNumber("Cal/GearRatio/MotorRotationsFor360", 0.0);
         
-        // Print instructions to console
-        System.out.println("=== TURRET GEAR RATIO CALIBRATION STARTED ===");
-        System.out.println("Start motor position: " + startMotorRotations + " rotations");
-        System.out.println("Now rotate the turret EXACTLY 360 degrees by hand.");
-        System.out.println("Then press the button again or cancel the command.");
+        SmartDashboard.putString("Cal/Status", "GEAR RATIO CAL - Rotate turret 360 degrees by hand, then stop command");
+        SmartDashboard.putString("Cal/Instructions",
+            "1. Rotate turret EXACTLY 360 degrees by hand. " +
+            "2. Watch Cal/GearRatio/PreviewGearRatio update live. " +
+            "3. Click the command button again to finalize.");
+        
+        // Notify via Elastic
+        calibration.logInfo("Gear Ratio Calibration Started", 
+            "Rotate turret 360 degrees by hand. Start: " + startMotorRotations + " rotations");
     }
     
     @Override
@@ -60,13 +73,17 @@ public class CalibrateTurretGearRatioCommand extends Command {
         double currentMotorRotations = turret.getMotorRotations();
         double motorRotationsDelta = Math.abs(currentMotorRotations - startMotorRotations);
         
-        SmartDashboard.putNumber("Calibration/CurrentMotorRotations", currentMotorRotations);
-        SmartDashboard.putNumber("Calibration/MotorRotationsSoFar", motorRotationsDelta);
+        SmartDashboard.putNumber("Cal/GearRatio/CurrentMotorRotations", currentMotorRotations);
+        SmartDashboard.putNumber("Cal/GearRatio/MotorRotationsSoFar", motorRotationsDelta);
         
         // Show live preview of gear ratio (assuming current position is 360 degrees)
         if (motorRotationsDelta > 0.1) {
             double previewGearRatio = motorRotationsDelta;  // motor rotations per 1 turret rotation
-            SmartDashboard.putNumber("Calibration/PreviewGearRatio", previewGearRatio);
+            SmartDashboard.putNumber("Cal/GearRatio/PreviewGearRatio", previewGearRatio);
+            
+            SmartDashboard.putString("Cal/Status", 
+                String.format("GEAR RATIO CAL - Motor delta: %.2f rot | Preview ratio: %.2f", 
+                    motorRotationsDelta, previewGearRatio));
         }
     }
     
@@ -85,26 +102,28 @@ public class CalibrateTurretGearRatioCommand extends Command {
         double calculatedGearRatio = motorRotationsFor360;
         
         // Update dashboard
-        SmartDashboard.putNumber("Calibration/EndMotorRotations", endMotorRotations);
-        SmartDashboard.putNumber("Calibration/MotorRotationsFor360", motorRotationsFor360);
-        SmartDashboard.putNumber("Calibration/CalculatedGearRatio", calculatedGearRatio);
-        SmartDashboard.putString("Calibration/Status", "DONE - Copy CalculatedGearRatio to Constants.java");
+        SmartDashboard.putNumber("Cal/GearRatio/EndMotorRotations", endMotorRotations);
+        SmartDashboard.putNumber("Cal/GearRatio/MotorRotationsFor360", motorRotationsFor360);
+        SmartDashboard.putNumber("Cal/GearRatio/CalculatedGearRatio", calculatedGearRatio);
+        SmartDashboard.putString("Cal/Status", "DONE - Copy Cal/GearRatio/CalculatedGearRatio to Constants.java");
         
         // Print results to console
         System.out.println("=== TURRET GEAR RATIO CALIBRATION COMPLETE ===");
-        System.out.println("End motor position: " + endMotorRotations + " rotations");
         System.out.println("Motor rotations for 360 degrees: " + motorRotationsFor360);
-        System.out.println("");
         System.out.println(">>> CALCULATED GEAR RATIO: " + calculatedGearRatio + " <<<");
-        System.out.println("");
         System.out.println("Copy this value to Constants.Turret.GEAR_RATIO");
+        
+        // Notify via Elastic
+        calibration.logSuccess("Gear Ratio Calculated", 
+            String.format("Gear Ratio: %.2f (%.2f motor rotations for 360 deg)", 
+                calculatedGearRatio, motorRotationsFor360));
         
         calibrationStarted = false;
     }
     
     @Override
     public boolean isFinished() {
-        // Runs until manually canceled
+        // Runs until manually canceled via dashboard button
         return false;
     }
 }

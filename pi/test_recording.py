@@ -25,11 +25,11 @@ def main():
     time.sleep(2)
     
     if not inst.isConnected():
-        print("❌ Failed to connect to NetworkTables!")
+        print("[FAIL] Failed to connect to NetworkTables!")
         print(f"   Make sure robot/Pi is running on team {TEAM_NUMBER}")
         return
     
-    print("✅ Connected to NetworkTables")
+    print("[OK] Connected to NetworkTables")
     print()
     
     # Get tables
@@ -51,10 +51,10 @@ def main():
     print()
     
     if not connected:
-        print("❌ Pi not connected! Start pi_shooting.py first.")
+        print("[FAIL] Pi not connected! Start pi_shooting.py first.")
         return
     
-    print("✅ Pi is running")
+    print("[OK] Pi is running")
     print()
     
     # Test shot recording
@@ -83,7 +83,7 @@ def main():
     time.sleep(0.1)
     input_table.getEntry("record_shot").setBoolean(False)
     
-    print("✅ Shot recording triggered")
+    print("[OK] Shot recording triggered")
     print()
     
     # Wait and check if training points increased
@@ -93,9 +93,9 @@ def main():
     new_training_points = training_table.getEntry("training_points").getInteger(0)
     
     if new_training_points > training_points:
-        print(f"✅ Success! Training points increased: {training_points} → {new_training_points}")
+        print(f"[OK] Success! Training points increased: {training_points} -> {new_training_points}")
     else:
-        print(f"⚠️  Training points unchanged: {training_points}")
+        print(f"[WARN]  Training points unchanged: {training_points}")
         print("   This might be normal if Pi hasn't retrained yet (retrains every 10s)")
     
     print()

@@ -49,7 +49,7 @@ public class CalibrationManager {
     private double shooterBottomOffset = 0.0;
     
     /** Whether to use manual power override vs interpolated */
-    private boolean useManualShooterPower = true;
+    private boolean useManualShooterPower = false;
     
     // Turret calibration values
     
@@ -60,7 +60,7 @@ public class CalibrationManager {
     private double turretAngleOffset = 0.0;
     
     /** Whether to use manual angle override vs auto-aim */
-    private boolean useManualTurretAngle = true;
+    private boolean useManualTurretAngle = false;
     
     /** Turret PID P gain */
     private double turretP = Constants.Turret.PID_P;
@@ -158,6 +158,15 @@ public class CalibrationManager {
         SmartDashboard.putBoolean("Cal/PrintShooterTable", false);
         SmartDashboard.putBoolean("Cal/PrintTurretOffsets", false);
         SmartDashboard.putBoolean("Cal/PrintAllConstants", false);
+        
+        // ----- Data Management -----
+        SmartDashboard.putBoolean("Cal/ClearAllData", false);
+        
+        // ----- Game State Controls -----
+        SmartDashboard.putBoolean("Cal/ToggleShuttleMode", false);
+        SmartDashboard.putBoolean("Cal/ToggleForceShoot", false);
+        SmartDashboard.putBoolean("Cal/ClearShuttleOverride", false);
+        SmartDashboard.putBoolean("Cal/ResetGameState", false);
     }
     
     // PERIODIC UPDATE
@@ -216,6 +225,46 @@ public class CalibrationManager {
         if (SmartDashboard.getBoolean("Cal/PrintAllConstants", false)) {
             printAllConstants();
             SmartDashboard.putBoolean("Cal/PrintAllConstants", false);
+        }
+        
+        // ----- Check for Data Management Requests -----
+        if (SmartDashboard.getBoolean("Cal/ClearAllData", false)) {
+            clearRecordedData();
+            SmartDashboard.putBoolean("Cal/ClearAllData", false);
+        }
+        
+        // ----- Check for Game State Requests -----
+        GameStateManager gameState = GameStateManager.getInstance();
+        
+        if (SmartDashboard.getBoolean("Cal/ToggleShuttleMode", false)) {
+            boolean newMode = !gameState.isShuttleMode();
+            gameState.setShuttleMode(newMode);
+            logInfo(newMode ? "Shuttle Mode ON" : "Hub Mode ON",
+                newMode ? "Aiming at trench" : "Aiming at hub");
+            SmartDashboard.putBoolean("Cal/ToggleShuttleMode", false);
+        }
+        
+        if (SmartDashboard.getBoolean("Cal/ToggleForceShoot", false)) {
+            boolean newForce = !gameState.isForceShootEnabled();
+            gameState.setForceShootEnabled(newForce);
+            if (newForce) {
+                logWarning("Force Shoot ON", "Ignoring alliance timing!");
+            } else {
+                logInfo("Force Shoot OFF", "Normal timing restored");
+            }
+            SmartDashboard.putBoolean("Cal/ToggleForceShoot", false);
+        }
+        
+        if (SmartDashboard.getBoolean("Cal/ClearShuttleOverride", false)) {
+            gameState.clearShuttleModeOverride();
+            logInfo("Auto-Shuttle Enabled", "Auto-switching based on position");
+            SmartDashboard.putBoolean("Cal/ClearShuttleOverride", false);
+        }
+        
+        if (SmartDashboard.getBoolean("Cal/ResetGameState", false)) {
+            gameState.reset();
+            logInfo("Game State Reset", "All modes cleared");
+            SmartDashboard.putBoolean("Cal/ResetGameState", false);
         }
         
         // ----- Log to AdvantageScope -----

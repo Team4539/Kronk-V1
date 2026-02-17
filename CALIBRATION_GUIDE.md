@@ -1,4 +1,4 @@
-# Kronk Calibration Guide — Team 4539
+# Kronk Calibration Guide -- Team 4539
 
 Complete step-by-step guide for calibrating Kronk's subsystems on real hardware.
 
@@ -37,7 +37,7 @@ Before calibrating anything:
 
 ### Enabling/Disabling Subsystems for Testing
 
-In `Constants.java` → `SubsystemEnabled`, toggle subsystems:
+In `Constants.java` -> `SubsystemEnabled`, toggle subsystems:
 
 ```java
 public static final boolean DRIVETRAIN = true;   // Swerve drive
@@ -71,7 +71,7 @@ The swerve modules are **generated code** from Phoenix Tuner X. Do NOT edit `gen
 
 1. Place robot on a flat, level surface
 2. In Phoenix Tuner X, zero the Pigeon2 yaw
-3. Verify heading reads 0° when facing forward on the field
+3. Verify heading reads 0 deg when facing forward on the field
 
 ### Drive Testing
 
@@ -97,14 +97,14 @@ The swerve modules are **generated code** from Phoenix Tuner X. Do NOT edit `gen
 **Procedure**:
 1. **Mark the turret's current position** with tape on both the turret and the frame
 2. Run the `CalibrateTurretGearRatio` command from SmartDashboard
-3. **Manually rotate the turret exactly 360°** by hand (back to the tape mark)
+3. **Manually rotate the turret exactly 360 deg** by hand (back to the tape mark)
 4. Cancel the command
 5. Read `Calibration/CalculatedGearRatio` from SmartDashboard
 6. Update `Constants.Turret.GEAR_RATIO` with this value
 
 **Current value**: `10.00537109375`
 
-> **Important**: The turret has a 270° range centered at 0° (-135° to +135°). Do NOT rotate past the hardstops during this calibration.
+> **Important**: The turret has a 270 deg range centered at 0 deg (-135 deg to +135 deg). Do NOT rotate past the hardstops during this calibration.
 
 ---
 
@@ -119,13 +119,13 @@ The swerve modules are **generated code** from Phoenix Tuner X. Do NOT edit `gen
 **Procedure**:
 1. Run the `TurretPIDCalibration` command
 2. On SmartDashboard, adjust:
-   - `Cal/Turret/PID_P` — Proportional gain (start at `0.2`)
-   - `Cal/Turret/PID_I` — Integral gain (start at `0.0`)
-   - `Cal/Turret/PID_D` — Derivative gain (start at `0.01`)
-   - `Cal/Turret/TargetAngle` — Command angle to test response
+   - `Cal/Turret/PID_P` -- Proportional gain (start at `0.2`)
+   - `Cal/Turret/PID_I` -- Integral gain (start at `0.0`)
+   - `Cal/Turret/PID_D` -- Derivative gain (start at `0.01`)
+   - `Cal/Turret/TargetAngle` -- Command angle to test response
 3. **Tuning goals**:
-   - Turret reaches target angle quickly (< 0.5s for 90°)
-   - Minimal overshoot (< 2°)
+   - Turret reaches target angle quickly (< 0.5s for 90 deg)
+   - Minimal overshoot (< 2 deg)
    - No oscillation at rest
    - Smooth movement, no jerking
 4. Update `Constants.Turret.PID_P/I/D` with final values
@@ -134,11 +134,11 @@ The swerve modules are **generated code** from Phoenix Tuner X. Do NOT edit `gen
 
 ### Turret Angle Range
 
-The turret operates from **-135° to +135°** (270° total range):
-- `0°` = turret facing forward (centered)
-- `+90°` = turret rotated 90° counterclockwise (from top view)
-- `-90°` = turret rotated 90° clockwise
-- Warning at ±125° (10° from limits)
+The turret operates from **-135 deg to +135 deg** (270 deg total range):
+- `0 deg` = turret facing forward (centered)
+- `+90 deg` = turret rotated 90 deg counterclockwise (from top view)
+- `-90 deg` = turret rotated 90 deg clockwise
+- Warning at +/-125 deg (10 deg from limits)
 
 ---
 
@@ -180,10 +180,10 @@ The turret operates from **-135° to +135°** (270° total range):
 
 ### Pivot Angles
 1. Check `Constants.Intake` values:
-   - `IDLE_ANGLE_DEG` — Retracted/stowed position (currently `0.0`)
-   - `DEPLOYED_ANGLE_DEG` — Fully deployed position (currently `90.0`)
-   - `MIN_PIVOT_ANGLE_DEG` — Minimum safe angle (currently `-5.0`)
-   - `MAX_PIVOT_ANGLE_DEG` — Maximum safe angle (currently `105.0`)
+   - `IDLE_ANGLE_DEG` -- Retracted/stowed position (currently `0.0`)
+   - `DEPLOYED_ANGLE_DEG` -- Fully deployed position (currently `90.0`)
+   - `MIN_PIVOT_ANGLE_DEG` -- Minimum safe angle (currently `-5.0`)
+   - `MAX_PIVOT_ANGLE_DEG` -- Maximum safe angle (currently `105.0`)
 2. Deploy and retract the intake using commands
 3. Verify the intake reaches proper positions without binding
 4. If the intake doesn't reach far enough or goes too far, adjust the angle constants
@@ -194,7 +194,7 @@ The turret operates from **-135° to +135°** (270° total range):
    - Smooth deploy/retract motion
    - No overshoot past physical limits
    - Holds position when retracted
-3. `PIVOT_MAX_OUTPUT` (currently `0.2`) limits maximum motor power — increase if too slow, decrease if too aggressive
+3. `PIVOT_MAX_OUTPUT` (currently `0.2`) limits maximum motor power -- increase if too slow, decrease if too aggressive
 
 ---
 
@@ -279,9 +279,9 @@ Current values in `Constants.Limelight`:
 **Procedure**:
 1. Run the `DistanceOffsetCalibration` command
 2. Shoot at multiple distances and observe patterns:
-   - **Shots consistently short** → Increase `Constants.Shooter.BOTTOM_MOTOR_POWER_OFFSET`
-   - **Shots consistently high** → Decrease `Constants.Shooter.TOP_MOTOR_POWER_OFFSET`
-   - **Shots consistently long** → Decrease bottom motor offset
+   - **Shots consistently short** -> Increase `Constants.Shooter.BOTTOM_MOTOR_POWER_OFFSET`
+   - **Shots consistently high** -> Decrease `Constants.Shooter.TOP_MOTOR_POWER_OFFSET`
+   - **Shots consistently long** -> Decrease bottom motor offset
 3. Adjust via SmartDashboard: `Cal/Shooter/TopPowerOffset` and `Cal/Shooter/BottomPowerOffset`
 4. Copy final values to `Constants.Shooter.TOP_MOTOR_POWER_OFFSET` and `BOTTOM_MOTOR_POWER_OFFSET`
 
@@ -299,7 +299,7 @@ Current values in `Constants.Limelight`:
 5. Fire and observe results
 6. Use `Cal/Turret/AngleOffset` to fine-tune aim for specific tags
 7. Toggle `Cal/RecordOffset` to save per-tag offsets
-8. The generated Java code appears in `Cal/GeneratedCode` — copy to Constants
+8. The generated Java code appears in `Cal/GeneratedCode` -- copy to Constants
 
 ---
 
@@ -372,15 +372,15 @@ See `pi/TROUBLESHOOTING.md` for detailed Pi debugging steps.
 
 ### Creating Auto Routines
 1. Draw paths in the PathPlanner GUI
-2. All paths are drawn for **Blue alliance origin** — Red flipping is automatic
+2. All paths are drawn for **Blue alliance origin** -- Red flipping is automatic
 3. Use named commands in auto sequences:
-   - `autoShoot` — Full shoot sequence (3s timeout)
-   - `quickShoot` — Fast shoot (1.5s timeout)
-   - `aimAtPose` — Pre-aim turret (2s timeout)
-   - `spinUpShooter` — Pre-spool shooter
-   - `stopShooter` — Stop shooter motors
-   - `centerTurret` — Return turret to 0°
-   - `enableShuttleMode` / `disableShuttleMode` — Toggle trench mode
+   - `autoShoot` -- Full shoot sequence (3s timeout)
+   - `quickShoot` -- Fast shoot (1.5s timeout)
+   - `aimAtPose` -- Pre-aim turret (2s timeout)
+   - `spinUpShooter` -- Pre-spool shooter
+   - `stopShooter` -- Stop shooter motors
+   - `centerTurret` -- Return turret to 0 deg
+   - `enableShuttleMode` / `disableShuttleMode` -- Toggle trench mode
 
 ### Testing
 1. Use PathPlanner's built-in simulation
@@ -397,7 +397,7 @@ Before each match:
 ### Pre-Match (in pit)
 - [ ] Battery is **>12.5V**
 - [ ] All CAN devices show green LEDs
-- [ ] Turret moves freely through full range (-135° to +135°)
+- [ ] Turret moves freely through full range (-135 deg to +135 deg)
 - [ ] Intake deploys and retracts smoothly
 - [ ] Shooter wheels spin freely (no binding)
 - [ ] Limelight powered and showing camera feed
@@ -427,17 +427,17 @@ Before each match:
 | `MIN_ANGLE_DEG` | `Turret` | `-135.0` | Turret min angle |
 | `MAX_ANGLE_DEG` | `Turret` | `+135.0` | Turret max angle |
 | `ON_TARGET_TOLERANCE_DEG` | `Turret` | `2.0` | Aim accuracy threshold |
-| `SHOOTING_CALIBRATION` | `Shooter` | TreeMap | Distance → [top, bottom] |
-| `TRENCH_CALIBRATION` | `Shooter` | TreeMap | Distance → [top, bottom] |
+| `SHOOTING_CALIBRATION` | `Shooter` | TreeMap | Distance -> [top, bottom] |
+| `TRENCH_CALIBRATION` | `Shooter` | TreeMap | Distance -> [top, bottom] |
 | `TOP_MOTOR_POWER_OFFSET` | `Shooter` | `0.0` | Global top power adjustment |
 | `BOTTOM_MOTOR_POWER_OFFSET` | `Shooter` | `0.0` | Global bottom power adjustment |
-| `SPIN_UP_TIME_SECONDS` | `Shooter` | — | Time to reach full speed |
+| `SPIN_UP_TIME_SECONDS` | `Shooter` | -- | Time to reach full speed |
 | `IDLE_ANGLE_DEG` | `Intake` | `0.0` | Intake retracted angle |
 | `DEPLOYED_ANGLE_DEG` | `Intake` | `90.0` | Intake deployed angle |
-| `RIGHT_CANCODER_OFFSET_DEG` | `Intake` | — | CANcoder zero offset |
+| `RIGHT_CANCODER_OFFSET_DEG` | `Intake` | -- | CANcoder zero offset |
 | `PIVOT_PID_P` | `Intake` | `0.008` | Intake pivot PID |
-| `VISION_STD_DEV_X/Y/THETA` | `Limelight` | — | Vision trust levels |
+| `VISION_STD_DEV_X/Y/THETA` | `Limelight` | -- | Vision trust levels |
 
 ---
 
-*Last updated: February 2026 — Team 4539 Kronk*
+*Last updated: February 2026 -- Team 4539 Kronk*

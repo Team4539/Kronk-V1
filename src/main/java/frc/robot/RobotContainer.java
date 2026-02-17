@@ -51,7 +51,6 @@ public class RobotContainer {
   private final ShooterSubsystem shooter;
   private final TurretFeedSubsystem turretFeed;
   private final PiShootingHelper piShootingHelper;
-  @SuppressWarnings("unused")
   private final IntakeSubsystem intake;
   private final LEDSubsystem leds;
   private final CalibrationManager calibrationManager;
@@ -82,7 +81,6 @@ public class RobotContainer {
   private final AutoShootCommand autoShootCommand;
 
   // State
-  private boolean isSlowMode = false;
   private boolean useRobotCentric = false;
   private final SendableChooser<Command> autoChooser;
   
@@ -192,59 +190,115 @@ public class RobotContainer {
   // Control Bindings
   
   private void configureBindings() {
+    // +==================================================================+
+    // |                      DRIVER CONTROLLER                           |
+    // |  Left Stick  = Drive X/Y      Right Stick X = Rotation           |
+    // |  RT (hold)   = Slow mode      LT (hold)     = X-lock brake       |
+    // |  RB (hold)   = Intake         LB            = Field/Robot tog    |
+    // |  A  (hold)   = Auto-shoot     Y             = Reset gyro         |
+    // |  B           = Force shoot    X             = (spare)            |
+    // |  Start       = Reset gyro     Back          = (spare)            |
+    // |  POV Up      = Point wheels   POV Down      = Seed field centr   |
+    // +==================================================================+
+    // |                     OPERATOR CONTROLLER                          |
+    // |  RT (hold)   = Auto-shoot     LT (hold)     = Pre-spool          | 
+    // |  RB          = Shuttle toggle LB            = Force shoot tog    |
+    // |  A  (hold)   = Intake         B  (hold)     = Aim turret only    |
+    // |  X           = E-stop motors  Y             = Center turret      |
+    // |  Start       = Reset game     Back          = Clear shuttle ovr  |
+    // |  POV Up      = HIT (train)    POV Right     = MISS (train)       |
+    // |  POV Left    = Discard (train)POV Down      = (spare)            |
+    // +==================================================================+
+    
     // === DRIVER CONTROLS ===
+    // Philosophy: Driver drives. Most-used actions on triggers (ergonomic holds).
+    // Slow mode is HOLD (not toggle) -- more intuitive and safer mid-match.
     
-    // Right Bumper: Toggle slow mode
-    driverController.rightBumper().onTrue(Commands.runOnce(() -> isSlowMode = !isSlowMode));
+    // RT (hold): Slow mode -- hold for precision, release for full speed
+    // (Handled in default command via trigger axis -- no binding needed here)
     
-    // Left Bumper: Toggle field/robot centric
-    driverController.leftBumper().onTrue(Commands.runOnce(() -> useRobotCentric = !useRobotCentric));
-    
+    // LT (hold): X-lock brake -- instant defensive stop
     if (drivetrain != null) {
-      // Start: Reset gyro heading
+      driverController.leftTrigger(0.5).whileTrue(drivetrain.applyRequest(() -> brakeRequest));
+    }
+    
+    // RB (hold): Intake -- driver deploys intake since they see the game pieces
+    if (intake != null) {
+      driverController.rightBumper().onTrue(new DeployIntakeCommand(intake));
+      driverController.rightBumper().onFalse(new RetractIntakeCommand(intake));
+    }
+    
+    // LB: Toggle field-centric / robot-centric (rarely used, bumper is fine)
+    driverController.leftBumper().onTrue(Commands.runOnce(() -> {
+      useRobotCentric = !useRobotCentric;
+      Elastic.sendNotification(new Elastic.Notification()
+          .withLevel(NotificationLevel.INFO)
+          .withTitle(useRobotCentric ? "Robot Centric" : "Field Centric")
+          .withDescription(useRobotCentric ? "Driving relative to robot front" : "Driving relative to field")
+          .withDisplaySeconds(1.5));
+    }));
+    
+    // A (hold): Auto-shoot -- driver can trigger shooting for fast gameplay
+    if (autoShootCommand != null) {
+      // Need a separate command instance since driver + operator can't share
+      AutoShootCommand driverAutoShoot = (turret != null && shooter != null && limelight != null)
+          ? new AutoShootCommand(turret, shooter, limelight, leds, turretFeed, drivetrain)
+          : null;
+      if (driverAutoShoot != null) {
+        driverController.a().whileTrue(driverAutoShoot);
+      }
+    }
+    
+    // B: Toggle force shoot -- driver emergency override for scoring outside alliance window
+    driverController.b().onTrue(Commands.runOnce(() -> {
+      boolean newForce = !gameState.isForceShootEnabled();
+      gameState.setForceShootEnabled(newForce);
+      Elastic.sendNotification(new Elastic.Notification()
+          .withLevel(newForce ? NotificationLevel.WARNING : NotificationLevel.INFO)
+          .withTitle(newForce ? "! Force Shoot ON" : "Force Shoot OFF")
+          .withDescription(newForce ? "Ignoring alliance timing!" : "Normal timing restored")
+          .withDisplaySeconds(2.0));
+    }));
+    
+    // Y: Reset gyro heading
+    if (drivetrain != null) {
+      driverController.y().onTrue(Commands.runOnce(() -> {
+        drivetrain.seedFieldCentric();
+        Elastic.sendNotification(new Elastic.Notification()
+            .withLevel(NotificationLevel.INFO)
+            .withTitle("Gyro Reset")
+            .withDescription("Field-centric heading zeroed")
+            .withDisplaySeconds(1.5));
+      }));
+    }
+    
+    // Start: Reset gyro (backup binding for muscle memory)
+    if (drivetrain != null) {
       driverController.start().onTrue(Commands.runOnce(() -> drivetrain.seedFieldCentric()));
-      
-      // Back: X-lock wheels
-      driverController.back().whileTrue(drivetrain.applyRequest(() -> brakeRequest));
-      
-      // D-Pad Up: Point wheels forward
+    }
+    
+    // POV Up: Point wheels forward (useful for alignment)
+    if (drivetrain != null) {
       driverController.povUp().whileTrue(
           drivetrain.applyRequest(() -> pointRequest.withModuleDirection(Rotation2d.kZero)));
     }
     
     // === OPERATOR CONTROLS ===
+    // Philosophy: Operator manages weapons. Primary action (shooting) on RT.
+    // Face buttons handle intake/aim/safety. D-pad reserved for training.
     
-    // A: Auto-shoot
-    if (autoShootCommand != null) {
-      operatorController.a().whileTrue(autoShootCommand);
+    // RT (hold): Auto-shoot -- the #1 operator action, on the most ergonomic hold button
+    if (turret != null && shooter != null && limelight != null) {
+      operatorController.rightTrigger(0.5).whileTrue(autoShootCommand);
     }
     
-    // B: Pose-based aiming only
-    if (aimToPoseButtonCommand != null) {
-      operatorController.b().whileTrue(aimToPoseButtonCommand);
-    }
-    
-    // X: Intake deploy/stow
-    if (intake != null) {
-      operatorController.x().onTrue(new DeployIntakeCommand(intake));
-      operatorController.x().onFalse(new RetractIntakeCommand(intake));
-    }
-
-    
-    
-    // Y: Shooting calibration
+    // LT (hold): Pre-spool shooter -- spin up flywheels before our alliance window opens
     if (shooter != null && limelight != null) {
-      operatorController.y().whileTrue(new ShootingCalibrationCommand(shooter, limelight));
-    }
-    
-    // Right Trigger: Manual shooter spin-up (uses Pi shooting solution)
-    if (shooter != null && limelight != null) {
-      operatorController.rightTrigger(0.5).whileTrue(
+      operatorController.leftTrigger(0.5).whileTrue(
           Commands.run(() -> {
             PiShootingHelper piHelper = PiShootingHelper.getInstance();
             double topPower = piHelper.getTopSpeed();
             double bottomPower = piHelper.getBottomSpeed();
-            // If Pi hasn't calculated yet (both zero), use default idle power
             if (topPower == 0.0 && bottomPower == 0.0) {
               topPower = Constants.Shooter.DEFAULT_IDLE_POWER;
               bottomPower = Constants.Shooter.DEFAULT_IDLE_POWER;
@@ -253,27 +307,75 @@ public class RobotContainer {
           }, shooter).finallyDo(() -> shooter.stop()));
     }
     
-    // Left Trigger: Emergency stop shooter
-    if (shooter != null) {
-      operatorController.leftTrigger(0.5).onTrue(Commands.runOnce(() -> shooter.stop()));
-    }
-    
-    // Right Bumper: Toggle shuttle mode
+    // RB: Toggle shuttle mode (hub <-> trench)
     operatorController.rightBumper().onTrue(Commands.runOnce(() -> {
       boolean newMode = !gameState.isShuttleMode();
       gameState.setShuttleMode(newMode);
-      System.out.println("Shuttle Mode: " + (newMode ? "ON" : "OFF"));
       Elastic.sendNotification(new Elastic.Notification()
           .withLevel(NotificationLevel.INFO)
-          .withTitle(newMode ? " Shuttle Mode ON" : " Hub Mode ON")
+          .withTitle(newMode ? "Shuttle Mode ON" : "Hub Mode ON")
           .withDescription(newMode ? "Aiming at trench" : "Aiming at hub")
           .withDisplaySeconds(2.0));
     }));
-
-    // D-Pad Down: Clear shuttle mode override
-    operatorController.povDown().onTrue(Commands.runOnce(() -> {
+    
+    // LB: Toggle force shoot (operator can also toggle this)
+    operatorController.leftBumper().onTrue(Commands.runOnce(() -> {
+      boolean newForce = !gameState.isForceShootEnabled();
+      gameState.setForceShootEnabled(newForce);
+      Elastic.sendNotification(new Elastic.Notification()
+          .withLevel(newForce ? NotificationLevel.WARNING : NotificationLevel.INFO)
+          .withTitle(newForce ? "! Force Shoot ON" : "Force Shoot OFF")
+          .withDescription(newForce ? "Ignoring alliance timing!" : "Normal timing restored")
+          .withDisplaySeconds(3.0));
+    }));
+    
+    // A (hold): Intake deploy/retract -- operator backup for intake control
+    if (intake != null) {
+      operatorController.a().onTrue(new DeployIntakeCommand(intake));
+      operatorController.a().onFalse(new RetractIntakeCommand(intake));
+    }
+    
+    // B (hold): Aim turret only (pre-aim without shooting -- useful during waits)
+    if (aimToPoseButtonCommand != null) {
+      operatorController.b().whileTrue(aimToPoseButtonCommand);
+    }
+    
+    // X: Emergency stop all shooter/feed motors
+    operatorController.x().onTrue(Commands.runOnce(() -> {
+      if (shooter != null) shooter.stop();
+      if (turretFeed != null) turretFeed.stop();
+      Elastic.sendNotification(new Elastic.Notification()
+          .withLevel(NotificationLevel.WARNING)
+          .withTitle("E-STOP")
+          .withDescription("Shooter & feed motors stopped")
+          .withDisplaySeconds(2.0));
+    }));
+    
+    // Y: Center turret (safety position -- turret faces forward)
+    if (turret != null) {
+      operatorController.y().onTrue(Commands.runOnce(() -> {
+        turret.setTargetAngle(0);
+        Elastic.sendNotification(new Elastic.Notification()
+            .withLevel(NotificationLevel.INFO)
+            .withTitle("Turret Centered")
+            .withDescription("Turret reset to 0 deg")
+            .withDisplaySeconds(1.5));
+      }));
+    }
+    
+    // Start: Reset game state (clears all mode overrides)
+    operatorController.start().onTrue(Commands.runOnce(() -> {
+      gameState.reset();
+      Elastic.sendNotification(new Elastic.Notification()
+          .withLevel(NotificationLevel.INFO)
+          .withTitle("Game State Reset")
+          .withDescription("All modes cleared")
+          .withDisplaySeconds(2.0));
+    }));
+    
+    // Back: Clear shuttle mode override (re-enable auto-switching)
+    operatorController.back().onTrue(Commands.runOnce(() -> {
       gameState.clearShuttleModeOverride();
-      System.out.println("Auto-shuttle re-enabled");
       Elastic.sendNotification(new Elastic.Notification()
           .withLevel(NotificationLevel.INFO)
           .withTitle("Auto-Shuttle Enabled")
@@ -281,35 +383,66 @@ public class RobotContainer {
           .withDisplaySeconds(2.0));
     }));
     
-    // Left Bumper: Toggle force shoot
-    operatorController.leftBumper().onTrue(Commands.runOnce(() -> {
-      boolean newForce = !gameState.isForceShootEnabled();
-      gameState.setForceShootEnabled(newForce);
-      System.out.println("Force Shoot: " + (newForce ? "ON" : "OFF"));
-      Elastic.sendNotification(new Elastic.Notification()
-          .withLevel(newForce ? NotificationLevel.WARNING : NotificationLevel.INFO)
-          .withTitle(newForce ? " Force Shoot ON" : "Force Shoot OFF")
-          .withDescription(newForce ? "Ignoring alliance timing!" : "Normal timing restored")
-          .withDisplaySeconds(3.0));
+    // ---- TRAINING DATA RECORDING (Two-Phase) ----
+    // The robot automatically snapshots state when a shot is fired.
+    // Operator then confirms the result after watching the ball land.
+    // POV Up = HIT, POV Right = MISS, POV Left = Discard bad data
+    
+    // POV Up: Confirm shot as HIT
+    operatorController.povUp().onTrue(Commands.runOnce(() -> {
+      if (piShootingHelper.hasPendingShot()) {
+        boolean confirmed = piShootingHelper.confirmShot("HIT");
+        if (confirmed) {
+          Elastic.sendNotification(new Elastic.Notification()
+              .withLevel(NotificationLevel.INFO)
+              .withTitle("[OK] HIT Confirmed")
+              .withDescription(String.format("Shot at %.1fm logged to training data", 
+                  piShootingHelper.getDistance()))
+              .withDisplaySeconds(2.0));
+        }
+      } else {
+        Elastic.sendNotification(new Elastic.Notification()
+            .withLevel(NotificationLevel.WARNING)
+            .withTitle("No Pending Shot")
+            .withDescription("Fire a shot first, then confirm HIT/MISS")
+            .withDisplaySeconds(2.0));
+      }
     }));
     
-    // Start: Turret gear ratio calibration
-  
+    // POV Right: Confirm shot as MISS
+    operatorController.povRight().onTrue(Commands.runOnce(() -> {
+      if (piShootingHelper.hasPendingShot()) {
+        boolean confirmed = piShootingHelper.confirmShot("MISS");
+        if (confirmed) {
+          Elastic.sendNotification(new Elastic.Notification()
+              .withLevel(NotificationLevel.INFO)
+              .withTitle("[X] MISS Confirmed")
+              .withDescription(String.format("Shot at %.1fm logged to training data", 
+                  piShootingHelper.getDistance()))
+              .withDisplaySeconds(2.0));
+        }
+      } else {
+        Elastic.sendNotification(new Elastic.Notification()
+            .withLevel(NotificationLevel.WARNING)
+            .withTitle("No Pending Shot")
+            .withDescription("Fire a shot first, then confirm HIT/MISS")
+            .withDisplaySeconds(2.0));
+      }
+    }));
     
-    // Back: Reset game state
-    operatorController.back().onTrue(Commands.runOnce(() -> {
-      gameState.reset();
-      System.out.println("Game State Reset");
-      Elastic.sendNotification(new Elastic.Notification()
-          .withLevel(NotificationLevel.INFO)
-          .withTitle("Game State Reset")
-          .withDescription("All modes cleared")
-          .withDisplaySeconds(2.0));
+    // POV Left: Discard pending shot (bad data, don't log)
+    operatorController.povLeft().onTrue(Commands.runOnce(() -> {
+      if (piShootingHelper.hasPendingShot()) {
+        piShootingHelper.discardPendingShot();
+        Elastic.sendNotification(new Elastic.Notification()
+            .withLevel(NotificationLevel.INFO)
+            .withTitle("Shot Discarded")
+            .withDescription("Pending shot data thrown away")
+            .withDisplaySeconds(2.0));
+      }
     }));
   }
 
-  // Default Commands
-  
   // Default Commands
   
   private void configureDefaultCommands() {
@@ -320,7 +453,10 @@ public class RobotContainer {
           return fieldCentricDrive.withVelocityX(0).withVelocityY(0).withRotationalRate(0);
         }
         
-        double speedMultiplier = (isSlowMode ? Constants.Driver.SLOW_MODE_MULTIPLIER : 1.0) 
+        // RT = slow mode (hold for precision). Trigger axis 0.0-1.0 maps to full speed -> slow speed.
+        double triggerValue = driverController.getRightTriggerAxis();
+        boolean slowActive = triggerValue > 0.3;
+        double speedMultiplier = (slowActive ? Constants.Driver.SLOW_MODE_MULTIPLIER : 1.0) 
             * gameState.getEffectiveSpeedMultiplier();
         
         double xSpeed = -driverController.getLeftY() * Constants.Driver.MAX_DRIVE_SPEED_MPS * speedMultiplier;
@@ -342,7 +478,15 @@ public class RobotContainer {
     // Shooter: Default to 87% power to stay ready to shoot
     if (shooter != null) {
       shooter.setDefaultCommand(Commands.run(() -> {
-        shooter.setManualPower(Constants.Shooter.DEFAULT_IDLE_POWER, Constants.Shooter.DEFAULT_IDLE_POWER);
+            PiShootingHelper piHelper = PiShootingHelper.getInstance();
+            double topPower = piHelper.getTopSpeed();
+            double bottomPower = piHelper.getBottomSpeed();
+            // If Pi hasn't calculated yet (both zero), use default idle power
+            if (topPower == 0.0 && bottomPower == 0.0) {
+              topPower = Constants.Shooter.DEFAULT_IDLE_POWER;
+              bottomPower = Constants.Shooter.DEFAULT_IDLE_POWER;
+            }
+            shooter.setManualPower(topPower, bottomPower);
       }, shooter));
     }
   }
@@ -352,9 +496,16 @@ public class RobotContainer {
   private void configureDashboard() {
     DashboardHelper.putData(Category.PRE_MATCH, "Auto Chooser", autoChooser);
     
-    // Calibration commands
+    // ===== CALIBRATION COMMANDS (dashboard buttons) =====
+    // All calibration commands are available here so no controller buttons are needed.
+    
+    // Full calibration routines
     if (turret != null && shooter != null && limelight != null) {
-      DashboardHelper.putData(Category.SETTINGS, "Cal/FullShooter", new FullShooterCalibrationCommand(turret, shooter, limelight));
+      DashboardHelper.putData(Category.SETTINGS, "Cal/FullShooter", new FullShooterCalibrationCommand(turret, shooter, limelight, turretFeed));
+    }
+    if (shooter != null && limelight != null) {
+      DashboardHelper.putData(Category.SETTINGS, "Cal/Shooting", new ShootingCalibrationCommand(shooter, limelight));
+      DashboardHelper.putData(Category.SETTINGS, "Cal/DistanceOffset", new DistanceOffsetCalibrationCommand(shooter, limelight));
     }
     if (turret != null) {
       DashboardHelper.putData(Category.SETTINGS, "Cal/TurretGearRatio", new CalibrateTurretGearRatioCommand(turret));
@@ -363,17 +514,52 @@ public class RobotContainer {
     if (limelight != null) {
       DashboardHelper.putData(Category.SETTINGS, "Cal/Limelight", new LimelightCalibrationCommand(limelight));
     }
-    if (shooter != null && limelight != null) {
-      DashboardHelper.putData(Category.SETTINGS, "Cal/DistanceOffset", new DistanceOffsetCalibrationCommand(shooter, limelight));
-      DashboardHelper.putData(Category.SETTINGS, "Cal/Shooting", new ShootingCalibrationCommand(shooter, limelight));
-    }
     
-    // Aim mode command
+    // Aiming & shooting commands
     if (turret != null && limelight != null) {
       DashboardHelper.putData(Category.SETTINGS, "AimMode/Pose", new AimTurretToPoseCommand(turret, limelight));
     }
-    if (autoShootCommand != null) {
-      DashboardHelper.putData(Category.SETTINGS, "AutoShoot", autoShootCommand);
+    if (turret != null && shooter != null && limelight != null) {
+      DashboardHelper.putData(Category.SETTINGS, "AutoShoot",
+          new AutoShootCommand(turret, shooter, limelight, leds, turretFeed, drivetrain));
+    }
+    
+    // Manual shooter controls
+    if (shooter != null) {
+      DashboardHelper.putData(Category.SETTINGS, "Shooter/SpinUp", Commands.run(() -> {
+        PiShootingHelper piHelper = PiShootingHelper.getInstance();
+        double topPower = piHelper.getTopSpeed();
+        double bottomPower = piHelper.getBottomSpeed();
+        if (topPower == 0.0 && bottomPower == 0.0) {
+          topPower = Constants.Shooter.DEFAULT_IDLE_POWER;
+          bottomPower = Constants.Shooter.DEFAULT_IDLE_POWER;
+        }
+        shooter.setManualPower(topPower, bottomPower);
+      }, shooter));
+      DashboardHelper.putData(Category.SETTINGS, "Shooter/Stop", Commands.runOnce(() -> shooter.stop(), shooter));
+    }
+    
+    // Turret controls
+    if (turret != null) {
+      DashboardHelper.putData(Category.SETTINGS, "Turret/CenterTurret", Commands.runOnce(() -> turret.setTargetAngle(0), turret));
+    }
+    
+    // Intake controls
+    if (intake != null) {
+      DashboardHelper.putData(Category.SETTINGS, "Intake/Deploy", new DeployIntakeCommand(intake));
+      DashboardHelper.putData(Category.SETTINGS, "Intake/Retract", new RetractIntakeCommand(intake));
+    }
+    
+    // Turret feed controls
+    if (turretFeed != null) {
+      DashboardHelper.putData(Category.SETTINGS, "TurretFeed/Feed", Commands.run(() -> turretFeed.setShoot(), turretFeed));
+      DashboardHelper.putData(Category.SETTINGS, "TurretFeed/Stop", Commands.runOnce(() -> turretFeed.stop(), turretFeed));
+    }
+    
+    // Drivetrain controls
+    if (drivetrain != null) {
+      DashboardHelper.putData(Category.SETTINGS, "Drive/ResetGyro", Commands.runOnce(() -> drivetrain.seedFieldCentric()));
+      DashboardHelper.putData(Category.SETTINGS, "Drive/BrakeXLock", drivetrain.applyRequest(() -> brakeRequest));
     }
     
     // Status
@@ -381,6 +567,9 @@ public class RobotContainer {
     DashboardHelper.putBoolean(Category.PRE_MATCH, "Subsystems/Turret", turret != null);
     DashboardHelper.putBoolean(Category.PRE_MATCH, "Subsystems/Shooter", shooter != null);
     DashboardHelper.putBoolean(Category.PRE_MATCH, "Subsystems/Limelight", limelight != null);
+    DashboardHelper.putBoolean(Category.PRE_MATCH, "Subsystems/TurretFeed", turretFeed != null);
+    DashboardHelper.putBoolean(Category.PRE_MATCH, "Subsystems/Intake", intake != null);
+    DashboardHelper.putBoolean(Category.PRE_MATCH, "Subsystems/LEDs", leds != null);
   }
 
   // Periodic Updates
@@ -402,7 +591,15 @@ public class RobotContainer {
     if (limelight == null || drivetrain == null) return;
     
     limelight.setDrivetrainPose(drivetrain.getState().Pose);
-    gameState.update(calculateShuttleZone());
+    
+    // Update game state with shuttle zone calculation - this enables auto-switching
+    boolean inShuttleZone = calculateShuttleZone();
+    gameState.update(inShuttleZone);
+    
+    // Log auto-switch status for debugging
+    DashboardHelper.putBoolean(Category.DEBUG, "AutoShuttle/InZone", inShuttleZone);
+    DashboardHelper.putBoolean(Category.DEBUG, "AutoShuttle/HasOverride", gameState.isShuttleModeManualOverride());
+    DashboardHelper.putString(Category.TELEOP, "TargetMode", gameState.getTargetMode().name());
     
     if (limelight.hasVisionPose()) {
       double[] stdDevs = limelight.getVisionStdDevs();
@@ -412,7 +609,7 @@ public class RobotContainer {
           VecBuilder.fill(stdDevs[0], stdDevs[1], stdDevs[2]));
     }
     
-    DashboardHelper.putBoolean(Category.TELEOP, "Drive/SlowMode", isSlowMode);
+    DashboardHelper.putBoolean(Category.TELEOP, "Drive/SlowMode", driverController.getRightTriggerAxis() > 0.3);
     DashboardHelper.putBoolean(Category.TELEOP, "Drive/RobotCentric", useRobotCentric);
   }
   
@@ -423,9 +620,16 @@ public class RobotContainer {
     double boundaryX = DashboardHelper.getNumber(Category.SETTINGS, "Aim/AutoShuttleLineX", Constants.Field.AUTO_SHUTTLE_BOUNDARY_X);
     var alliance = DriverStation.getAlliance().orElse(DriverStation.Alliance.Blue);
     
+    // Blue alliance: past boundary = in shuttle zone (trench side)
+    // Red alliance: before flipped boundary = in shuttle zone
     boolean inZone = (alliance == DriverStation.Alliance.Blue) 
         ? robotX > boundaryX 
         : robotX < (Constants.Field.FIELD_LENGTH_METERS - boundaryX);
+    
+    // Debug outputs to diagnose auto-switching
+    DashboardHelper.putNumber(Category.DEBUG, "AutoShuttle/RobotX", robotX);
+    DashboardHelper.putNumber(Category.DEBUG, "AutoShuttle/BoundaryX", 
+        alliance == DriverStation.Alliance.Blue ? boundaryX : Constants.Field.FIELD_LENGTH_METERS - boundaryX);
     
     return inZone;
   }
@@ -448,7 +652,7 @@ public class RobotContainer {
     return autoShootCommand != null ? autoShootCommand : Commands.none();
   }
 
-  /** Turret gear ratio calibration - rotate turret 360° by hand while command runs. */
+  /** Turret gear ratio calibration - rotate turret 360 deg by hand while command runs. */
   public Command getCalibrateTurretCommand() {
     return turret != null ? new CalibrateTurretGearRatioCommand(turret) : Commands.none();
   }
@@ -476,7 +680,7 @@ public class RobotContainer {
 
   /**
    * Explicitly stops all motor subsystems. Called from Robot.disabledInit()
-   * as a belt-and-suspenders safety measure — subsystem periodic() methods
+   * as a belt-and-suspenders safety measure -- subsystem periodic() methods
    * also guard against disabled-state motor commands individually.
    */
   public void stopAllMotors() {

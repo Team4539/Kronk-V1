@@ -37,10 +37,10 @@ public final class Constants {
   /** Toggle subsystems for testing */
   public static final class SubsystemEnabled {
     public static final boolean DRIVETRAIN = true;
-    public static final boolean TURRET = false;
-    public static final boolean SHOOTER = false;
-    public static final boolean LIMELIGHT = false;
-    public static final boolean TURRET_FEED = false;
+    public static final boolean TURRET = true;
+    public static final boolean SHOOTER = true;
+    public static final boolean LIMELIGHT = true;
+    public static final boolean TURRET_FEED = true;
     public static final boolean INTAKE = true;
     public static final boolean LEDS = true;
   }
@@ -144,7 +144,7 @@ public final class Constants {
     public static final double RIGHT_CANCODER_OFFSET_DEG = -100.107;
     public static final double PIVOT_GEAR_RATIO = 45.0;
     
-    // Pivot PID (WPILib PID — works in degrees, outputs duty cycle)
+    // Pivot PID (WPILib PID -- works in degrees, outputs duty cycle)
     // P: gets it moving toward target
     // D: HIGH to brake hard before overshooting into chain slop bounce
     public static final double PIVOT_PID_P = 0.008;
@@ -192,9 +192,10 @@ public final class Constants {
     public static final double GEAR_RATIO = 10.00537109375; // Calibrate with CalibrateTurretGearRatioCommand
     public static final boolean MOTOR_INVERTED = false;
     
-    // Motion limits (270° range, centered at 0°)
+    // Motion limits (270 deg range, centered at 0 deg)
     public static final double MIN_ANGLE_DEG = -135.0;
-    public static final double MAX_ANGLE_DEG = 135.0;
+    public static final double MAX_ANGLE_DEG = 56;
+
     public static final double LIMIT_SAFETY_MARGIN_DEG = 10.0;
     
     // PID

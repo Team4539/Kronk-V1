@@ -53,8 +53,9 @@ public class LEDSubsystem extends SubsystemBase {
     private boolean testMode = false;
     private boolean lastTestMode = false; // Track previous state to detect transitions
     
-    // CANdle boot readiness — hardware isn't responsive until fully booted
+    // CANdle boot readiness -- hardware isn't responsive until fully booted
     private boolean candleReady = false;
+    @SuppressWarnings("unused")
     private boolean configApplied = false;
     private double bootStartTime = 0;
     private static final double CANDLE_MIN_BOOT_SECONDS = 1.5; // Minimum wait before checking
@@ -141,7 +142,7 @@ public class LEDSubsystem extends SubsystemBase {
         ledCount = Constants.LEDs.LED_COUNT;
         ledBuffer = new int[ledCount][3];  // RGB for each LED
         
-        // Build the CANdle config but DON'T apply yet —
+        // Build the CANdle config but DON'T apply yet --
         // the CANdle hardware isn't responsive until ~1-2s after power-on.
         // We'll apply it once the device is alive on the CAN bus.
         candleConfig = new CANdleConfiguration();
@@ -654,7 +655,7 @@ public class LEDSubsystem extends SubsystemBase {
                 ledBuffer[stripStart + i][1] = (int)(sparkColor[1] * intensity * masterBrightness);
                 ledBuffer[stripStart + i][2] = (int)(sparkColor[2] * intensity * masterBrightness);
             }
-            // LEDs not sparkling stay dark — makes the sparkles pop!
+            // LEDs not sparkling stay dark -- makes the sparkles pop!
         }
         
         pushBuffer();
@@ -751,7 +752,7 @@ public class LEDSubsystem extends SubsystemBase {
      * TARGETING PATTERN - "Edges closing in" with pulsing center crosshair.
      * Yellow brackets sweep inward from both ends like a targeting reticle.
      * A pulsing dim yellow glow at the center acts as the crosshair target.
-     * When brackets meet, the whole strip flashes bright — "LOCKED ON!"
+     * When brackets meet, the whole strip flashes bright -- "LOCKED ON!"
      * Instantly says: "I'm locking onto something!"
      */
     private void setTargetingPattern() {
@@ -833,7 +834,7 @@ public class LEDSubsystem extends SubsystemBase {
      * POWER FILL PATTERN - Dramatic charging progress bar.
      * Orange fills from left to right with a bright white leading edge
      * and an energy shimmer through the filled section.
-     * Onboard LEDs pulse faster as it fills up — building tension!
+     * Onboard LEDs pulse faster as it fills up -- building tension!
      * Instantly says: "Building power, almost ready!"
      */
     private void setPowerFillPattern() {
@@ -902,7 +903,7 @@ public class LEDSubsystem extends SubsystemBase {
     /**
      * INTAKE FLOW PATTERN - Dual streams being sucked toward center.
      * Two bright comets with long trails chase from both edges to center.
-     * When they reach center, a bright flash pulses — "NOM!"
+     * When they reach center, a bright flash pulses -- "NOM!"
      * Onboard LEDs breathe in sync.
      * Instantly says: "Eating a game piece!"
      */
@@ -954,7 +955,7 @@ public class LEDSubsystem extends SubsystemBase {
             setLED(stripStart + rightChase, new int[]{255, 200, 220});
         }
         
-        // Center "gulp" glow — brighter when comets are near center
+        // Center "gulp" glow -- brighter when comets are near center
         double nearCenter = 1.0 - (double) Math.abs(chasePos - center) / center;
         nearCenter = nearCenter * nearCenter * nearCenter;  // Cubic for dramatic pop
         int[] centerGlow = {(int)(color[0] * nearCenter), (int)(color[1] * nearCenter), (int)(color[2] * nearCenter)};
@@ -1056,7 +1057,7 @@ public class LEDSubsystem extends SubsystemBase {
      * ENDGAME URGENCY PATTERN - Accelerating heartbeat with shockwaves.
      * Alliance-colored pulses radiate from center, getting faster over time.
      * Every few seconds a bright white flash grabs attention.
-     * The "heartbeat" speeds up as match time decreases — real urgency!
+     * The "heartbeat" speeds up as match time decreases -- real urgency!
      * Instantly says: "HURRY! Time is almost up!"
      */
     private void setEndgameUrgencyPattern() {
@@ -1086,7 +1087,7 @@ public class LEDSubsystem extends SubsystemBase {
                 setLED(stripStart + i, Constants.LEDs.WHITE);
             }
         } else {
-            // Heartbeat speed — faster as time runs out (1Hz to 4Hz)
+            // Heartbeat speed -- faster as time runs out (1Hz to 4Hz)
             double heartRate = 1.0 + (1.0 - Math.max(0, Math.min(1.0, matchTime / 30.0))) * 3.0;
             double beatPhase = (currentTime * heartRate) % 1.0;
             
@@ -1178,7 +1179,7 @@ public class LEDSubsystem extends SubsystemBase {
      * WAITING/DISABLED PATTERN - Clean team color idle animation.
      * 
      * Onboard LEDs (0-7): Gentle alternating orange/blue breathing glow.
-     * Strip LEDs (8-67): Smooth comet tails — an orange comet and a blue comet
+     * Strip LEDs (8-67): Smooth comet tails -- an orange comet and a blue comet
      * chase each other around the strip on a dark background. Each comet is a
      * bright head with a fading trail behind it. The two comets are always on
      * opposite sides of the strip so they never overlap or mix into ugly colors.
@@ -1331,7 +1332,7 @@ public class LEDSubsystem extends SubsystemBase {
     /**
      * AUTO MODE PATTERN - Dual alliance-colored comets racing opposite directions.
      * Two bright comets circling the strip in opposite directions with white-hot tips.
-     * Energetic and fast — clearly distinct from teleop's calmer wave.
+     * Energetic and fast -- clearly distinct from teleop's calmer wave.
      * White sparkle accents randomly appear and fade for extra energy.
      * Onboard LEDs pulse alliance color at 2Hz.
      * Instantly says: "Robot is driving itself!"
@@ -1412,7 +1413,7 @@ public class LEDSubsystem extends SubsystemBase {
             ledBuffer[idx][2] = Math.max(ledBuffer[idx][2], b);
         }
         
-        // Random sparkle accents — 3 at any time, seeded by time
+        // Random sparkle accents -- 3 at any time, seeded by time
         long sparkSeed = (long)(currentTime * 10);
         for (int s = 0; s < 3; s++) {
             int sparkPos = (int)(((sparkSeed + s * 17) * 31 + s * 7) % stripCount);
@@ -1432,7 +1433,7 @@ public class LEDSubsystem extends SubsystemBase {
      * TELEOP MODE PATTERN - Smooth flowing gradient wave.
      * Two alliance-color bands flow slowly along the strip with smooth sinusoidal
      * shaping, creating a lava-lamp style "liquid flow" effect. Much calmer and
-     * smoother than auto's racing comets — clearly says "human in control."
+     * smoother than auto's racing comets -- clearly says "human in control."
      * Onboard LEDs breathe alliance color at a relaxed 4-second cycle.
      * Instantly says: "Driver has control"
      */
@@ -1467,7 +1468,7 @@ public class LEDSubsystem extends SubsystemBase {
             ledBuffer[stripStart + i][2] = (int)(allianceColor[2] * brightness * masterBrightness);
         }
         
-        // Subtle white shimmer — one bright point that slowly moves
+        // Subtle white shimmer -- one bright point that slowly moves
         double shimmerPos = ((Math.sin(currentTime * 0.7) + 1) / 2) * stripCount;
         int shimmerIdx = (int) shimmerPos;
         double shimmerBright = (Math.sin(currentTime * 1.3) + 1) / 2 * 0.3;
@@ -1489,7 +1490,7 @@ public class LEDSubsystem extends SubsystemBase {
     /**
      * Updates LED pattern based on current state.
      * Sets currentPatternName for dashboard visibility.
-     * checkEStop() is already called in periodic() — not duplicated here.
+     * checkEStop() is already called in periodic() -- not duplicated here.
      */
     private void updateLEDPattern() {
         double timeSinceStateStart = Timer.getFPGATimestamp() - stateStartTime;
@@ -1559,37 +1560,34 @@ public class LEDSubsystem extends SubsystemBase {
                     
                 case SHOOTING:
                 case ESTOP:
-                    // Already handled above
-                    return;
                 case BROWNOUT:
-                    currentPatternName = "Brownout";
-                    setBrownoutPattern();
                     return;
                     
             }
         }
         
-        // PRIORITY 4: Endgame warning (30 seconds remaining)
+        // PRIORITY 4: Endgame warning (warnings BEFORE the 30-second endgame mark)
         // Only show if not doing critical actions
-        if (currentState == LEDState.TELEOP && inEndgame && phase != GamePhase.END_GAME) {
-            // Warning before endgame officially starts
+        // matchTime counts DOWN, so matchTime of 40 = 40 seconds left, 30 = endgame starts
+        if (currentState == LEDState.TELEOP && !inEndgame && matchTime > 0) {
+            // Time until endgame starts (positive means endgame hasn't started yet)
             double timeUntilEndgame = matchTime - 30.0;
             
-            // 10 second warning before endgame
+            // 10 second warning before endgame (matchTime 37-40)
             if (timeUntilEndgame > 7.0 && timeUntilEndgame <= 10.0) {
                 currentPatternName = "Endgame 10s Warning";
                 setBreathing(Constants.LEDs.ENDGAME_WARNING_10SEC);
                 return;
             }
             
-            // 5 second warning before endgame
+            // 5 second warning before endgame (matchTime 33-35)
             if (timeUntilEndgame > 3.0 && timeUntilEndgame <= 5.0) {
                 currentPatternName = "Endgame 5s Warning";
                 setStrobe(Constants.LEDs.ENDGAME_WARNING_5SEC);
                 return;
             }
             
-            // 3 second warning before endgame
+            // 3 second warning before endgame (matchTime 30-33)
             if (timeUntilEndgame > 0.0 && timeUntilEndgame <= 3.0) {
                 currentPatternName = "Endgame 3s Warning";
                 setStrobe(Constants.LEDs.ENDGAME_WARNING_3SEC);
@@ -1707,21 +1705,21 @@ public class LEDSubsystem extends SubsystemBase {
     
     @Override
     public void periodic() {
-        // ─── CANdle Boot Readiness Gate ───
+        // --- CANdle Boot Readiness Gate ---
         // The CANdle hardware needs ~1-2 seconds to initialize on the CAN bus after power-on.
         // Any commands sent before it's ready are silently lost. We wait for the minimum
         // boot time, then apply config on first ready detection.
         if (!candleReady) {
             double timeSinceBoot = Timer.getFPGATimestamp() - bootStartTime;
             if (timeSinceBoot < CANDLE_MIN_BOOT_SECONDS) {
-                // Still in minimum boot window — don't send anything
+                // Still in minimum boot window -- don't send anything
                 DashboardHelper.putString(Category.DEBUG, "LED/Pattern", "Waiting for CANdle (" 
                     + String.format("%.1f", timeSinceBoot) + "s)");
                 DashboardHelper.putString(Category.DEBUG, "LED/State", currentState.name());
                 DashboardHelper.putString(Category.DEBUG, "LED/Action", currentAction.name());
                 return;
             }
-            // Minimum boot time elapsed — apply config now
+            // Minimum boot time elapsed -- apply config now
             candle.getConfigurator().apply(candleConfig);
             configApplied = true;
             candleReady = true;
@@ -1729,7 +1727,7 @@ public class LEDSubsystem extends SubsystemBase {
             stateStartTime = Timer.getFPGATimestamp();
         }
         
-        // ─── Dashboard Controls ───
+        // --- Dashboard Controls ---
         // Check for brightness updates from dashboard
         double newBrightness = DashboardHelper.getNumber(Category.DEBUG, "LED/Master_Brightness", masterBrightness);
         if (Math.abs(newBrightness - masterBrightness) > 0.01) {
@@ -1753,19 +1751,19 @@ public class LEDSubsystem extends SubsystemBase {
             return;
         }
         
-        // ─── State Updates ───
+        // --- State Updates ---
         updateAllianceColor();
         checkEStop();
         
-        // ─── Pattern Dispatch ───
+        // --- Pattern Dispatch ---
         updateLEDPattern();
         
-        // ─── Dashboard Telemetry ───
+        // --- Dashboard Telemetry ---
         DashboardHelper.putString(Category.DEBUG, "LED/Pattern", currentPatternName);
         DashboardHelper.putString(Category.DEBUG, "LED/State", currentState.name());
         DashboardHelper.putString(Category.DEBUG, "LED/Action", currentAction.name());
         
-        // ─── Critical Notifications ───
+        // --- Critical Notifications ---
         double matchTime = DriverStation.getMatchTime();
         boolean inEndgame = (matchTime > 0 && matchTime <= 30.0);
         checkCriticalNotifications(matchTime, inEndgame);

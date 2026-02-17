@@ -15,11 +15,11 @@
 
 The **core innovation** is offloading shooting intelligence to a Raspberry Pi:
 
-1. **roboRIO → Pi** (`Pi/Input` table): Robot publishes pose, velocity, alliance, target mode, battery voltage
+1. **roboRIO -> Pi** (`Pi/Input` table): Robot publishes pose, velocity, alliance, target mode, battery voltage
 2. **Pi calculates** optimal turret angle, shooter top/bottom speeds using:
    - Trained ML model (`pi/shooting_model.pkl`) if available
    - Interpolation fallback from `Constants.Shooter.SHOOTING_CALIBRATION` if Pi disconnects
-3. **Pi → roboRIO** (`Pi/Output` table): Shooting solution consumed by `PiShootingHelper`
+3. **Pi -> roboRIO** (`Pi/Output` table): Shooting solution consumed by `PiShootingHelper`
 4. **Fallback**: If Pi heartbeat timeout (500ms), robot uses local calibration tables
 
 **Key files**: `util/PiShootingHelper.java`, `pi/pi_shooting.py`, `pi/train_model.py`
@@ -48,7 +48,7 @@ The **core innovation** is offloading shooting intelligence to a Raspberry Pi:
 - Limelight camera position offsets
 - **Outputs ready-to-paste code** for updating `Constants.java`
 
-**Workflow**: Tune sliders → Copy generated code from dashboard → Update `Constants.java`
+**Workflow**: Tune sliders -> Copy generated code from dashboard -> Update `Constants.java`
 
 ## Essential Developer Workflows
 
@@ -93,7 +93,7 @@ The **core innovation** is offloading shooting intelligence to a Raspberry Pi:
 - `Field` - Field geometry, alliance-specific poses (BLUE_HUB_CENTER, RED_TRENCH_ROTATING)
 - Per-subsystem constants (Turret, Shooter, Intake, etc.)
 
-**Pattern**: Calibration data uses `TreeMap<Double, double[]>` for interpolation (e.g., distance → [top_power, bottom_power]).
+**Pattern**: Calibration data uses `TreeMap<Double, double[]>` for interpolation (e.g., distance -> [top_power, bottom_power]).
 
 ### Subsystem Nullability Pattern
 
@@ -129,7 +129,7 @@ Use `DashboardHelper.Category` enum to organize SmartDashboard entries:
 
 1. **Alliance flipping**: All field coordinates in `Constants.Field` have BLUE and RED variants. LimelightSubsystem auto-flips based on `GameStateManager.getRobotAlliance()`.
 
-2. **Turret angle limits**: 270° rotation range centered at 0° (-135° to +135°) with 10° safety margins. **Never** command angles outside this range or turret will fault.
+2. **Turret angle limits**: 270 deg rotation range centered at 0 deg (-135 deg to +135 deg) with 10 deg safety margins. **Never** command angles outside this range or turret will fault.
 
 3. **Phoenix 6 config**: Swerve modules are **generated code** in `generated/TunerConstants.java`. Modify via Phoenix Tuner X, not by hand.
 

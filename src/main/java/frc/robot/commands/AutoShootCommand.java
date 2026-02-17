@@ -1,6 +1,5 @@
 package frc.robot.commands;
 
-import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import frc.robot.Constants;
@@ -34,7 +33,8 @@ public class AutoShootCommand extends Command {
     private final TurretSubsystem turret;
     private final ShooterSubsystem shooter;
     private final LimelightSubsystem limelight;
-    private final CommandSwerveDrivetrain drivetrain; // For velocity data
+    @SuppressWarnings("unused")
+    private final CommandSwerveDrivetrain drivetrain; // For velocity data (used by RobotContainer.updateVisionPose)
     private final GameStateManager gameState;
     private final LEDSubsystem leds; // Optional - can be null
     private final TurretFeedSubsystem turretFeed; // Optional - can be null
@@ -68,6 +68,9 @@ public class AutoShootCommand extends Command {
     private boolean wasAllianceActive = false;
     private boolean hasNotifiedHeadBack = false;
     private boolean hasNotifiedGreenLight = false;
+    
+    /** Tracks whether we were firing last cycle (for snapshot rising edge detection) */
+    private boolean wasFiring = false;
     
     // CONSTRUCTOR
     
@@ -152,6 +155,7 @@ public class AutoShootCommand extends Command {
         wasAllianceActive = false;
         hasNotifiedHeadBack = false;
         hasNotifiedGreenLight = false;
+        wasFiring = false;
     }
 
     @Override
@@ -180,8 +184,8 @@ public class AutoShootCommand extends Command {
         }
         
         // ----- Handle disabled mode (alliance inactive) -----
-        // Green light pre-shift (3 sec before our shift) overrides disabled - allow shooting!
-        if (currentTargetMode == TargetMode.DISABLED && !gameState.isGreenLightPreShift()) {
+        // Green light pre-shift (3 sec before our shift) OR Force Shoot overrides disabled
+        if (currentTargetMode == TargetMode.DISABLED && !gameState.isGreenLightPreShift() && !gameState.isForceShootEnabled()) {
             SmartDashboard.putString("AutoShoot/Status", "ALLIANCE INACTIVE - Waiting");
             // If we're in head-back warning (5 sec), still aim but don't shoot
             if (gameState.isHeadBackWarning()) {
@@ -215,15 +219,23 @@ public class AutoShootCommand extends Command {
         
         // ----- Control ball handling subsystems -----
         // Only feed balls when turret is aimed, shooter is ready, and alliance is active
-        if (isReadyToFire()) {
+        boolean firing = isReadyToFire();
+        if (firing) {
             // Fire the balls!
             if (turretFeed != null) {
                 turretFeed.setShoot();
+            }
+            
+            // Snapshot training data on the RISING EDGE (first cycle of firing).
+            // This captures the exact robot state at the moment the ball is launched.
+            if (!wasFiring) {
+                piHelper.snapshotShotData();
             }
         } else {
             // Not ready - keep ball handling in idle (staging mode)
             idleBallHandling();
         }
+        wasFiring = firing;
         
         // ----- Update LED action state -----
         updateLEDState();
@@ -248,7 +260,7 @@ public class AutoShootCommand extends Command {
             hasNotifiedReady = true;
             Elastic.sendNotification(new Elastic.Notification()
                 .withLevel(NotificationLevel.INFO)
-                .withTitle(" READY TO FIRE!")
+                .withTitle("READY TO FIRE!")
                 .withDescription(String.format("Distance: %.1fm | %s", distanceToTarget, 
                     currentTargetMode == TargetMode.TRENCH ? "Trench" : "Hub"))
                 .withDisplaySeconds(1.5));
@@ -260,7 +272,7 @@ public class AutoShootCommand extends Command {
         if (allianceActive && !wasAllianceActive) {
             Elastic.sendNotification(new Elastic.Notification()
                 .withLevel(NotificationLevel.INFO)
-                .withTitle(" Alliance Window OPEN")
+                .withTitle("Alliance Window OPEN")
                 .withDescription("Scoring is now allowed!")
                 .withDisplaySeconds(2.0));
             hasNotifiedHeadBack = false;
@@ -268,7 +280,7 @@ public class AutoShootCommand extends Command {
         } else if (!allianceActive && wasAllianceActive && !gameState.isForceShootEnabled()) {
             Elastic.sendNotification(new Elastic.Notification()
                 .withLevel(NotificationLevel.WARNING)
-                .withTitle(" Alliance Window CLOSED")
+                .withTitle("Alliance Window CLOSED")
                 .withDescription("Waiting for next window...")
                 .withDisplaySeconds(2.0));
         }
@@ -279,7 +291,7 @@ public class AutoShootCommand extends Command {
             hasNotifiedHeadBack = true;
             Elastic.sendNotification(new Elastic.Notification()
                 .withLevel(NotificationLevel.WARNING)
-                .withTitle("⬅ HEAD BACK!")
+                .withTitle("<- HEAD BACK!")
                 .withDescription(String.format("Our shift starts in %.0fs - get in position!", 
                     gameState.getSecondsUntilOurNextShift()))
                 .withDisplaySeconds(2.0));
@@ -292,7 +304,7 @@ public class AutoShootCommand extends Command {
             hasNotifiedGreenLight = true;
             Elastic.sendNotification(new Elastic.Notification()
                 .withLevel(NotificationLevel.INFO)
-                .withTitle(" GREEN LIGHT!")
+                .withTitle("GREEN LIGHT!")
                 .withDescription("Cleared to shoot! Shift starts in " + 
                     String.format("%.0fs", gameState.getSecondsUntilOurNextShift()))
                 .withDisplaySeconds(2.0));
@@ -308,8 +320,8 @@ public class AutoShootCommand extends Command {
         if (leds == null) return;
         
         // Determine priority action state
-        if (turretOnTarget && shooterReady && (allianceActive || gameState.isGreenLightPreShift())) {
-            // Ready to shoot! (including green light pre-shift window)
+        if (turretOnTarget && shooterReady && (allianceActive || gameState.isGreenLightPreShift() || gameState.isForceShootEnabled())) {
+            // Ready to shoot! (including green light pre-shift window or force shoot)
             leds.setAction(ActionState.SHOOTING);
         } else if (!turretOnTarget && !shooterReady) {
             // Both aiming and spooling - prioritize aiming
@@ -352,23 +364,12 @@ public class AutoShootCommand extends Command {
      * Aims at the current target using the Raspberry Pi coprocessor.
      * The Pi calculates turret angle, lead compensation, and training corrections.
      * Falls back to local calculation if Pi is unreachable.
+     * 
+     * NOTE: piHelper.update() is called from RobotContainer.updateVisionPose() every cycle,
+     * so we only READ the Pi's solution here -- we don't publish a second update.
      */
     private void aimAtTarget() {
-        // Update Pi with current robot state
-        if (drivetrain != null && limelight != null && limelight.hasPoseEstimate()) {
-            ChassisSpeeds speeds = drivetrain.getState().Speeds;
-            double hubOffsetX = SmartDashboard.getNumber("Aim/HubOffsetX", 0.0);
-            double hubOffsetY = SmartDashboard.getNumber("Aim/HubOffsetY", 0.0);
-            double trenchOffsetX = SmartDashboard.getNumber("Aim/TrenchOffsetX", 0.0);
-            double trenchOffsetY = SmartDashboard.getNumber("Aim/TrenchOffsetY", 0.0);
-            
-            piHelper.update(drivetrain.getState().Pose, speeds, currentTargetMode,
-                           hubOffsetX, hubOffsetY, trenchOffsetX, trenchOffsetY);
-        } else if (limelight != null && limelight.hasPoseEstimate()) {
-            piHelper.update(limelight.getRobotPose(), new ChassisSpeeds(), currentTargetMode);
-        }
-        
-        // Read Pi results (or fallback values)
+        // Read Pi results (or fallback values) -- already updated by RobotContainer
         turretTargetAngle = piHelper.getTurretAngle();
         distanceToTarget = piHelper.getDistance();
         isMoving = piHelper.isMoving();
