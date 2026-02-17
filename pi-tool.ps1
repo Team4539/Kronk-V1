@@ -501,6 +501,200 @@ function Invoke-Status {
 }
 
 # ============================================================================
+# 7) FIND & SET IP - Scan network for the Pi and update address
+# ============================================================================
+
+function Invoke-FindAndSetIP {
+    Show-Header "Find & Set Pi IP"
+
+    Write-Host "Current Pi address: $PiAddress" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  [1] Scan robot network (10.45.39.x) for the Pi" -ForegroundColor White
+    Write-Host "  [2] Enter IP manually" -ForegroundColor White
+    Write-Host "  [3] Cancel" -ForegroundColor White
+    Write-Host ""
+    Write-Host "Choice: " -ForegroundColor Yellow -NoNewline
+    $ipChoice = Read-Host
+
+    switch ($ipChoice) {
+        "1" { Find-PiOnNetwork }
+        "2" { Set-PiManual }
+        "3" { return }
+        default {
+            Write-Host "Invalid choice" -ForegroundColor Red
+        }
+    }
+}
+
+function Find-PiOnNetwork {
+    $subnet = "10.45.39"
+    Write-Host ""
+    Write-Host "Scanning $subnet.1 - $subnet.254 ..." -ForegroundColor Cyan
+    Write-Host "(This may take 30-60 seconds)" -ForegroundColor Gray
+    Write-Host ""
+
+    $found = @()
+
+    # Ping sweep -- run pings in parallel using jobs for speed
+    $jobs = @()
+    for ($i = 1; $i -le 254; $i++) {
+        $ip = "$subnet.$i"
+        $jobs += Start-Job -ScriptBlock {
+            param($ip)
+            $result = ping -c 1 -W 1 $ip 2>$null
+            if ($LASTEXITCODE -eq 0) { return $ip }
+            # Fallback for Windows
+            $result = ping -n 1 -w 1000 $ip 2>$null
+            if ($LASTEXITCODE -eq 0) { return $ip }
+            return $null
+        } -ArgumentList $ip
+    }
+
+    # Wait for all pings (timeout 60s)
+    $null = $jobs | Wait-Job -Timeout 60
+
+    $reachable = @()
+    foreach ($job in $jobs) {
+        $result = Receive-Job $job -ErrorAction SilentlyContinue
+        if ($result) { $reachable += $result }
+        Remove-Job $job -Force -ErrorAction SilentlyContinue
+    }
+
+    if ($reachable.Count -eq 0) {
+        Write-Host "[FAIL] No devices found on $subnet.x" -ForegroundColor Red
+        Write-Host "  Are you on the robot network?" -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host "Found $($reachable.Count) device(s). Checking for Pi..." -ForegroundColor Cyan
+    Write-Host ""
+
+    # Try SSH to each reachable host to identify the Pi
+    foreach ($ip in ($reachable | Sort-Object)) {
+        Write-Host "  $ip - " -NoNewline -ForegroundColor White
+
+        # Skip known roboRIO IPs
+        if ($ip -eq "$subnet.2") {
+            Write-Host "roboRIO (skipped)" -ForegroundColor Gray
+            continue
+        }
+
+        try {
+            $sshResult = ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no -o BatchMode=yes "$PiUser@$ip" "hostname 2>/dev/null; echo '---PICHECK---'" 2>&1
+            if ($sshResult -match "PICHECK") {
+                $hostname = ($sshResult | Select-Object -First 1).Trim()
+                Write-Host "PI FOUND! (hostname: $hostname)" -ForegroundColor Green
+                $found += $ip
+            } else {
+                Write-Host "SSH failed (not the Pi or wrong credentials)" -ForegroundColor Gray
+            }
+        } catch {
+            Write-Host "no SSH response" -ForegroundColor Gray
+        }
+    }
+
+    Write-Host ""
+
+    if ($found.Count -eq 0) {
+        Write-Host "[FAIL] No Pi found with user '$PiUser' on the network." -ForegroundColor Red
+        Write-Host "  - Is the Pi powered on?" -ForegroundColor Yellow
+        Write-Host "  - Is SSH enabled?" -ForegroundColor Yellow
+        Write-Host "  - Is the username '$PiUser' correct?" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Enter IP manually? (y/n): " -ForegroundColor Yellow -NoNewline
+        $manual = Read-Host
+        if ($manual -eq "y") { Set-PiManual }
+    } elseif ($found.Count -eq 1) {
+        $newIP = $found[0]
+        Write-Host "Use $newIP as the Pi address? (y/n): " -ForegroundColor Yellow -NoNewline
+        $confirm = Read-Host
+        if ($confirm -eq "y") {
+            Apply-NewIP $newIP
+        }
+    } else {
+        Write-Host "Multiple Pis found:" -ForegroundColor Yellow
+        for ($i = 0; $i -lt $found.Count; $i++) {
+            Write-Host "  [$($i+1)] $($found[$i])" -ForegroundColor White
+        }
+        Write-Host ""
+        Write-Host "Which one? " -ForegroundColor Yellow -NoNewline
+        $pick = Read-Host
+        $idx = [int]$pick - 1
+        if ($idx -ge 0 -and $idx -lt $found.Count) {
+            Apply-NewIP $found[$idx]
+        } else {
+            Write-Host "Invalid choice" -ForegroundColor Red
+        }
+    }
+}
+
+function Set-PiManual {
+    Write-Host ""
+    Write-Host "Enter Pi IP address: " -ForegroundColor Yellow -NoNewline
+    $newIP = Read-Host
+
+    if ([string]::IsNullOrWhiteSpace($newIP)) {
+        Write-Host "No IP entered, cancelled." -ForegroundColor Yellow
+        return
+    }
+
+    # Quick ping test
+    Write-Host "Testing $newIP..." -ForegroundColor Cyan
+    $pingOk = $false
+    try {
+        $result = ping -c 1 -W 2 $newIP 2>$null
+        if ($LASTEXITCODE -eq 0) { $pingOk = $true }
+    } catch {}
+    if (-not $pingOk) {
+        try {
+            $result = ping -n 1 -w 2000 $newIP 2>$null
+            if ($LASTEXITCODE -eq 0) { $pingOk = $true }
+        } catch {}
+    }
+
+    if ($pingOk) {
+        Write-Host "[OK] $newIP responds to ping" -ForegroundColor Green
+    } else {
+        Write-Host "[WARN] $newIP does not respond to ping" -ForegroundColor Yellow
+        Write-Host "Set it anyway? (y/n): " -ForegroundColor Yellow -NoNewline
+        $confirm = Read-Host
+        if ($confirm -ne "y") { return }
+    }
+
+    Apply-NewIP $newIP
+}
+
+function Apply-NewIP {
+    param([string]$NewIP)
+
+    $oldIP = $script:PiAddress
+    $script:PiAddress = $NewIP
+
+    Write-Host ""
+    Write-Host "[OK] Pi address updated: $oldIP -> $NewIP" -ForegroundColor Green
+    Write-Host ""
+
+    # Also update this script's default so it persists
+    $scriptPath = $PSCommandPath
+    if ($scriptPath -and (Test-Path $scriptPath)) {
+        $content = Get-Content $scriptPath -Raw
+        $updated = $content -replace 'PiAddress = "[^"]*"', "PiAddress = `"$NewIP`""
+        $updated = $updated -replace '\$TargetPiIP = "[^"]*"', "`$TargetPiIP = `"$NewIP`""
+        Set-Content $scriptPath -Value $updated -NoNewline
+        Write-Host "[OK] Default IP saved to pi-tool.ps1 (will persist)" -ForegroundColor Green
+    }
+
+    # Test SSH
+    Write-Host ""
+    Write-Host "Testing SSH to $PiUser@$NewIP..." -ForegroundColor Cyan
+    if (Test-PiConnection) {
+        Write-Host "[OK] Pi is reachable at new address!" -ForegroundColor Green
+    } else {
+        Write-Host "[WARN] Could not SSH to new address. Connection will be retried when needed." -ForegroundColor Yellow
+    }
+}
+
+# ============================================================================
 # MAIN MENU
 # ============================================================================
 
@@ -515,6 +709,7 @@ function Show-Menu {
     Write-Host "  [4] Download Deps- Get Python wheels for offline install" -ForegroundColor White
     Write-Host "  [5] Fresh Setup  - Complete first-time Pi setup" -ForegroundColor White
     Write-Host "  [6] Status       - Quick Pi health check" -ForegroundColor White
+    Write-Host "  [7] Find/Set IP  - Scan network or set Pi address" -ForegroundColor White
     Write-Host "  [Q] Quit" -ForegroundColor White
     Write-Host ""
     Write-Host "Choice: " -ForegroundColor Yellow -NoNewline
@@ -532,13 +727,14 @@ while ($true) {
         "4" { Invoke-DownloadDeps }
         "5" { Invoke-FreshSetup }
         "6" { Invoke-Status }
+        "7" { Invoke-FindAndSetIP }
         "Q" {
             Write-Host ""
             Write-Host "Bye!" -ForegroundColor Cyan
             exit 0
         }
         default {
-            Write-Host "Invalid choice. Pick 1-6 or Q." -ForegroundColor Red
+            Write-Host "Invalid choice. Pick 1-7 or Q." -ForegroundColor Red
         }
     }
 
