@@ -315,13 +315,19 @@ public class AutoShootCommand extends Command {
     
     /**
      * Updates LED action state based on current shooting status.
+     * FIRING = balls actively being fed (highest priority visual)
+     * SHOOTING = ready to fire but not yet feeding
+     * AIMING/SPOOLING = still getting ready
      */
     private void updateLEDState() {
         if (leds == null) return;
         
         // Determine priority action state
-        if (turretOnTarget && shooterReady && (allianceActive || gameState.isGreenLightPreShift() || gameState.isForceShootEnabled())) {
-            // Ready to shoot! (including green light pre-shift window or force shoot)
+        if (wasFiring) {
+            // Balls are actively being launched! Most dramatic animation.
+            leds.setAction(ActionState.FIRING);
+        } else if (turretOnTarget && shooterReady && (allianceActive || gameState.isGreenLightPreShift() || gameState.isForceShootEnabled())) {
+            // Ready to shoot but not yet feeding -- tell driver to hold/fire!
             leds.setAction(ActionState.SHOOTING);
         } else if (!turretOnTarget && !shooterReady) {
             // Both aiming and spooling - prioritize aiming

@@ -16,9 +16,17 @@ import frc.robot.Constants;
 import frc.robot.GameStateManager;
 
 /**
- * Turret subsystem - 270 deg rotation range centered at 0 deg (-135 deg to +135 deg) with PID position control.
- * Positive angles are counterclockwise, negative angles are clockwise (from top view).
- * Motor position 0 corresponds to turret facing forward (0 deg).
+ * Turret subsystem with bounded 0-360 deg internal position tracking.
+ * 
+ * Internal position is bounded [0, 360] and never counts beyond. The turret starts
+ * at STARTUP_ANGLE_DEG (180 deg) which represents "forward" (0 deg external).
+ * 
+ * There is a physical dead zone between MAX_ANGLE_DEG and MIN_ANGLE_DEG (going through
+ * 360/0). If the target is on the other side of the dead zone, the turret takes the
+ * long way around through the usable range to avoid the dead zone.
+ * 
+ * External interface: setTargetAngle() accepts -180 to +180 (0 = forward).
+ *                     getCurrentAngle() returns -180 to +180 (0 = forward).
  */
 public class TurretSubsystem extends SubsystemBase {
     
@@ -26,9 +34,13 @@ public class TurretSubsystem extends SubsystemBase {
     private final PositionDutyCycle positionControl;
     private final GameStateManager gameState = GameStateManager.getInstance();
     
-    private double currentAbsoluteAngle = 0.0;
-    private double targetAbsoluteAngle = 0.0;
-    private double commandedAngle = 0.0;
+    /** Internal position in bounded 0-360 degrees. 180 = forward at startup. */
+    private double currentAngle = Constants.Turret.STARTUP_ANGLE_DEG;
+    /** Target in bounded 0-360 degrees. */
+    private double targetAngle = Constants.Turret.STARTUP_ANGLE_DEG;
+    /** Smoothed commanded angle in bounded 0-360 degrees. */
+    private double commandedAngle = Constants.Turret.STARTUP_ANGLE_DEG;
+    
     private long lastTimestampNanos = System.nanoTime();
     private boolean initialized = false;
     private boolean hasWarnedNearLimit = false;
@@ -54,39 +66,38 @@ public class TurretSubsystem extends SubsystemBase {
         lastTimestampNanos = System.nanoTime();
     }
 
-    /** Set target angle (-180 to +180). Calculates best path within limits. */
-    public void setTargetAngle(double angle) {
-        double normalizedTarget = normalizeAngle(angle);
-        double option1 = calculateAbsoluteTarget(normalizedTarget, currentAbsoluteAngle);
-        double option2 = option1 + (option1 > currentAbsoluteAngle ? -360 : 360);
+    /** 
+     * Set target angle in external coordinates (-180 to +180, 0 = forward).
+     * Converts to internal 0-360 and routes around the dead zone if needed.
+     */
+    public void setTargetAngle(double externalAngle) {
+        // Convert external angle (-180..+180) to internal (0..360)
+        double internalTarget = externalToInternal(externalAngle);
         
-        boolean option1Valid = isWithinLimits(option1);
-        boolean option2Valid = isWithinLimits(option2);
+        // Clamp to usable range
+        internalTarget = clamp(internalTarget, Constants.Turret.MIN_ANGLE_DEG, Constants.Turret.MAX_ANGLE_DEG);
         
-        double bestTarget;
-        if (option1Valid && option2Valid) {
-            double travel1 = Math.abs(option1 - currentAbsoluteAngle);
-            double travel2 = Math.abs(option2 - currentAbsoluteAngle);
-            bestTarget = (travel1 <= travel2) ? option1 : option2;
-        } else if (option1Valid) {
-            bestTarget = option1;
-        } else if (option2Valid) {
-            bestTarget = option2;
-        } else {
-            bestTarget = clamp(option1, Constants.Turret.MIN_ANGLE_DEG, Constants.Turret.MAX_ANGLE_DEG);
-        }
-        
-        targetAbsoluteAngle = bestTarget;
+        // Check if the shortest path crosses the dead zone.
+        // If so, go the long way around through the usable range.
+        targetAngle = routeAroundDeadZone(currentAngle, internalTarget);
     }
 
-    public double getCurrentAngle() { return normalizeAngle(currentAbsoluteAngle); }
-    public double getCurrentAbsoluteAngle() { return currentAbsoluteAngle; }
-    public double getTargetAngle() { return normalizeAngle(targetAbsoluteAngle); }
-    public double getTargetAbsoluteAngle() { return targetAbsoluteAngle; }
+    /** Get current angle in external coordinates (-180 to +180, 0 = forward). */
+    public double getCurrentAngle() { return internalToExternal(currentAngle); }
+    
+    /** Get current angle in internal coordinates (0-360). */
+    public double getCurrentAbsoluteAngle() { return currentAngle; }
+    
+    /** Get target angle in external coordinates (-180 to +180, 0 = forward). */
+    public double getTargetAngle() { return internalToExternal(targetAngle); }
+    
+    /** Get target angle in internal coordinates (0-360). */
+    public double getTargetAbsoluteAngle() { return targetAngle; }
+    
     public double getMotorRotations() { return motor.getPosition().getValueAsDouble(); }
     
     public boolean isOnTarget() {
-        return Math.abs(currentAbsoluteAngle - targetAbsoluteAngle) < Constants.Turret.ON_TARGET_TOLERANCE_DEG;
+        return Math.abs(currentAngle - targetAngle) < Constants.Turret.ON_TARGET_TOLERANCE_DEG;
     }
 
     /** Get angle offset for a specific AprilTag. */
@@ -114,8 +125,8 @@ public class TurretSubsystem extends SubsystemBase {
         updateCurrentAngle();
         
         if (!initialized) {
-            commandedAngle = currentAbsoluteAngle;
-            targetAbsoluteAngle = currentAbsoluteAngle;
+            commandedAngle = currentAngle;
+            targetAngle = currentAngle;
             initialized = true;
         }
         
@@ -147,7 +158,7 @@ public class TurretSubsystem extends SubsystemBase {
         
         if (telemetryCounter >= 10) {
             telemetryCounter = 0;
-            DashboardHelper.putNumber(Category.DEBUG, "Turret/AbsAngle", currentAbsoluteAngle);
+            DashboardHelper.putNumber(Category.DEBUG, "Turret/InternalAngle", currentAngle);
             checkLimitWarnings();
         }
     }
@@ -159,7 +170,7 @@ public class TurretSubsystem extends SubsystemBase {
             Elastic.sendNotification(new Elastic.Notification()
                 .withLevel(NotificationLevel.WARNING)
                 .withTitle("Turret Near Limit!")
-                .withDescription("At " + (int)currentAbsoluteAngle + " deg")
+                .withDescription("At " + (int)currentAngle + " deg internal (" + (int)getCurrentAngle() + " deg)")
                 .withDisplaySeconds(2.0));
         } else if (!nearLimit) {
             hasWarnedNearLimit = false;
@@ -169,13 +180,18 @@ public class TurretSubsystem extends SubsystemBase {
     private void updateCurrentAngle() {
         double motorRotations = motor.getPosition().getValueAsDouble();
         double turretRotations = motorRotations / Constants.Turret.GEAR_RATIO;
-        currentAbsoluteAngle = turretRotations * 360.0;
-        if (Constants.Turret.MOTOR_INVERTED) currentAbsoluteAngle = -currentAbsoluteAngle;
+        double rawAngle = turretRotations * 360.0;
+        if (Constants.Turret.MOTOR_INVERTED) rawAngle = -rawAngle;
+        // Motor position 0 = STARTUP_ANGLE internally
+        currentAngle = clamp(Constants.Turret.STARTUP_ANGLE_DEG + rawAngle, 0.0, 360.0);
     }
 
     private void updateMotorPosition() {
-        double motorRots = (commandedAngle / 360.0) * Constants.Turret.GEAR_RATIO;
-        if (Constants.Turret.MOTOR_INVERTED) motorRots = -motorRots;
+        // Convert internal commanded angle back to motor rotations
+        // Motor position 0 = STARTUP_ANGLE internally
+        double turretDegrees = commandedAngle - Constants.Turret.STARTUP_ANGLE_DEG;
+        if (Constants.Turret.MOTOR_INVERTED) turretDegrees = -turretDegrees;
+        double motorRots = (turretDegrees / 360.0) * Constants.Turret.GEAR_RATIO;
         motor.setControl(positionControl.withPosition(motorRots));
     }
 
@@ -186,11 +202,14 @@ public class TurretSubsystem extends SubsystemBase {
         lastTimestampNanos = now;
 
         double maxDelta = Constants.Turret.MAX_ANGULAR_SPEED_DEG_PER_SEC * dt * speedMultiplier;
-        double delta = targetAbsoluteAngle - commandedAngle;
+        double delta = targetAngle - commandedAngle;
         
         commandedAngle = (Math.abs(delta) <= maxDelta) 
-            ? targetAbsoluteAngle 
+            ? targetAngle 
             : commandedAngle + Math.signum(delta) * maxDelta;
+        
+        // Clamp to usable range for safety
+        commandedAngle = clamp(commandedAngle, Constants.Turret.MIN_ANGLE_DEG, Constants.Turret.MAX_ANGLE_DEG);
     }
 
     private void initializeOffsets() {
@@ -202,33 +221,44 @@ public class TurretSubsystem extends SubsystemBase {
         }
     }
 
-    private double normalizeAngle(double angle) {
-        return ((angle + 180) % 360 + 360) % 360 - 180;
+    // ===== Coordinate Conversion =====
+
+    /** Convert external angle (-180..+180, 0=forward) to internal (0..360). */
+    private double externalToInternal(double externalAngle) {
+        double internal = Constants.Turret.STARTUP_ANGLE_DEG + externalAngle;
+        // Wrap to 0-360
+        internal = ((internal % 360.0) + 360.0) % 360.0;
+        return internal;
+    }
+
+    /** Convert internal angle (0..360) to external (-180..+180, 0=forward). */
+    private double internalToExternal(double internalAngle) {
+        double external = internalAngle - Constants.Turret.STARTUP_ANGLE_DEG;
+        // Normalize to -180..+180
+        external = ((external + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
+        return external;
+    }
+
+    // ===== Dead Zone Routing =====
+    private double routeAroundDeadZone(double from, double to) {
+
+        return to;
     }
 
     private double clamp(double value, double min, double max) {
         return Math.max(min, Math.min(max, value));
     }
     
-    private double calculateAbsoluteTarget(double normalizedTarget, double currentAbsolute) {
-        double diff = normalizedTarget - normalizeAngle(currentAbsolute);
-        return currentAbsolute + normalizeAngle(diff);
-    }
-    
-    private boolean isWithinLimits(double absoluteAngle) {
-        return absoluteAngle >= Constants.Turret.MIN_ANGLE_DEG && absoluteAngle <= Constants.Turret.MAX_ANGLE_DEG;
-    }
-    
     public boolean isAtLimit() {
-        double margin = 10.0;
-        return currentAbsoluteAngle <= Constants.Turret.MIN_ANGLE_DEG + margin
-            || currentAbsoluteAngle >= Constants.Turret.MAX_ANGLE_DEG - margin;
+        double margin = Constants.Turret.LIMIT_SAFETY_MARGIN_DEG;
+        return currentAngle <= Constants.Turret.MIN_ANGLE_DEG + margin
+            || currentAngle >= Constants.Turret.MAX_ANGLE_DEG - margin;
     }
     
     public void resetPosition() {
         motor.setPosition(0);
-        currentAbsoluteAngle = 0;
-        commandedAngle = 0;
-        targetAbsoluteAngle = 0;
+        currentAngle = Constants.Turret.STARTUP_ANGLE_DEG;
+        commandedAngle = Constants.Turret.STARTUP_ANGLE_DEG;
+        targetAngle = Constants.Turret.STARTUP_ANGLE_DEG;
     }
 }

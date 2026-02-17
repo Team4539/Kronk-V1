@@ -224,8 +224,12 @@ public class RobotContainer {
     
     // RB (hold): Intake -- driver deploys intake since they see the game pieces
     if (intake != null) {
-      driverController.rightBumper().onTrue(new DeployIntakeCommand(intake));
-      driverController.rightBumper().onFalse(new RetractIntakeCommand(intake));
+      driverController.rightBumper().onTrue(
+          new DeployIntakeCommand(intake)
+              .alongWith(Commands.runOnce(() -> { if (leds != null) leds.setAction(LEDSubsystem.ActionState.INTAKING); })));
+      driverController.rightBumper().onFalse(
+          new RetractIntakeCommand(intake)
+              .alongWith(Commands.runOnce(() -> { if (leds != null) leds.clearAction(); })));
     }
     
     // LB: Toggle field-centric / robot-centric (rarely used, bumper is fine)
@@ -304,7 +308,11 @@ public class RobotContainer {
               bottomPower = Constants.Shooter.DEFAULT_IDLE_POWER;
             }
             shooter.setManualPower(topPower, bottomPower);
-          }, shooter).finallyDo(() -> shooter.stop()));
+            if (leds != null) leds.setAction(LEDSubsystem.ActionState.SPOOLING);
+          }, shooter).finallyDo(() -> {
+            shooter.stop();
+            if (leds != null) leds.clearAction();
+          }));
     }
     
     // RB: Toggle shuttle mode (hub <-> trench)
@@ -331,13 +339,19 @@ public class RobotContainer {
     
     // A (hold): Intake deploy/retract -- operator backup for intake control
     if (intake != null) {
-      operatorController.a().onTrue(new DeployIntakeCommand(intake));
-      operatorController.a().onFalse(new RetractIntakeCommand(intake));
+      operatorController.a().onTrue(
+          new DeployIntakeCommand(intake)
+              .alongWith(Commands.runOnce(() -> { if (leds != null) leds.setAction(LEDSubsystem.ActionState.INTAKING); })));
+      operatorController.a().onFalse(
+          new RetractIntakeCommand(intake)
+              .alongWith(Commands.runOnce(() -> { if (leds != null) leds.clearAction(); })));
     }
     
     // B (hold): Aim turret only (pre-aim without shooting -- useful during waits)
     if (aimToPoseButtonCommand != null) {
-      operatorController.b().whileTrue(aimToPoseButtonCommand);
+      operatorController.b().whileTrue(
+          aimToPoseButtonCommand.beforeStarting(() -> { if (leds != null) leds.setAction(LEDSubsystem.ActionState.AIMING); })
+              .finallyDo(() -> { if (leds != null) leds.clearAction(); }));
     }
     
     // X: Emergency stop all shooter/feed motors

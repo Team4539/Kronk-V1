@@ -192,9 +192,12 @@ public final class Constants {
     public static final double GEAR_RATIO = 10.00537109375; // Calibrate with CalibrateTurretGearRatioCommand
     public static final boolean MOTOR_INVERTED = false;
     
-    // Motion limits (270 deg range, centered at 0 deg)
-    public static final double MIN_ANGLE_DEG = -135.0;
-    public static final double MAX_ANGLE_DEG = 56;
+    // Bounded 0-360 position system. STARTUP_ANGLE is internal position at power-on (forward).
+    // Usable range: MIN_ANGLE_DEG to MAX_ANGLE_DEG (going CW through 0-360).
+    // Dead zone: MAX_ANGLE_DEG -> wraps through 360/0 -> MIN_ANGLE_DEG (cannot traverse).
+    public static final double STARTUP_ANGLE_DEG = 180.0; // Internal angle when turret faces forward (0 deg external)
+    public static final double MIN_ANGLE_DEG = 45.0;      // Lower usable limit (was -135 deg from forward)
+    public static final double MAX_ANGLE_DEG = 236.0;     // Upper usable limit (was +56 deg from forward)
 
     public static final double LIMIT_SAFETY_MARGIN_DEG = 10.0;
     

@@ -120,7 +120,8 @@ public class LEDSubsystem extends SubsystemBase {
      */
     public enum ActionState {
         IDLE,           // Robot doing nothing special
-        SHOOTING,       // Actively shooting
+        FIRING,         // Actively launching balls (feed motors running)
+        SHOOTING,       // Ready to shoot (turret aimed, shooter spun up)
         AIMING,         // Aiming turret at target
         SPOOLING,       // Spinning up shooter wheels
         DRIVING,        // Just driving (lowest priority)
@@ -1330,6 +1331,88 @@ public class LEDSubsystem extends SubsystemBase {
     }
     
     /**
+     * FIRING PATTERN - Explosive rapid-fire strobe with outward blasts!
+     * Much more intense than the "ready to shoot" pattern. Rapid alternation
+     * between bright white and green with violent outward shockwaves.
+     * The whole strip pulses like a muzzle flash with each "shot."
+     * Onboard LEDs strobe white/green rapidly.
+     * Instantly says: "BALLS ARE FLYING RIGHT NOW!"
+     */
+    private void setFiringPattern() {
+        double currentTime = Timer.getFPGATimestamp();
+        
+        int stripStart = Constants.LEDs.STRIP_START;
+        int stripCount = Constants.LEDs.STRIP_COUNT;
+        int center = stripCount / 2;
+        
+        clearBuffer();
+        
+        // Onboard LEDs: rapid white/green strobe (muzzle flash effect)
+        boolean onboardFlash = ((int)(currentTime * 20) % 2) == 0;
+        setOnboardColor(onboardFlash ? Constants.LEDs.WHITE : Constants.LEDs.SHOOTING_COLOR);
+        
+        // "Muzzle flash" pulse - the whole strip flashes white briefly every 0.15s
+        double flashPhase = (currentTime % 0.15) / 0.15;
+        boolean inFlash = flashPhase < 0.3;  // First 30% of cycle is the white flash
+        
+        if (inFlash) {
+            // FLASH - bright white burst across entire strip
+            double flashIntensity = 1.0 - (flashPhase / 0.3);  // Fade out quickly
+            flashIntensity = flashIntensity * flashIntensity;
+            for (int i = 0; i < stripCount; i++) {
+                int brightness = (int)(255 * flashIntensity * masterBrightness);
+                ledBuffer[stripStart + i][0] = brightness;
+                ledBuffer[stripStart + i][1] = brightness;
+                ledBuffer[stripStart + i][2] = brightness;
+            }
+        } else {
+            // Between flashes - fast outward shockwaves from center
+            // Multiple overlapping rings moving FAST (6x speed of ready pattern)
+            int numRings = 4;
+            for (int ring = 0; ring < numRings; ring++) {
+                double ringPhase = (currentTime * 6.0 + ring * 0.25) % 1.0;
+                int ringPos = (int)(ringPhase * center);
+                int trailLength = 4;
+                
+                for (int t = 0; t < trailLength; t++) {
+                    int pos = ringPos - t;
+                    if (pos >= 0 && pos < center) {
+                        double fade = 1.0 - ((double) t / trailLength);
+                        fade = fade * fade;
+                        
+                        int r, g, b;
+                        if (t == 0) {
+                            // White-hot leading edge
+                            r = (int)(255 * fade * masterBrightness);
+                            g = (int)(255 * fade * masterBrightness);
+                            b = (int)(200 * fade * masterBrightness);
+                        } else {
+                            r = (int)(Constants.LEDs.SHOOTING_COLOR[0] * fade * masterBrightness);
+                            g = (int)(Constants.LEDs.SHOOTING_COLOR[1] * fade * masterBrightness);
+                            b = (int)(Constants.LEDs.SHOOTING_COLOR[2] * fade * masterBrightness);
+                        }
+                        
+                        int leftIdx = stripStart + center - pos;
+                        if (leftIdx >= stripStart) {
+                            ledBuffer[leftIdx][0] = Math.max(ledBuffer[leftIdx][0], r);
+                            ledBuffer[leftIdx][1] = Math.max(ledBuffer[leftIdx][1], g);
+                            ledBuffer[leftIdx][2] = Math.max(ledBuffer[leftIdx][2], b);
+                        }
+                        int rightIdx = stripStart + center + pos;
+                        if (rightIdx < stripStart + stripCount) {
+                            ledBuffer[rightIdx][0] = Math.max(ledBuffer[rightIdx][0], r);
+                            ledBuffer[rightIdx][1] = Math.max(ledBuffer[rightIdx][1], g);
+                            ledBuffer[rightIdx][2] = Math.max(ledBuffer[rightIdx][2], b);
+                        }
+                    }
+                }
+            }
+        }
+        
+        pushBuffer();
+    }
+    
+    /**
      * AUTO MODE PATTERN - Dual alliance-colored comets racing opposite directions.
      * Two bright comets circling the strip in opposite directions with white-hot tips.
      * Energetic and fast -- clearly distinct from teleop's calmer wave.
@@ -1517,10 +1600,17 @@ public class LEDSubsystem extends SubsystemBase {
             return;
         }
         
-        // PRIORITY 2: Ready to shoot - Override everything (driver needs to know they can fire!)
+        // PRIORITY 2: Actively firing - Override everything (driver needs instant feedback!)
+        if (currentAction == ActionState.FIRING) {
+            currentPatternName = "FIRING!";
+            setFiringPattern();
+            return;
+        }
+        
+        // PRIORITY 3: Ready to shoot - driver needs to know they can fire!
         if (currentAction == ActionState.SHOOTING) {
             currentPatternName = "SHOOT NOW";
-            setShootNowPattern();  // Solid green strobe - 
+            setShootNowPattern();
             return;
         }
         
@@ -1529,48 +1619,11 @@ public class LEDSubsystem extends SubsystemBase {
         GamePhase phase = gameState.getGamePhase();
         boolean inEndgame = (matchTime > 0 && matchTime <= 30.0);
         
-        // PRIORITY 3: Critical actions (aiming, spooling, climbing, intaking)
-        // These override time warnings because robot is actively doing something important
-        if (currentState == LEDState.AUTO || currentState == LEDState.TELEOP) {
-            switch (currentAction) {
-                case AIMING:
-                    currentPatternName = "Targeting";
-                    setTargetingPattern();
-                    return;
-                    
-                case SPOOLING:
-                    currentPatternName = "Spooling Up";
-                    setPowerFillPattern();
-                    return;
-                    
-                case CLIMBING:
-                    currentPatternName = "Climbing";
-                    setClimbRisingPattern();
-                    return;
-                    
-                case INTAKING:
-                    currentPatternName = "Intaking";
-                    setIntakeFlowPattern();
-                    return;
-                    
-                case DRIVING:
-                case IDLE:
-                    // Fall through to check time warnings
-                    break;
-                    
-                case SHOOTING:
-                case ESTOP:
-                case BROWNOUT:
-                    return;
-                    
-            }
-        }
-        
-        // PRIORITY 4: Endgame warning (warnings BEFORE the 30-second endgame mark)
-        // Only show if not doing critical actions
-        // matchTime counts DOWN, so matchTime of 40 = 40 seconds left, 30 = endgame starts
+        // PRIORITY 4: Endgame warnings and urgency pattern
+        // Endgame takes priority over internal actions (aiming, spooling, etc.)
+        // because the driver needs to know time is running out regardless of what
+        // the robot is doing. FIRING/SHOOTING still override since that's active scoring.
         if (currentState == LEDState.TELEOP && !inEndgame && matchTime > 0) {
-            // Time until endgame starts (positive means endgame hasn't started yet)
             double timeUntilEndgame = matchTime - 30.0;
             
             // 10 second warning before endgame (matchTime 37-40)
@@ -1595,14 +1648,51 @@ public class LEDSubsystem extends SubsystemBase {
             }
         }
         
-        // Once in endgame phase, show special endgame pattern (if idle)
-        if (currentState == LEDState.TELEOP && phase == GamePhase.END_GAME && currentAction == ActionState.IDLE) {
+        // Once in endgame phase, show endgame urgency pattern
+        if (currentState == LEDState.TELEOP && phase == GamePhase.END_GAME) {
             currentPatternName = "Endgame Urgency";
             setEndgameUrgencyPattern();
             return;
         }
         
-        // PRIORITY 5: Alliance shift warnings (only during TELEOP and when idle/driving)
+        // PRIORITY 5: Internal robot actions (aiming, spooling, climbing, intaking)
+        // These show what the robot is actively doing but are less critical than time warnings
+        if (currentState == LEDState.AUTO || currentState == LEDState.TELEOP) {
+            switch (currentAction) {
+                case AIMING:
+                    currentPatternName = "Targeting";
+                    setTargetingPattern();
+                    return;
+                    
+                case SPOOLING:
+                    currentPatternName = "Spooling Up";
+                    setPowerFillPattern();
+                    return;
+                    
+                case CLIMBING:
+                    currentPatternName = "Climbing";
+                    setClimbRisingPattern();
+                    return;
+                    
+                case INTAKING:
+                    currentPatternName = "Intaking";
+                    setIntakeFlowPattern();
+                    return;
+                    
+                case DRIVING:
+                case IDLE:
+                    // Fall through to check shift warnings
+                    break;
+                    
+                case FIRING:
+                case SHOOTING:
+                case ESTOP:
+                case BROWNOUT:
+                    return;
+            }
+        }
+        
+        // PRIORITY 6: Alliance shift warnings (only during TELEOP and when idle/driving)
         // These use alliance-aware methods - only warn before OUR shifts
         if (currentState == LEDState.TELEOP) {
             // 5 second warning - "HEAD BACK" - start returning to scoring position
