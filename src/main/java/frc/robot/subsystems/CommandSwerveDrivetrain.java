@@ -82,10 +82,10 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     /** Auto-shuttle boundary line */
     private final FieldObject2d m_shuttleBoundaryObject;
 
-    /** Pi-computed target point (where Pi says turret is aiming) */
+    /** Computed target point (where ShootingCalculator says turret is aiming) */
     private final FieldObject2d m_piTargetObject;
 
-    /** Pi-computed aim line (from turret to Pi's calculated target) */
+    /** Computed aim line (from turret to ShootingCalculator's calculated target) */
     private final FieldObject2d m_piAimLineObject;
 
     // FIELD INITIALIZATION HELPER - Initializes field objects (must be called in constructor)
@@ -99,8 +99,8 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         m_aimTargetObject = m_field2d.getObject("Current Target");
         m_aimLineObject = m_field2d.getObject("Aim Line");
         m_shuttleBoundaryObject = m_field2d.getObject("Shuttle Boundary");
-        m_piTargetObject = m_field2d.getObject("Pi Target");
-        m_piAimLineObject = m_field2d.getObject("Pi Aim Line");
+        m_piTargetObject = m_field2d.getObject("Calc Target");
+        m_piAimLineObject = m_field2d.getObject("Calc Aim Line");
         
         // Publish to SmartDashboard at top-level "Field"
         DashboardHelper.putData(Category.MATCH, "Field", m_field2d);
@@ -381,8 +381,8 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         Translation2d turretPosition = getTurretFieldPosition(currentPose);
         drawAimLine(turretPosition, currentTarget);
         
-        // Draw Pi-based aim line using actual Pi shooting solution (turret angle + distance)
-        drawPiAimLine(currentPose, turretPosition);
+        // Draw ShootingCalculator aim line using actual shooting solution (turret angle + distance)
+        drawCalculatedAimLine(currentPose, turretPosition);
         
         // Draw shuttle boundary line
         drawShuttleBoundaryLine(alliance);
@@ -447,14 +447,14 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     }
 
     /**
-     * Draws the computed aim line on the field.
-     * Uses the ShootingCalculator's turret angle and distance to show exactly where
-     * the robot will shoot, including lead angle compensation.
+     * Draws the ShootingCalculator's computed aim line on the field.
+     * Uses the calculator's turret angle and distance to show exactly where
+     * the turret will shoot, including lead angle compensation.
      * 
      * @param robotPose Current robot pose
      * @param turretPosition Turret position in field coordinates
      */
-    private void drawPiAimLine(Pose2d robotPose, Translation2d turretPosition) {
+    private void drawCalculatedAimLine(Pose2d robotPose, Translation2d turretPosition) {
         ShootingCalculator calc = ShootingCalculator.getInstance();
         
         double turretAngle = calc.getTurretAngle();  // degrees, robot-relative

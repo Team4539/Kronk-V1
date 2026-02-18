@@ -8,40 +8,30 @@ import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.util.Elastic;
 
 /**
- * DISTANCE OFFSET CALIBRATION COMMAND
- * Calibration command for fine-tuning distance-based offsets.
- * 
- * This command lets you observe how the shooter performs at different distances
- * and record global offsets that apply to the entire calibration table.
- * 
- * USE CASE:
+ * Calibration command for fine-tuning shooter power offsets at various distances.
  * 
  * After initial calibration, you might find that shots consistently:
- * - Fall short - Increase bottom motor offset
- * - Go too high - Decrease top motor offset
- * - Miss left/right - Adjust turret angle offset
+ * - Fall short -> Increase bottom motor power
+ * - Go too high -> Decrease top motor power
+ * - Miss left/right -> Adjust turret angle offset in CalibrationManager
  * 
- * Rather than re-calibrate the entire table, you can add small global offsets.
+ * This command lets you manually set shooter power via CalibrationManager sliders
+ * while observing the distance readout, so you can find the right adjustments.
  * 
  * HOW TO USE:
  * 
  * 1. Run this command with the robot at a known distance
- * 2. Use distance-based (interpolated) power by setting UseManual = false
+ * 2. Adjust Tuning/Shooter/TopPower and BottomPower sliders
  * 3. Shoot and observe results
- * 4. Adjust Cal/Shooter/TopOffset and Cal/Shooter/BottomOffset
- * 5. Shoot again until shots are consistently good
- * 6. Repeat at multiple distances to verify offsets work everywhere
- * 7. Click "Cal/PrintAllConstants" to get the offset values
+ * 4. Repeat at multiple distances to verify
+ * 5. Record good values via CalibrationManager's RecordPoint button
  * 
  * TIPS:
  * 
- * - Start with small offsets (+/-0.02 to +/-0.05)
- * - Positive offset = more power
- * - Test at multiple distances before committing to an offset
- * - If different distances need different corrections, the calibration
- *   table itself needs adjustment (use FullShooterCalibrationCommand)
- * 
- * @author Team 4539
+ * - Start with small changes (+/-0.02 to +/-0.05)
+ * - Test at multiple distances before committing
+ * - If different distances need very different corrections, the calibration
+ *   table itself needs updating (use FullShooterCalibrationCommand)
  */
 public class DistanceOffsetCalibrationCommand extends Command {
     

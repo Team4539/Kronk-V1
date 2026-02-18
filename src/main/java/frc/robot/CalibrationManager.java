@@ -7,8 +7,7 @@ import java.util.TreeMap;
 /**
  * Live-tuning sliders for calibration sessions.
  * 
- * KISS: SmartDashboard sliders for tuning, record button, and code export.
- * No AdvantageScope double-logging. No game state controls (those are on the controllers).
+ * SmartDashboard sliders for tuning, record button, and code export.
  * 
  * WORKFLOW:
  *   1. Drive to known distance from target

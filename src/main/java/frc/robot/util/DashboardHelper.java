@@ -4,7 +4,7 @@ import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 
 /**
- * Organizes SmartDashboard into 3 clean folders:
+ * Organizes SmartDashboard entries into categorized folders:
  *   MATCH/   - Driver-facing status (shoot unlocked, target mode, etc.)
  *   TUNING/  - Calibration sliders and commands (pit crew / testing)
  *   DEBUG/   - Diagnostic data (only when troubleshooting)

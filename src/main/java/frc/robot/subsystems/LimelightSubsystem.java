@@ -75,9 +75,9 @@ public class LimelightSubsystem extends SubsystemBase {
     
     /**
      * Creates the Limelight subsystem.
-     * Connects to NetworkTables and sets up field visualization.
+     * Connects to NetworkTables and initializes tunable target position offsets.
      * 
-     * NOTE: Field visualization is now handled by CommandSwerveDrivetrain's "Field" widget.
+     * NOTE: Field visualization is handled by CommandSwerveDrivetrain.
      * This subsystem only publishes Limelight-specific telemetry.
      */
     public LimelightSubsystem() {
@@ -159,7 +159,6 @@ public class LimelightSubsystem extends SubsystemBase {
     /**
      * Estimate distance to the currently tracked AprilTag.
      * Uses the pose estimate if available, otherwise estimates from target area.
-     * This is used for the turret training system.
      * @return Estimated distance in meters
      */
     public double getEstimatedDistanceToTag() {

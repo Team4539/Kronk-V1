@@ -49,9 +49,9 @@ public class Robot extends TimedRobot {
 
   @Override
   public void disabledInit() {
-    // SAFETY: Explicitly stop all motor subsystems immediately on disable.
-    // This is a belt-and-suspenders approach -- each subsystem's periodic()
-    // also guards against disabled-state motor commands individually.
+    // SAFETY: Stop all motors immediately on disable.
+    // Each subsystem's periodic() also sends zero power when disabled,
+    // but this ensures an immediate stop at the transition.
     m_robotContainer.stopAllMotors();
     
     setLEDState(LEDState.DISABLED);

@@ -5,9 +5,12 @@ import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 
 /**
- * Tracks alliance color, scoring windows, and target selection.
+ * Tracks alliance color, game phase timing, scoring windows, and target selection.
  * 
- * KISS: Game logic only. No dashboard-driven test modes.
+ * Manages the alternating alliance shift system where each alliance has
+ * designated 25-second scoring windows. Also handles shuttle mode
+ * (automatic or manual) for switching between hub and trench targets.
+ * 
  * Use Constants.SubsystemEnabled to disable subsystems for bench testing.
  */
 public class GameStateManager {
@@ -197,6 +200,16 @@ public class GameStateManager {
     /** Can we shoot right now? */
     public boolean canShoot() {
         return isGreenLightPreShift() || currentTargetMode != TargetMode.DISABLED;
+    }
+    
+    /** Whether auto-aim is enabled. Always returns true (no toggle exists). */
+    public boolean isAutoAimEnabled() {
+        return true;
+    }
+    
+    /** Alias for getSecondsUntilOurNextShift() - seconds until our alliance is active. */
+    public double getTimeUntilActive() {
+        return getSecondsUntilOurNextShift();
     }
     
     // ========================================================================

@@ -6,47 +6,31 @@ import frc.robot.subsystems.LimelightSubsystem;
 import frc.robot.util.Elastic;
 
 /**
- * LIMELIGHT CALIBRATION COMMAND
- * Calibration command for tuning Limelight camera mounting and vision trust.
+ * Calibration command for verifying Limelight camera pose estimation accuracy.
  * 
- * This command allows live adjustment of:
- * - Camera mounting offsets (X, Y, Z position on robot)
- * - Camera pitch angle
- * - Vision measurement standard deviations (trust levels)
+ * Allows you to compare the Limelight's reported robot position against a known
+ * physical position to identify and correct mounting or configuration errors.
  * 
  * HOW TO USE:
  * 
- * CAMERA MOUNTING CALIBRATION:
+ * POSITION VALIDATION:
  * 1. Place robot at a known position on the field
- * 2. Compare "Limelight/PoseX/Y" to your known position
- * 3. Adjust Cal/Limelight/XOffset, YOffset, ZOffset, Pitch
- * 4. Repeat until vision pose matches physical position
+ * 2. Enter the known X/Y into Cal/Limelight/KnownX and KnownY
+ * 3. Compare reported pose to your known position
+ * 4. Click "Cal/Limelight/ValidatePosition" for an accuracy grade
  * 
- * VISION TRUST CALIBRATION:
- * 1. Move the robot around while viewing the pose estimate
- * 2. If pose jumps around too much: INCREASE std dev values
- * 3. If pose is too slow to update: DECREASE std dev values
- * 4. Values of 0.1-0.5 are typical starting points
- * 
- * WHAT EACH VALUE DOES:
+ * WHAT EACH CAMERA OFFSET DOES (in Constants.Limelight):
  * 
  * CAMERA_X_OFFSET: Forward/backward from robot center (+ = forward)
  * CAMERA_Y_OFFSET: Left/right from robot center (+ = left)
  * CAMERA_Z_OFFSET: Height from ground to camera lens
  * CAMERA_PITCH_DEGREES: Tilt angle (+ = tilted up)
  * 
- * VISION_STD_DEV_X: How much to trust X position (lower = trust more)
- * VISION_STD_DEV_Y: How much to trust Y position
- * VISION_STD_DEV_THETA: How much to trust rotation
+ * VISION TRUST (std dev values in Constants.Limelight):
  * 
- * ADVANTAGESCOPE TIPS:
- * 
- * 1. Open the "Limelight Field" widget to see pose visualization
- * 2. Compare Limelight pose to odometry pose
- * 3. If they disagree significantly, check camera mounting
- * 4. Graph std devs vs pose jitter to find optimal values
- * 
- * @author Team 4539
+ * Lower std dev = trust vision more, higher = trust odometry more.
+ * Scaled automatically by distance (farther from tags = less trust).
+ * Values of 0.1-0.5 are typical starting points.
  */
 public class LimelightCalibrationCommand extends Command {
     
@@ -83,12 +67,12 @@ public class LimelightCalibrationCommand extends Command {
         SmartDashboard.putNumber("Cal/Limelight/KnownY", 0.0);
         SmartDashboard.putBoolean("Cal/Limelight/ValidatePosition", false);
         
-        SmartDashboard.putString("Cal/Status", "LIMELIGHT CALIBRATION - Adjust camera mounting and vision trust");
+        SmartDashboard.putString("Cal/Status", "LIMELIGHT CALIBRATION - Compare vision pose to known position");
         SmartDashboard.putString("Cal/Instructions", 
             "1. Place robot at known field position. " +
             "2. Enter known X/Y in Cal/Limelight/KnownX/Y. " +
-            "3. Adjust offsets until pose matches. " +
-            "4. Tune std devs for smooth tracking.");
+            "3. Click ValidatePosition for accuracy grade. " +
+            "4. If error is high, check camera mounting in Constants.Limelight.");
         
         Elastic.sendNotification(new Elastic.Notification(
             Elastic.NotificationLevel.INFO, "Limelight Calibration",

@@ -20,17 +20,18 @@ import frc.robot.util.Elastic;
 import frc.robot.util.Elastic.NotificationLevel;
 
 /**
- * LED subsystem using CTRE CANdle - because robots should look cool!
+ * LED subsystem using CTRE CANdle for visual feedback.
  * 
- * This handles all the visual feedback for the drivers and pit crew:
- * - Pre-match diagnostics (are all systems go?)
+ * Provides status indicators for drivers and pit crew:
+ * - Pre-match diagnostics (auto selected, FMS connection)
  * - Alliance colors during the match
  * - Action feedback (shooting, aiming, intaking, etc.)
- * - Warning flashes for E-stops and endgame
- * - Victory celebration after matches! 
+ * - Warning flashes for shift timing and endgame
+ * - Post-match celebration animation
  * 
- * The LEDs follow a state machine pattern, with the main robot state
- * taking priority over action states (which are temporary overlays).
+ * Uses a state machine pattern: the main robot state (LEDState) controls
+ * the base pattern, and temporary action overlays (ActionState) show
+ * what the robot is actively doing.
  */
 public class LEDSubsystem extends SubsystemBase {
     
@@ -149,7 +150,7 @@ public class LEDSubsystem extends SubsystemBase {
         candleConfig = new CANdleConfiguration();
         candleConfig.LED.LossOfSignalBehavior = LossOfSignalBehaviorValue.KeepRunning;
         candleConfig.FutureProofConfigs = true;
-        candleConfig.LED.StripType = StripTypeValue.GRB;  // Standard addressable RGB (ARGB) LEDs
+        candleConfig.LED.StripType = StripTypeValue.GRB;  // GRB is the standard WS2812B LED data format
         
         bootStartTime = Timer.getFPGATimestamp();
         stateStartTime = bootStartTime;

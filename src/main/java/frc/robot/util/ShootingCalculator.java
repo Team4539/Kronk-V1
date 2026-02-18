@@ -14,15 +14,12 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /**
- * On-board shooting calculator - replaces the Raspberry Pi coprocessor.
+ * On-board shooting calculator running on the roboRIO.
  * 
- * Does everything locally on the roboRIO:
+ * Computes the full shooting solution every cycle:
  *   1. Calculates turret angle to target using robot pose + turret offset
  *   2. Interpolates flywheel RPM from distance-based lookup tables
- *   3. Compensates for robot velocity (shooting on the fly)
- * 
- * This is simpler, faster (no NetworkTables lag), and more reliable than
- * offloading to a separate computer. Standard FRC approach used by top teams.
+ *   3. Compensates for robot velocity (lead angle for shooting while moving)
  * 
  * USAGE:
  *   Call update() every robot cycle with current pose and speeds.
@@ -87,7 +84,7 @@ public class ShootingCalculator {
     }
 
     private ShootingCalculator() {
-        System.out.println("[ShootingCalculator] Initialized - on-board shooting ready");
+        System.out.println("[ShootingCalculator] Initialized");
     }
 
     // ========================================================================
@@ -98,10 +95,10 @@ public class ShootingCalculator {
      * Recalculate the full shooting solution.
      * Call this every 20ms cycle from RobotContainer.updateVisionPose().
      * 
-     * @param robotPose      Current robot pose on the field (from odometry + vision fusion)
-     * @param chassisSpeeds   Current robot velocity (robot-relative)
-     * @param targetMode      Current target mode (HUB, TRENCH, or DISABLED)
-     * @param turretAngleOffset  Tunable turret angle offset from CalibrationManager (degrees)
+     * @param robotPose         Current robot pose on the field (from odometry + vision fusion)
+     * @param chassisSpeeds     Current robot velocity (robot-relative)
+     * @param targetMode        Current target mode (HUB, TRENCH, or DISABLED)
+     * @param turretAngleOffset Tunable turret angle offset from CalibrationManager (degrees)
      */
     public void update(Pose2d robotPose, ChassisSpeeds chassisSpeeds,
                        TargetMode targetMode, double turretAngleOffset) {

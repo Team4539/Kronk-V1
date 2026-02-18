@@ -16,9 +16,9 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
 
 /**
- * Controls the intake mechanism with a single pivot motor and a roller motor.
- * Uses a CANcoder for absolute position feedback and a WPILib PID controller
- * that works directly in degrees -- no gear ratio math needed.
+ * Controls the intake mechanism with a pivot motor, a roller motor,
+ * and a CANcoder for absolute position feedback. Uses a WPILib PID
+ * controller that works in degrees and outputs duty cycle to the pivot motor.
  */
 public class IntakeSubsystem extends SubsystemBase {
     

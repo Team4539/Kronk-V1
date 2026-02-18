@@ -14,17 +14,18 @@ import frc.robot.subsystems.TurretFeedSubsystem;
 import frc.robot.subsystems.TurretSubsystem;
 import frc.robot.util.Elastic;
 import frc.robot.util.Elastic.NotificationLevel;
-import frc.robot.util.PiShootingHelper;
+import frc.robot.util.ShootingCalculator;
 
 /**
- * The big one! This command handles everything needed for fully automated shooting.
+ * Fully automated shooting command. Handles turret aiming, shooter spin-up,
+ * and ball feeding in one seamless operation.
  * 
- * It combines turret aiming, shooter control, and ball feeding into one seamless
- * operation. The command is alliance-aware (only shoots when our window is active)
- * and can even do SHOOTING ON THE FLY with velocity-based lead compensation!
+ * Alliance-aware: only feeds balls when our scoring window is active
+ * (or during green-light pre-shift / force-shoot override).
  * 
- * All turret/shooter calculations are offloaded to the Raspberry Pi coprocessor
- * via PiShootingHelper. Falls back to calibration tables if Pi is unreachable.
+ * All turret/shooter calculations come from ShootingCalculator, which is
+ * updated every cycle by RobotContainer.updateVisionPose(). This command
+ * reads those results and controls the subsystems accordingly.
  */
 public class AutoShootCommand extends Command {
     
@@ -34,11 +35,11 @@ public class AutoShootCommand extends Command {
     private final ShooterSubsystem shooter;
     private final LimelightSubsystem limelight;
     @SuppressWarnings("unused")
-    private final CommandSwerveDrivetrain drivetrain; // For velocity data (used by RobotContainer.updateVisionPose)
+    private final CommandSwerveDrivetrain drivetrain; // Reserved for future use (e.g., auto-stop while shooting)
     private final GameStateManager gameState;
     private final LEDSubsystem leds; // Optional - can be null
     private final TurretFeedSubsystem turretFeed; // Optional - can be null
-    private final PiShootingHelper piHelper;
+    private final ShootingCalculator shootingCalc;
     
     // STATE TRACKING
     
@@ -75,23 +76,22 @@ public class AutoShootCommand extends Command {
     // CONSTRUCTOR
     
     /**
-     * Creates the auto shoot command (basic version without ball handling).
-     * NOTE: For shooting on the fly, use the constructor with drivetrain.
+     * Creates the auto shoot command (turret + shooter only, no feed motor).
      * 
      * @param turret The turret subsystem for aiming
      * @param shooter The shooter subsystem for launching
-     * @param limelight The limelight subsystem for distance/angle calculation
+     * @param limelight The limelight subsystem for pose estimation
      */
     public AutoShootCommand(TurretSubsystem turret, ShooterSubsystem shooter, LimelightSubsystem limelight) {
         this(turret, shooter, limelight, null, null, null);
     }
     
     /**
-     * Creates the auto shoot command with LED feedback but no ball handling.
+     * Creates the auto shoot command with LED feedback but no feed motor.
      * 
      * @param turret The turret subsystem for aiming
      * @param shooter The shooter subsystem for launching
-     * @param limelight The limelight subsystem for distance/angle calculation
+     * @param limelight The limelight subsystem for pose estimation
      * @param leds The LED subsystem for visual feedback (optional, can be null)
      */
     public AutoShootCommand(TurretSubsystem turret, ShooterSubsystem shooter, LimelightSubsystem limelight, LEDSubsystem leds) {
@@ -99,15 +99,14 @@ public class AutoShootCommand extends Command {
     }
     
     /**
-     * Creates the full auto shoot command with LED feedback and ball handling.
-     * When turretFeed is provided, balls are automatically fed when ready.
-     * NOTE: For shooting on the fly, pass drivetrain to get velocity data.
+     * Creates the auto shoot command with LED feedback and feed motor control.
+     * When turretFeed is provided, balls are automatically fed into the shooter when ready.
      * 
      * @param turret The turret subsystem for aiming
      * @param shooter The shooter subsystem for launching
-     * @param limelight The limelight subsystem for distance/angle calculation
+     * @param limelight The limelight subsystem for pose estimation
      * @param leds The LED subsystem for visual feedback (optional, can be null)
-     * @param turretFeed The turret feed subsystem for ball feeding (optional, can be null)
+     * @param turretFeed The turret feed subsystem for feeding balls (optional, can be null)
      */
     public AutoShootCommand(TurretSubsystem turret, ShooterSubsystem shooter, LimelightSubsystem limelight, 
                            LEDSubsystem leds, TurretFeedSubsystem turretFeed) {
@@ -115,15 +114,16 @@ public class AutoShootCommand extends Command {
     }
     
     /**
-     * Creates the full auto shoot command with shooting on the fly support.
-     * When drivetrain is provided, lead angle compensation is applied based on robot velocity.
+     * Creates the full auto shoot command with all subsystems.
+     * Lead angle compensation is handled by ShootingCalculator using drivetrain
+     * velocity data provided by RobotContainer.updateVisionPose().
      * 
      * @param turret The turret subsystem for aiming
      * @param shooter The shooter subsystem for launching
-     * @param limelight The limelight subsystem for distance/angle calculation
+     * @param limelight The limelight subsystem for pose estimation
      * @param leds The LED subsystem for visual feedback (optional, can be null)
-     * @param turretFeed The turret feed subsystem for ball feeding (optional, can be null)
-     * @param drivetrain The swerve drivetrain for velocity data (optional, can be null for no lead compensation)
+     * @param turretFeed The turret feed subsystem for feeding balls (optional, can be null)
+     * @param drivetrain The swerve drivetrain (optional, reserved for future use)
      */
     public AutoShootCommand(TurretSubsystem turret, ShooterSubsystem shooter, LimelightSubsystem limelight, 
                            LEDSubsystem leds, TurretFeedSubsystem turretFeed,
@@ -135,9 +135,9 @@ public class AutoShootCommand extends Command {
         this.leds = leds;
         this.turretFeed = turretFeed;
         this.gameState = GameStateManager.getInstance();
-        this.piHelper = PiShootingHelper.getInstance();
+        this.shootingCalc = ShootingCalculator.getInstance();
         
-        // Requires turret and shooter, plus ball handling if provided
+        // Requires turret and shooter, plus feed motor if provided
         addRequirements(turret, shooter);
         if (turretFeed != null) {
             addRequirements(turretFeed);
@@ -217,22 +217,16 @@ public class AutoShootCommand extends Command {
         // ----- Check shooter ready status -----
         shooterReady = shooter.isReady();
         
-        // ----- Control ball handling subsystems -----
-        // Only feed balls when turret is aimed, shooter is ready, and alliance is active
+        // ----- Control turret feed motor -----
+        // Only feed balls when turret is aimed, shooter is spun up, and alliance is active
         boolean firing = isReadyToFire();
         if (firing) {
-            // Fire the balls!
+            // Feed balls into the shooter
             if (turretFeed != null) {
                 turretFeed.setShoot();
             }
-            
-            // Snapshot training data on the RISING EDGE (first cycle of firing).
-            // This captures the exact robot state at the moment the ball is launched.
-            if (!wasFiring) {
-                piHelper.snapshotShotData();
-            }
         } else {
-            // Not ready - keep ball handling in idle (staging mode)
+            // Not ready - keep feed in idle mode
             idleBallHandling();
         }
         wasFiring = firing;
@@ -315,7 +309,7 @@ public class AutoShootCommand extends Command {
     
     /**
      * Updates LED action state based on current shooting status.
-     * FIRING = balls actively being fed (highest priority visual)
+     * FIRING = feed motor actively running (highest priority)
      * SHOOTING = ready to fire but not yet feeding
      * AIMING/SPOOLING = still getting ready
      */
@@ -344,10 +338,10 @@ public class AutoShootCommand extends Command {
         }
     }
     
-    // BALL HANDLING CONTROL
+    // FEED MOTOR CONTROL
     
     /**
-     * Sets ball handling subsystems to idle mode (staging balls).
+     * Sets the turret feed motor to idle speed.
      */
     private void idleBallHandling() {
         if (turretFeed != null) {
@@ -356,7 +350,7 @@ public class AutoShootCommand extends Command {
     }
     
     /**
-     * Stops ball handling subsystems completely.
+     * Stops the turret feed motor completely.
      */
     private void stopBallHandling() {
         if (turretFeed != null) {
@@ -367,18 +361,16 @@ public class AutoShootCommand extends Command {
     // AIMING LOGIC
     
     /**
-     * Aims at the current target using the Raspberry Pi coprocessor.
-     * The Pi calculates turret angle, lead compensation, and training corrections.
-     * Falls back to local calculation if Pi is unreachable.
+     * Aims at the current target using ShootingCalculator results.
      * 
-     * NOTE: piHelper.update() is called from RobotContainer.updateVisionPose() every cycle,
-     * so we only READ the Pi's solution here -- we don't publish a second update.
+     * NOTE: shootingCalc.update() is called from RobotContainer.updateVisionPose() every cycle,
+     * so we only READ the solution here.
      */
     private void aimAtTarget() {
-        // Read Pi results (or fallback values) -- already updated by RobotContainer
-        turretTargetAngle = piHelper.getTurretAngle();
-        distanceToTarget = piHelper.getDistance();
-        isMoving = piHelper.isMoving();
+        // Read ShootingCalculator results -- already updated by RobotContainer
+        turretTargetAngle = shootingCalc.getTurretAngle();
+        distanceToTarget = shootingCalc.getDistance();
+        isMoving = shootingCalc.isMoving();
         
         // Apply global calibration offset (tunable via SmartDashboard)
         double calibrationOffset = SmartDashboard.getNumber("AutoShoot/TurretOffset", 
@@ -390,17 +382,15 @@ public class AutoShootCommand extends Command {
     }
     
     /**
-     * Sets shooter power using the Pi coprocessor results.
-     * The Pi provides final top and bottom motor power directly.
-     * Falls back to calibration table interpolation if Pi is unreachable.
+     * Sets shooter RPM from ShootingCalculator's interpolated calibration values.
      */
     private void setShooterWithTraining() {
-        // Pi already calculated final power values (including training corrections)
-        double topPower = piHelper.getTopSpeed();
-        double bottomPower = piHelper.getBottomSpeed();
+        // ShootingCalculator already calculated RPM values from calibration tables
+        double topRPM = shootingCalc.getTargetTopRPM();
+        double bottomRPM = shootingCalc.getTargetBottomRPM();
         
-        // Set shooter power directly
-        shooter.setManualPower(topPower, bottomPower);
+        // Set shooter RPM
+        shooter.setTargetRPM(topRPM, bottomRPM);
     }
     
     // STATUS DETERMINATION
@@ -430,17 +420,16 @@ public class AutoShootCommand extends Command {
         // Show target type and moving status
         String targetStr = (currentTargetMode == TargetMode.TRENCH) ? "[TRENCH] " : "[HUB] ";
         String movingStr = isMoving ? "[MOVING] " : "";
-        String piStr = piHelper.isUsingFallback() ? "[FALLBACK] " : "";
         
         // Show progress toward ready
         if (!turretOnTarget && !shooterReady) {
-            return targetStr + piStr + movingStr + "Aiming + Spinning Up";
+            return targetStr + movingStr + "Aiming + Spinning Up";
         } else if (!turretOnTarget) {
-            return targetStr + piStr + movingStr + "Aiming...";
+            return targetStr + movingStr + "Aiming...";
         } else if (!shooterReady) {
-            return targetStr + piStr + movingStr + "Spinning Up...";
+            return targetStr + movingStr + "Spinning Up...";
         } else {
-            return targetStr + piStr + movingStr + "READY!";
+            return targetStr + movingStr + "READY!";
         }
     }
     

@@ -112,7 +112,7 @@ public class TurretPIDCalibrationCommand extends Command {
         SmartDashboard.putNumber("Cal/PID/Error", error);
         SmartDashboard.putBoolean("Cal/PID/OnTarget", Math.abs(error) < 2.0);
         
-        // Log for AdvantageScope graphing
+        // Log target angle for dashboard graphing
         SmartDashboard.putNumber("Cal/Turret/TargetAngle", targetAngle);
         
         String status = String.format("Target: %.1f deg | Current: %.1f deg | Error: %.1f deg | P=%.3f I=%.3f D=%.3f",

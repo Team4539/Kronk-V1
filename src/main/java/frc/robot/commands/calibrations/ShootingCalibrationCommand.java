@@ -9,16 +9,17 @@ import frc.robot.util.Elastic;
 
 /**
  * Interactive command for building the shooter power calibration table.
- * All controls are on SmartDashboard -- no controller buttons needed.
+ * Spins the shooter at manual power from CalibrationManager sliders
+ * so you can test shots and record good distance/power pairs.
  * 
  * HOW TO USE:
- * 1. Click "Cal/Shooting" on SmartDashboard to start
- * 2. Adjust "Cal/Shooter/TopPower" and "Cal/Shooter/BottomPower" sliders
+ * 1. Run this command from SmartDashboard ("Tuning/Cal: Shooting")
+ * 2. Adjust Tuning/Shooter/TopPower and BottomPower sliders
  * 3. Shooter spins at the set power so you can shoot
- * 4. Click "Cal/RecordShootingPoint" to log the calibration point
+ * 4. Click Tuning/RecordPoint to log the calibration point
  * 5. Move to new distance and repeat
- * 6. Click "Cal/PrintShooterTable" to export ready-to-paste Java code
- * 7. Click the command button again to stop
+ * 6. Click Tuning/PrintTable to export ready-to-paste Java code
+ * 7. Cancel the command to stop
  */
 public class ShootingCalibrationCommand extends Command {
     

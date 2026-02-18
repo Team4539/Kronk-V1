@@ -1,23 +1,19 @@
 package frc.robot.commands.turret;
 
-import edu.wpi.first.math.geometry.Pose2d;
-import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import frc.robot.Constants;
 import frc.robot.GameStateManager;
-import frc.robot.GameStateManager.TargetMode;
 import frc.robot.subsystems.LimelightSubsystem;
 import frc.robot.subsystems.TurretSubsystem;
-import frc.robot.util.PiShootingHelper;
+import frc.robot.util.ShootingCalculator;
 
 /**
- * Aims the turret at the current target using the Raspberry Pi coprocessor.
+ * Continuously aims the turret at the current target (hub or trench).
  * 
- * All turret angle calculations are done on the Pi. This command publishes
- * the robot pose to the Pi via NetworkTables and reads back the turret angle.
- * If the Pi is unreachable, PiShootingHelper provides a fallback angle based
- * on pose geometry and the Constants calibration tables.
+ * Reads the latest shooting solution from ShootingCalculator, which is
+ * updated every cycle by RobotContainer.updateVisionPose(). This command
+ * just applies the calculated turret angle.
  * 
  * This is the DEFAULT turret command -- it runs continuously when no other
  * turret command (like AutoShootCommand) is active.
@@ -28,11 +24,11 @@ public class AimTurretToPoseCommand extends Command {
     
     private final TurretSubsystem turret;
     private final LimelightSubsystem limelight;
-    private final PiShootingHelper piHelper;
+    private final ShootingCalculator shootingCalc;
     
     // STATE
     
-    /** The turret angle received from Pi (or fallback) */
+    /** Target turret angle from ShootingCalculator (degrees, -180 to +180) */
     private double targetTurretAngle = 0.0;
     
     /** Distance from robot to current target */
@@ -45,15 +41,14 @@ public class AimTurretToPoseCommand extends Command {
     
     /**
      * Creates the pose-based turret aiming command.
-     * All processing is offloaded to the Raspberry Pi via PiShootingHelper.
      * 
      * @param turret The turret subsystem to control
-     * @param limelight The limelight subsystem for pose estimation
+     * @param limelight The limelight subsystem (used for pose availability checks)
      */
     public AimTurretToPoseCommand(TurretSubsystem turret, LimelightSubsystem limelight) {
         this.turret = turret;
         this.limelight = limelight;
-        this.piHelper = PiShootingHelper.getInstance();
+        this.shootingCalc = ShootingCalculator.getInstance();
         
         // This command requires exclusive control of the turret
         addRequirements(turret);
@@ -86,26 +81,19 @@ public class AimTurretToPoseCommand extends Command {
 
         // ----- Determine target mode -----
         aimingAtTrench = gameState.isShuttleMode();
-        TargetMode targetMode = aimingAtTrench ? TargetMode.TRENCH : TargetMode.HUB;
         String targetName = aimingAtTrench ? "TRENCH" : "HUB";
         
-        // ----- Send pose to Pi and get turret angle back -----
-        Pose2d robotPose = limelight.getRobotPose();
-        
-        // Default command doesn't have drivetrain reference, so use zero speeds.
-        // AutoShootCommand provides real chassis speeds for lead compensation.
-        piHelper.update(robotPose, new ChassisSpeeds(), targetMode);
-        
-        // ----- Read Pi solution -----
-        targetTurretAngle = piHelper.getTurretAngle();
-        distanceToTarget = piHelper.getDistance();
+        // ----- Read shooting solution from ShootingCalculator -----
+        // ShootingCalculator is updated every cycle from RobotContainer.updateVisionPose(),
+        // so we just read the latest values here.
+        targetTurretAngle = shootingCalc.getTurretAngle();
+        distanceToTarget = shootingCalc.getDistance();
         
         // ----- Command turret to calculated angle -----
         turret.setTargetAngle(targetTurretAngle);
         
         // ----- Publish telemetry -----
-        String fallbackTag = piHelper.isUsingFallback() ? "[FALLBACK] " : "";
-        SmartDashboard.putString("AimPose/Status", fallbackTag + "Tracking " + targetName);
+        SmartDashboard.putString("AimPose/Status", "Tracking " + targetName);
     }
     
     // STATUS METHODS

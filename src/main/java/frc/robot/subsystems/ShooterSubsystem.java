@@ -18,13 +18,15 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /**
- * Dual flywheel shooter - launches game pieces with style!
+ * Dual flywheel shooter subsystem with two independently controlled motors.
  * 
- * Two motors work together:
- * - Top motor controls arc (backspin = higher trajectory)
- * - Bottom motor controls distance (more power = further)
+ * Top and bottom motors spin at different RPMs to control shot trajectory:
+ * - Differential spin creates backspin/topspin for arc control
+ * - Higher RPM = more distance
  * 
- * Calibration tables map distance to power, interpolating for smooth curves.
+ * Primary control is via closed-loop velocity (RPM) using TalonFX VelocityVoltage.
+ * Manual duty-cycle control is available for calibration.
+ * Distance-to-RPM interpolation is handled by ShootingCalculator.
  */
 public class ShooterSubsystem extends SubsystemBase {
     
@@ -58,7 +60,7 @@ public class ShooterSubsystem extends SubsystemBase {
     // private final double[] interpolatedPowers = new double[2];
 
     /**
-     * Sets up the shooter motors in coast mode (flywheels spin freely).
+     * Configures both motors in coast mode so flywheels spin down naturally.
      */
     public ShooterSubsystem() {
         topMotor = new TalonFX(Constants.Shooter.TOP_MOTOR_ID);
@@ -298,7 +300,9 @@ public class ShooterSubsystem extends SubsystemBase {
     // INTERPOLATION
     
     /**
-     * Interpolates motor powers from calibration table. 
+     * Interpolates motor values from a distance-keyed calibration table.
+     * Uses linear interpolation between the two nearest calibration points.
+     * Clamps to boundary values if distance is outside the table range.
      */
     private double[] interpolatePowers(double distance, TreeMap<Double, double[]> calibration) {
         // Create local array to avoid concurrency issues
@@ -398,7 +402,8 @@ public class ShooterSubsystem extends SubsystemBase {
     }
     
     /**
-     * Warns if motors are getting too hot. Only called periodically to save CAN bandwidth.
+     * Warns via Elastic notification if motors are getting too hot.
+     * Only called every ~500ms to minimize CAN bus traffic.
      */
     private void checkMotorTemperatures() {
         double topTemp = topMotor.getDeviceTemp().getValueAsDouble();

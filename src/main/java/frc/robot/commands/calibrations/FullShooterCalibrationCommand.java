@@ -10,15 +10,14 @@ import frc.robot.subsystems.TurretSubsystem;
 import frc.robot.util.Elastic;
 
 /**
- * FULL SHOOTER CALIBRATION COMMAND
  * Comprehensive calibration command for tuning shooter AND turret together.
  * 
- * This command provides FULL MANUAL CONTROL over:
+ * Provides full manual control over:
  * - Turret angle (via SmartDashboard slider)
  * - Top motor power (via SmartDashboard slider)
  * - Bottom motor power (via SmartDashboard slider)
  * 
- * While also DISPLAYING:
+ * Also displays:
  * - Current AprilTag detection (ID, TX offset)
  * - Distance to target
  * - Robot pose from vision
@@ -26,7 +25,7 @@ import frc.robot.util.Elastic;
  * HOW TO USE:
  * 
  * 1. Position the robot where it can see AprilTags
- * 2. Run this command (from SmartDashboard or controller)
+ * 2. Run this command from SmartDashboard
  * 3. Use sliders to adjust:
  *    - Cal/Turret/ManualAngle: Point turret at target
  *    - Cal/Shooter/TopPower: Adjust shot arc/height
@@ -34,7 +33,7 @@ import frc.robot.util.Elastic;
  * 4. Shoot a ball and observe
  * 5. When the shot is good, click "Cal/RecordShootingPoint"
  * 6. Move to a new distance and repeat
- * 7. When done, click "Cal/PrintShooterTable" to get Java code
+ * 7. When done, click "Cal/PrintShooterTable" to get Java code for Constants.java
  * 
  * DASHBOARD BUTTONS AVAILABLE DURING CALIBRATION:
  * 
@@ -44,14 +43,6 @@ import frc.robot.util.Elastic;
  * - Cal/FeedBall: Feed a ball into the shooter (button)
  * - Cal/RecordShootingPoint: Record current shot as calibration point (button)
  * - Cal/PrintShooterTable: Export all recorded points as Java code (button)
- * - Cal/PrintAllConstants: Export all calibration values (button)
- * 
- * ADVANTAGESCOPE INTEGRATION:
- * 
- * All values are logged to NetworkTables under /Calibration/:
- * - View real-time graphs of your adjustments
- * - Record log files for later analysis
- * - Use in simulation without a robot!
  * 
  * TIPS FOR CALIBRATION:
  * 
@@ -61,8 +52,6 @@ import frc.robot.util.Elastic;
  * 4. TOP MOTOR = HEIGHT/ARC (more = higher shot)
  * 5. BOTTOM MOTOR = DISTANCE (more = farther shot)
  * 6. Turret angle offset can compensate for camera alignment issues
- * 
- * @author Team 4539
  */
 public class FullShooterCalibrationCommand extends Command {
     

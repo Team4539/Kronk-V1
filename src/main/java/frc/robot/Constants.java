@@ -233,7 +233,7 @@ public final class Constants {
     public static final double BRIGHTNESS = 0.8;
     
     // Colors are RGB format {Red, Green, Blue}
-    // These are addressable RGB (ARGB) LEDs - the A is for addressing, not alpha/white
+    // Strip type is GRB (set in LEDSubsystem CANdle config)
     
     // Team colors
     public static final int[] TEAM_SAFETY_ORANGE = {255, 100, 0};

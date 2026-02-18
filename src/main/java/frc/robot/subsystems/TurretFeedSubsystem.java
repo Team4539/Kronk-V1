@@ -12,9 +12,9 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
 
 /**
- * Controls the turret feed motor for ball management.
- * Normally runs slowly reverse to build up balls.
- * Runs fast forward when shooting to dump balls into turret.
+ * Controls the turret feed motor that moves balls between the intake
+ * and the shooter flywheels. Runs at idle speed normally, and at
+ * full shoot speed to feed balls into the shooter when firing.
  */
 public class TurretFeedSubsystem extends SubsystemBase {
     
@@ -79,7 +79,7 @@ public class TurretFeedSubsystem extends SubsystemBase {
     // CONTROL METHODS
     
     /**
-     * Set turret feed to idle mode (slow reverse to build up balls).
+     * Set turret feed to idle mode (slow speed to stage balls near the shooter).
      */
     public void setIdle() {
         targetSpeed = Constants.TurretFeed.IDLE_SPEED;
@@ -87,7 +87,7 @@ public class TurretFeedSubsystem extends SubsystemBase {
     }
     
     /**
-     * Set turret feed to shooting mode (fast forward to dump balls).
+     * Set turret feed to shooting mode (full speed to feed balls into shooter).
      */
     public void setShoot() {
         targetSpeed = Constants.TurretFeed.SHOOT_SPEED;
