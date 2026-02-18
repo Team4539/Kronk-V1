@@ -4,6 +4,7 @@ import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import frc.robot.CalibrationManager;
 import frc.robot.subsystems.TurretSubsystem;
+import frc.robot.util.Elastic;
 
 /**
  * Live PID tuning command for the turret motor.
@@ -60,9 +61,9 @@ public class TurretPIDCalibrationCommand extends Command {
             "2. Adjust Cal/Turret/P, I, D. " +
             "3. Watch response and iterate.");
         
-        // Notify via Elastic
-        calibration.logInfo("PID Tuning Started", 
-            String.format("Current: P=%.4f I=%.4f D=%.4f", lastP, lastI, lastD));
+        Elastic.sendNotification(new Elastic.Notification(
+            Elastic.NotificationLevel.INFO, "PID Tuning Started",
+            String.format("P=%.4f I=%.4f D=%.4f", lastP, lastI, lastD)));
     }
     
     @Override
@@ -111,9 +112,6 @@ public class TurretPIDCalibrationCommand extends Command {
         SmartDashboard.putNumber("Cal/PID/Error", error);
         SmartDashboard.putBoolean("Cal/PID/OnTarget", Math.abs(error) < 2.0);
         
-        // Update calibration manager
-        calibration.setCurrentTurretAngle(currentAngle);
-        
         // Log for AdvantageScope graphing
         SmartDashboard.putNumber("Cal/Turret/TargetAngle", targetAngle);
         
@@ -126,9 +124,9 @@ public class TurretPIDCalibrationCommand extends Command {
     public void end(boolean interrupted) {
         SmartDashboard.putString("Cal/Status", "PID tuning ended");
         
-        // Notify via Elastic with final values
-        calibration.logSuccess("PID Tuning Complete", 
-            String.format("Final: P=%.4f I=%.4f D=%.4f", lastP, lastI, lastD));
+        Elastic.sendNotification(new Elastic.Notification(
+            Elastic.NotificationLevel.INFO, "PID Tuning Complete",
+            String.format("Final: P=%.4f I=%.4f D=%.4f", lastP, lastI, lastD)));
     }
     
     @Override

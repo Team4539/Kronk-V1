@@ -166,15 +166,13 @@ public class TurretFeedSubsystem extends SubsystemBase {
         telemetryCounter++;
         
         // Essential info every cycle
-        DashboardHelper.putBoolean(Category.TURRET_FEED, "Is Shooting", isShooting);
+        DashboardHelper.putBoolean(Category.DEBUG, "Feed/IsShooting", isShooting);
         
         // Detailed diagnostics every 10 cycles (200ms)
         if (telemetryCounter >= 10) {
             telemetryCounter = 0;
-            DashboardHelper.putNumber(Category.TURRET_FEED, "Target Speed", targetSpeed);
-            DashboardHelper.putNumber(Category.TURRET_FEED, "Current Speed", getCurrentSpeed());
-            DashboardHelper.putNumber(Category.TURRET_FEED, "Motor Current (A)", motor.getSupplyCurrent().getValueAsDouble());
-            DashboardHelper.putNumber(Category.TURRET_FEED, "Motor Temp (C)", motor.getDeviceTemp().getValueAsDouble());
+            DashboardHelper.putNumber(Category.DEBUG, "Feed/TargetSpeed", targetSpeed);
+            DashboardHelper.putNumber(Category.DEBUG, "Feed/CurrentSpeed", getCurrentSpeed());
         }
     }
 }

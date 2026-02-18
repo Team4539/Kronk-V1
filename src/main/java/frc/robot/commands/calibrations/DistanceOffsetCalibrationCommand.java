@@ -5,6 +5,7 @@ import edu.wpi.first.wpilibj2.command.Command;
 import frc.robot.CalibrationManager;
 import frc.robot.subsystems.LimelightSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
+import frc.robot.util.Elastic;
 
 /**
  * DISTANCE OFFSET CALIBRATION COMMAND
@@ -85,8 +86,9 @@ public class DistanceOffsetCalibrationCommand extends Command {
             "3. Adjust Cal/Shooter/Top/BottomOffset. " +
             "4. Test at multiple distances.");
         
-        System.out.println("=== DISTANCE OFFSET CALIBRATION STARTED ===");
-        System.out.println("Adjust global offsets that apply to all distances");
+        Elastic.sendNotification(new Elastic.Notification(
+            Elastic.NotificationLevel.INFO, "Offset Calibration Started",
+            "Adjust global offsets that apply to all distances"));
     }
     
     @Override
@@ -98,49 +100,22 @@ public class DistanceOffsetCalibrationCommand extends Command {
             calibration.setCurrentDistance(distance);
         }
         
-        // Update target info
-        calibration.setHasTarget(limelight.hasTarget());
-        if (limelight.hasTarget()) {
-            calibration.setCurrentTagId(limelight.getTargetId());
-        }
-        
-        // ----- Apply power based on mode -----
-        if (calibration.useManualShooterPower()) {
-            // Manual mode - direct power control
-            shooter.setManualPower(
-                calibration.getShooterTopPower(),
-                calibration.getShooterBottomPower()
-            );
-        } else {
-            // Interpolated mode - distance-based with offsets
-            shooter.setForDistanceWithOffset(
-                distance,
-                calibration.getShooterTopOffset(),
-                calibration.getShooterBottomOffset()
-            );
-        }
+        // ----- Apply manual power from calibration sliders -----
+        double topPower = calibration.getShooterTopPower();
+        double bottomPower = calibration.getShooterBottomPower();
+        shooter.setManualPower(topPower, bottomPower);
         
         // ----- Update status display -----
-        double topOffset = calibration.getShooterTopOffset();
-        double bottomOffset = calibration.getShooterBottomOffset();
-        boolean useManual = calibration.useManualShooterPower();
-        
-        String mode = useManual ? "MANUAL" : "INTERPOLATED";
         String status;
-        
         if (!limelight.hasPoseEstimate()) {
-            status = String.format("WARNING: No pose | Mode: %s | Offsets: Top=%.3f Bot=%.3f",
-                mode, topOffset, bottomOffset);
+            status = String.format("WARNING: No pose | Top=%.2f Bot=%.2f", topPower, bottomPower);
         } else {
-            status = String.format("OK Dist: %.2fm | Mode: %s | Offsets: Top=%.3f Bot=%.3f",
-                distance, mode, topOffset, bottomOffset);
+            status = String.format("OK Dist: %.2fm | Top=%.2f Bot=%.2f | %s",
+                distance, topPower, bottomPower,
+                shooter.isReady() ? "READY" : "Spinning...");
         }
         
         SmartDashboard.putString("Cal/Status", status);
-        
-        // Show what power is being applied
-        SmartDashboard.putNumber("Cal/Offset/AppliedTopPower", shooter.getCurrentTopPower());
-        SmartDashboard.putNumber("Cal/Offset/AppliedBottomPower", shooter.getCurrentBottomPower());
         SmartDashboard.putNumber("Cal/Offset/CurrentDistance", distance);
     }
     
@@ -150,10 +125,9 @@ public class DistanceOffsetCalibrationCommand extends Command {
         
         SmartDashboard.putString("Cal/Status", "Offset calibration ended");
         
-        System.out.println("=== DISTANCE OFFSET CALIBRATION ENDED ===");
-        System.out.println("Final offsets:");
-        System.out.printf("  Top Motor Offset: %.3f%n", calibration.getShooterTopOffset());
-        System.out.printf("  Bottom Motor Offset: %.3f%n", calibration.getShooterBottomOffset());
+        Elastic.sendNotification(new Elastic.Notification(
+            Elastic.NotificationLevel.INFO, "Offset Calibration Ended",
+            String.format("Final Top=%.3f Bot=%.3f", calibration.getShooterTopPower(), calibration.getShooterBottomPower())));
     }
     
     @Override

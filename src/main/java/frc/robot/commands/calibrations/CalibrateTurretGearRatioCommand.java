@@ -2,8 +2,8 @@ package frc.robot.commands.calibrations;
 
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
-import frc.robot.CalibrationManager;
 import frc.robot.subsystems.TurretSubsystem;
+import frc.robot.util.Elastic;
 
 /**
  * Determines the correct turret gear ratio by measuring motor rotations per full turret rotation.
@@ -19,7 +19,6 @@ import frc.robot.subsystems.TurretSubsystem;
 public class CalibrateTurretGearRatioCommand extends Command {
     
     private final TurretSubsystem turret;
-    private final CalibrationManager calibration;
     
     // STATE
     
@@ -38,7 +37,6 @@ public class CalibrateTurretGearRatioCommand extends Command {
      */
     public CalibrateTurretGearRatioCommand(TurretSubsystem turret) {
         this.turret = turret;
-        this.calibration = CalibrationManager.getInstance();
         // NOTE: We intentionally don't add requirements
         // This allows the motor to be moved freely by hand during calibration
     }
@@ -62,9 +60,9 @@ public class CalibrateTurretGearRatioCommand extends Command {
             "2. Watch Cal/GearRatio/PreviewGearRatio update live. " +
             "3. Click the command button again to finalize.");
         
-        // Notify via Elastic
-        calibration.logInfo("Gear Ratio Calibration Started", 
-            "Rotate turret 360 degrees by hand. Start: " + startMotorRotations + " rotations");
+        Elastic.sendNotification(new Elastic.Notification(
+            Elastic.NotificationLevel.INFO, "Gear Ratio Calibration Started",
+            "Rotate turret 360 deg by hand. Start: " + startMotorRotations + " rotations"));
     }
     
     @Override
@@ -113,10 +111,9 @@ public class CalibrateTurretGearRatioCommand extends Command {
         System.out.println(">>> CALCULATED GEAR RATIO: " + calculatedGearRatio + " <<<");
         System.out.println("Copy this value to Constants.Turret.GEAR_RATIO");
         
-        // Notify via Elastic
-        calibration.logSuccess("Gear Ratio Calculated", 
-            String.format("Gear Ratio: %.2f (%.2f motor rotations for 360 deg)", 
-                calculatedGearRatio, motorRotationsFor360));
+        Elastic.sendNotification(new Elastic.Notification(
+            Elastic.NotificationLevel.INFO, "Gear Ratio Calculated",
+            String.format("Ratio: %.2f (%.2f motor rot for 360 deg)", calculatedGearRatio, motorRotationsFor360)));
         
         calibrationStarted = false;
     }

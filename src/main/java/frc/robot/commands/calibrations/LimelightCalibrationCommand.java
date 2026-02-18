@@ -2,8 +2,8 @@ package frc.robot.commands.calibrations;
 
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
-import frc.robot.CalibrationManager;
 import frc.robot.subsystems.LimelightSubsystem;
+import frc.robot.util.Elastic;
 
 /**
  * LIMELIGHT CALIBRATION COMMAND
@@ -54,10 +54,6 @@ public class LimelightCalibrationCommand extends Command {
     
     private final LimelightSubsystem limelight;
     
-    // CALIBRATION MANAGER
-    
-    private final CalibrationManager calibration;
-    
     // STATE
     
     /** Known X position for validation (set via SmartDashboard) */
@@ -75,7 +71,6 @@ public class LimelightCalibrationCommand extends Command {
      */
     public LimelightCalibrationCommand(LimelightSubsystem limelight) {
         this.limelight = limelight;
-        this.calibration = CalibrationManager.getInstance();
         // Note: We don't require the limelight subsystem because we're just reading values
     }
     
@@ -95,9 +90,9 @@ public class LimelightCalibrationCommand extends Command {
             "3. Adjust offsets until pose matches. " +
             "4. Tune std devs for smooth tracking.");
         
-        // Notify via Elastic
-        calibration.logInfo("Limelight Calibration", 
-            "Adjust camera offsets and vision trust values");
+        Elastic.sendNotification(new Elastic.Notification(
+            Elastic.NotificationLevel.INFO, "Limelight Calibration",
+            "Adjust camera offsets and vision trust values"));
     }
     
     @Override
@@ -109,11 +104,6 @@ public class LimelightCalibrationCommand extends Command {
         // ----- Get current vision pose -----
         boolean hasTarget = limelight.hasTarget();
         boolean hasPose = limelight.hasPoseEstimate();
-        
-        calibration.setHasTarget(hasTarget);
-        if (hasTarget) {
-            calibration.setCurrentTagId(limelight.getTargetId());
-        }
         
         // ----- Update status display -----
         if (!hasTarget) {
@@ -143,12 +133,6 @@ public class LimelightCalibrationCommand extends Command {
             SmartDashboard.putString("Cal/Status", status);
         }
         
-        // ----- Display current calibration values -----
-        SmartDashboard.putNumber("Cal/Limelight/CurrentXOffset", calibration.getLimelightXOffset());
-        SmartDashboard.putNumber("Cal/Limelight/CurrentYOffset", calibration.getLimelightYOffset());
-        SmartDashboard.putNumber("Cal/Limelight/CurrentZOffset", calibration.getLimelightZOffset());
-        SmartDashboard.putNumber("Cal/Limelight/CurrentPitch", calibration.getLimelightPitch());
-        
         // ----- Handle validation request -----
         if (SmartDashboard.getBoolean("Cal/Limelight/ValidatePosition", false)) {
             validatePosition();
@@ -159,13 +143,8 @@ public class LimelightCalibrationCommand extends Command {
     @Override
     public void end(boolean interrupted) {
         SmartDashboard.putString("Cal/Status", "Limelight calibration ended");
-        
-        // Notify via Elastic with summary
-        calibration.logSuccess("Limelight Calibration Complete", 
-            String.format("Camera: X=%.2f Y=%.2f Z=%.2f", 
-                calibration.getLimelightXOffset(),
-                calibration.getLimelightYOffset(),
-                calibration.getLimelightZOffset()));
+        Elastic.sendNotification(new Elastic.Notification(
+            Elastic.NotificationLevel.INFO, "Limelight Calibration Complete", ""));
     }
     
     @Override
@@ -177,7 +156,9 @@ public class LimelightCalibrationCommand extends Command {
     
     private void validatePosition() {
         if (!limelight.hasPoseEstimate()) {
-            calibration.logError("Validation Failed", "No pose estimate available");
+            Elastic.sendNotification(new Elastic.Notification(
+                Elastic.NotificationLevel.ERROR, "Validation Failed", "No pose estimate available"));
+            SmartDashboard.putString("Cal/Status", "VALIDATION FAILED: No pose estimate");
             return;
         }
         
@@ -190,14 +171,23 @@ public class LimelightCalibrationCommand extends Command {
         String description = String.format("Known: (%.2f, %.2f) | Vision: (%.2f, %.2f) | Error: %.2fm", 
             knownX, knownY, poseX, poseY, totalError);
         
+        Elastic.NotificationLevel level;
+        String grade;
         if (totalError < 0.1) {
-            calibration.logSuccess("Excellent Accuracy", description + " (< 10cm)");
+            level = Elastic.NotificationLevel.INFO;
+            grade = "EXCELLENT (< 10cm)";
         } else if (totalError < 0.25) {
-            calibration.logSuccess("Good Accuracy", description + " (< 25cm)");
+            level = Elastic.NotificationLevel.INFO;
+            grade = "GOOD (< 25cm)";
         } else if (totalError < 0.5) {
-            calibration.logWarning("Acceptable Accuracy", description + " - Consider fine-tuning");
+            level = Elastic.NotificationLevel.WARNING;
+            grade = "ACCEPTABLE - Consider fine-tuning";
         } else {
-            calibration.logError("Poor Accuracy", description + " - Check camera mounting");
+            level = Elastic.NotificationLevel.ERROR;
+            grade = "POOR - Check camera mounting";
         }
+        
+        Elastic.sendNotification(new Elastic.Notification(level, grade, description));
+        SmartDashboard.putString("Cal/Status", "VALIDATION: " + grade);
     }
 }

@@ -92,43 +92,34 @@ public final class Constants {
     public static final double TOP_MOTOR_POWER_OFFSET = 0.0;
     public static final double BOTTOM_MOTOR_POWER_OFFSET = 0.0;
     
-    /** Default idle power (87%) - keeps shooter ready to fire */
-    public static final double DEFAULT_IDLE_POWER = 0.87;
-    
-    // RPM recovery compensation (auto-boost power when balls sap flywheel speed)
     /** Free speed of the motor in rotations per second (Kraken X60 ~100 rps) */
     public static final double MOTOR_FREE_SPEED_RPS = 100.0;
-    /** If actual RPM drops below this fraction of expected, start compensating (e.g. 0.95 = 95%) */
-    public static final double RPM_RECOVERY_THRESHOLD = 0.95;
-    /** Proportional gain for RPM recovery (how aggressively to boost power per unit of RPM deficit) */
-    public static final double RPM_RECOVERY_GAIN = 1.5;
-    /** Maximum extra power the RPM recovery can add (prevents runaway) */
-    public static final double RPM_RECOVERY_MAX_BOOST = 0.15;
     
-    // Hub calibration: distance (m) -> {TopPower, BottomPower}
+    // Hub calibration: distance (m) -> {TopRPM, BottomRPM}
+    // Values are in motor RPM (Kraken X60 free speed ~6000 RPM)
     public static final TreeMap<Double, double[]> SHOOTING_CALIBRATION = new TreeMap<>() {{
-      put(1.5, new double[]{0.30, 0.40}); put(2.0, new double[]{0.35, 0.45});
-      put(2.5, new double[]{0.40, 0.50}); put(3.0, new double[]{0.45, 0.55});
-      put(3.5, new double[]{0.50, 0.60}); put(4.0, new double[]{0.55, 0.65});
-      put(4.5, new double[]{0.60, 0.70}); put(5.0, new double[]{0.65, 0.75});
-      put(5.5, new double[]{0.70, 0.80}); put(6.0, new double[]{0.75, 0.85});
-      put(7.0, new double[]{0.85, 0.95}); put(8.0, new double[]{0.95, 1.00});
+      put(1.5, new double[]{1800, 2400}); put(2.0, new double[]{2100, 2700});
+      put(2.5, new double[]{2400, 3000}); put(3.0, new double[]{2700, 3300});
+      put(3.5, new double[]{3000, 3600}); put(4.0, new double[]{3300, 3900});
+      put(4.5, new double[]{3600, 4200}); put(5.0, new double[]{3900, 4500});
+      put(5.5, new double[]{4200, 4800}); put(6.0, new double[]{4500, 5100});
+      put(7.0, new double[]{5100, 5700}); put(8.0, new double[]{5700, 6000});
     }};
     
-    // Trench calibration for shuttle shots
+    // Trench calibration for shuttle shots: distance (m) -> {TopRPM, BottomRPM}
     public static final TreeMap<Double, double[]> TRENCH_CALIBRATION = new TreeMap<>() {{
-      put(2.0, new double[]{0.25, 0.50}); put(3.0, new double[]{0.30, 0.55});
-      put(4.0, new double[]{0.35, 0.60}); put(5.0, new double[]{0.40, 0.65});
-      put(6.0, new double[]{0.45, 0.70}); put(7.0, new double[]{0.50, 0.75});
-      put(8.0, new double[]{0.55, 0.80});
+      put(2.0, new double[]{1500, 3000}); put(3.0, new double[]{1800, 3300});
+      put(4.0, new double[]{2100, 3600}); put(5.0, new double[]{2400, 3900});
+      put(6.0, new double[]{2700, 4200}); put(7.0, new double[]{3000, 4500});
+      put(8.0, new double[]{3300, 4800});
     }};
   }
 
   public static final class TurretFeed {
     public static final int MOTOR_ID = CANIds.TURRET_FEED_MOTOR;
     public static final boolean MOTOR_INVERTED = false;
-    public static final double IDLE_SPEED = -0.15;
-    public static final double SHOOT_SPEED = 1.0;
+    public static final double IDLE_SPEED = 0.15;
+    public static final double SHOOT_SPEED = -1.0; // Negative = reverse direction to feed balls into shooter
     public static final double STOP_SPEED = 0.0;
   }
 
@@ -146,10 +137,10 @@ public final class Constants {
     
     // Pivot PID (WPILib PID -- works in degrees, outputs duty cycle)
     // P: gets it moving toward target
-    // D: HIGH to brake hard before overshooting into chain slop bounce
+    // D: currently 0 -- increase if overshoot/bounce is a problem
     public static final double PIVOT_PID_P = 0.008;
     public static final double PIVOT_PID_I = 0.0;
-    public static final double PIVOT_PID_D = 0.00;
+    public static final double PIVOT_PID_D = 0.0;
     
     // Pivot limits
     public static final double MIN_PIVOT_ANGLE_DEG = 0.0;
@@ -217,7 +208,7 @@ public final class Constants {
     public static final double TURRET_X_OFFSET = (TURRET_FROM_BACK_INCHES - (Robot.LENGTH_INCHES / 2.0)) * 0.0254;
     public static final double TURRET_Y_OFFSET = ((Robot.WIDTH_INCHES / 2.0) - TURRET_FROM_LEFT_INCHES) * 0.0254;
     
-    public static final double ON_TARGET_TOLERANCE_DEG = 2.0;
+    public static final double ON_TARGET_TOLERANCE_DEG = 20.0;
     
     // Per-tag calibration offsets (initialize all to 0)
     public static final Map<Integer, Double> TAG_ANGLE_OFFSETS = new HashMap<>() {{ for (int i = 1; i <= 32; i++) put(i, 0.0); }};

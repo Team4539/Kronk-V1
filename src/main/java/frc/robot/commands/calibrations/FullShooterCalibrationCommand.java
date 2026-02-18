@@ -7,6 +7,7 @@ import frc.robot.subsystems.LimelightSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.TurretFeedSubsystem;
 import frc.robot.subsystems.TurretSubsystem;
+import frc.robot.util.Elastic;
 
 /**
  * FULL SHOOTER CALIBRATION COMMAND
@@ -137,29 +138,27 @@ public class FullShooterCalibrationCommand extends Command {
             "3. Click Cal/FeedBall to feed a ball. " +
             "4. Click Cal/RecordShootingPoint after a good shot.");
         
-        // Notify via Elastic
-        calibration.logInfo("Calibration Started", 
-            "Full shooter calibration mode active. Use sliders to tune.");
+        Elastic.sendNotification(new Elastic.Notification(
+            Elastic.NotificationLevel.INFO, "Full Calibration Started",
+            "Use sliders to tune turret + shooter."));
     }
     
     @Override
     public void execute() {
-        // ----- Update calibration manager with sensor data -----
-        updateCalibrationData();
-        
-        // ----- Apply manual turret angle -----
-        if (calibration.useManualTurretAngle()) {
-            double angle = calibration.getTurretManualAngle();
-            angle += calibration.getTurretAngleOffset();
-            turret.setTargetAngle(angle);
+        // ----- Update distance from limelight -----
+        if (limelight.hasPoseEstimate()) {
+            calibration.setCurrentDistance(limelight.getDistanceToHub());
         }
+        
+        // ----- Apply manual turret angle from slider -----
+        double angle = SmartDashboard.getNumber("Cal/Turret/ManualAngle", 0.0);
+        angle += calibration.getTurretAngleOffset();
+        turret.setTargetAngle(angle);
         
         // ----- Apply manual shooter power -----
-        if (calibration.useManualShooterPower()) {
-            double topPower = calibration.getShooterTopPower();
-            double bottomPower = calibration.getShooterBottomPower();
-            shooter.setManualPower(topPower, bottomPower);
-        }
+        double topPower = calibration.getShooterTopPower();
+        double bottomPower = calibration.getShooterBottomPower();
+        shooter.setManualPower(topPower, bottomPower);
         
         // ----- Handle feed ball button -----
         if (turretFeed != null) {
@@ -189,14 +188,15 @@ public class FullShooterCalibrationCommand extends Command {
         
         SmartDashboard.putString("Cal/Status", "Calibration ended");
         
-        // Notify via Elastic
         int points = calibration.getRecordCount();
         if (points > 0) {
-            calibration.logSuccess("Calibration Complete", 
-                "Recorded " + points + " points. Click PrintShooterTable to export.");
+            Elastic.sendNotification(new Elastic.Notification(
+                Elastic.NotificationLevel.INFO, "Calibration Complete",
+                points + " points recorded. Click PrintShooterTable to export."));
         } else {
-            calibration.logWarning("Calibration Ended", 
-                "No points recorded. Run again and record some shots!");
+            Elastic.sendNotification(new Elastic.Notification(
+                Elastic.NotificationLevel.WARNING, "Calibration Ended",
+                "No points recorded."));
         }
     }
     
@@ -207,26 +207,9 @@ public class FullShooterCalibrationCommand extends Command {
     
     // HELPER METHODS
     
-    private void updateCalibrationData() {
-        // Update distance from limelight
-        if (limelight.hasPoseEstimate()) {
-            calibration.setCurrentDistance(limelight.getDistanceToHub());
-        }
-        
-        // Update tag detection
-        calibration.setHasTarget(limelight.hasTarget());
-        if (limelight.hasTarget()) {
-            calibration.setCurrentTagId(limelight.getTargetId());
-        }
-        
-        // Update turret angle
-        calibration.setCurrentTurretAngle(turret.getCurrentAngle());
-    }
-    
     private void updateStatusDisplay() {
         double distance = calibration.getCurrentDistance();
-        int tagId = calibration.getCurrentTagId();
-        double turretAngle = calibration.getTurretManualAngle();
+        double turretAngle = SmartDashboard.getNumber("Cal/Turret/ManualAngle", 0.0);
         double topPower = calibration.getShooterTopPower();
         double bottomPower = calibration.getShooterBottomPower();
         
@@ -234,10 +217,10 @@ public class FullShooterCalibrationCommand extends Command {
         if (!limelight.hasTarget()) {
             status = "WARNING: NO TARGET - Move to see AprilTags";
         } else if (distance <= 0) {
-            status = String.format("WARNING: Tag %d visible, no pose", tagId);
+            status = String.format("WARNING: Tag visible, no pose");
         } else {
-            status = String.format("OK Tag %d | Dist: %.2fm | Angle: %.1f deg | Top: %.2f | Bot: %.2f", 
-                tagId, distance, turretAngle, topPower, bottomPower);
+            status = String.format("OK Dist: %.2fm | Angle: %.1f deg | Top: %.2f | Bot: %.2f", 
+                distance, turretAngle, topPower, bottomPower);
         }
         
         SmartDashboard.putString("Cal/Status", status);

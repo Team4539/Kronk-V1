@@ -5,6 +5,7 @@ import edu.wpi.first.wpilibj2.command.Command;
 import frc.robot.CalibrationManager;
 import frc.robot.subsystems.LimelightSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
+import frc.robot.util.Elastic;
 
 /**
  * Interactive command for building the shooter power calibration table.
@@ -59,9 +60,9 @@ public class ShootingCalibrationCommand extends Command {
             "2. Click Cal/RecordShootingPoint after a good shot. " +
             "3. Click Cal/PrintShooterTable when done.");
         
-        // Notify via Elastic
-        calibration.logInfo("Shooting Calibration Started", 
-            "Adjust shooter power sliders on SmartDashboard. Record good shots.");
+        Elastic.sendNotification(new Elastic.Notification(
+            Elastic.NotificationLevel.INFO, "Shooting Calibration Started",
+            "Adjust power sliders, record good shots."));
     }
 
     @Override
@@ -74,10 +75,6 @@ public class ShootingCalibrationCommand extends Command {
         // ----- Update CalibrationManager with sensor data -----
         if (limelight.hasPoseEstimate()) {
             calibration.setCurrentDistance(limelight.getDistanceToHub());
-        }
-        calibration.setHasTarget(limelight.hasTarget());
-        if (limelight.hasTarget()) {
-            calibration.setCurrentTagId(limelight.getTargetId());
         }
         
         // ----- Update status display -----
@@ -105,11 +102,13 @@ public class ShootingCalibrationCommand extends Command {
         SmartDashboard.putString("Cal/Status", "Shooting calibration ended - " + points + " points recorded");
         
         if (points > 0) {
-            calibration.logSuccess("Shooting Calibration Complete", 
-                "Recorded " + points + " points. Click Cal/PrintShooterTable to export.");
+            Elastic.sendNotification(new Elastic.Notification(
+                Elastic.NotificationLevel.INFO, "Shooting Calibration Complete",
+                points + " points recorded. Click Cal/PrintShooterTable to export."));
         } else {
-            calibration.logWarning("Shooting Calibration Ended", 
-                "No points recorded. Run again and record some shots!");
+            Elastic.sendNotification(new Elastic.Notification(
+                Elastic.NotificationLevel.WARNING, "Shooting Calibration Ended",
+                "No points recorded."));
         }
     }
 

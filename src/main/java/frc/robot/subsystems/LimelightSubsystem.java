@@ -40,9 +40,6 @@ public class LimelightSubsystem extends SubsystemBase {
     /** Robot pose in Blue alliance coordinates */
     private final NetworkTableEntry botposeBlueEntry;
     
-    /** Robot pose in Red alliance coordinates */
-    private final NetworkTableEntry botposeRedEntry;
-    
     /** Pipeline processing latency (ms) */
     @SuppressWarnings("unused")
     private final NetworkTableEntry tlEntry;
@@ -93,7 +90,6 @@ public class LimelightSubsystem extends SubsystemBase {
         tvEntry = table.getEntry("tv");
         taEntry = table.getEntry("ta");
         botposeBlueEntry = table.getEntry("botpose_wpiblue");
-        botposeRedEntry = table.getEntry("botpose_wpired");
         tlEntry = table.getEntry("tl");
         clEntry = table.getEntry("cl");
 
@@ -107,20 +103,12 @@ public class LimelightSubsystem extends SubsystemBase {
      */
     private void initializeTunableValues() {
         // Hub position offsets (add to base Constants values)
-        DashboardHelper.putNumber(Category.SETTINGS, "Aim/HubOffsetX", 0.0);
-        DashboardHelper.putNumber(Category.SETTINGS, "Aim/HubOffsetY", 0.0);
+        DashboardHelper.putNumber(Category.TUNING, "Aim/HubOffsetX", 0.0);
+        DashboardHelper.putNumber(Category.TUNING, "Aim/HubOffsetY", 0.0);
 
         // Trench position offsets (add to base Constants values - applies to BOTH trenches)
-        DashboardHelper.putNumber(Category.SETTINGS, "Aim/TrenchOffsetX", 0.0);
-        DashboardHelper.putNumber(Category.SETTINGS, "Aim/TrenchOffsetY", 0.0);
-
-        // Auto-shuttle boundary line (X position)
-        DashboardHelper.putNumber(Category.SETTINGS, "Aim/AutoShuttleLineX", Constants.Field.AUTO_SHUTTLE_BOUNDARY_X);
-        DashboardHelper.putBoolean(Category.SETTINGS, "Aim/AutoShuttleEnabled", Constants.Field.AUTO_SHUTTLE_ENABLED);
-
-        // Current target mode display
-        DashboardHelper.putString(Category.SETTINGS, "Aim/CurrentTarget", "HUB");
-
+        DashboardHelper.putNumber(Category.TUNING, "Aim/TrenchOffsetX", 0.0);
+        DashboardHelper.putNumber(Category.TUNING, "Aim/TrenchOffsetY", 0.0);
     }
 
     // Diagnostic checks
@@ -344,8 +332,8 @@ public class LimelightSubsystem extends SubsystemBase {
                Constants.Field.RED_HUB_CENTER;
         
         // Apply tunable offsets from SmartDashboard
-        double offsetX = DashboardHelper.getNumber(Category.SETTINGS, "Aim/HubOffsetX", 0.0);
-        double offsetY = DashboardHelper.getNumber(Category.SETTINGS, "Aim/HubOffsetY", 0.0);
+        double offsetX = DashboardHelper.getNumber(Category.TUNING, "Aim/HubOffsetX", 0.0);
+        double offsetY = DashboardHelper.getNumber(Category.TUNING, "Aim/HubOffsetY", 0.0);
         
         return new Translation2d(basePosition.getX() + offsetX, basePosition.getY() + offsetY);
     }
@@ -391,8 +379,8 @@ public class LimelightSubsystem extends SubsystemBase {
         Translation2d basePosition = (distToRotating <= distToFixed) ? trenchRotating : trenchFixed;
 
         // Apply tunable offsets from SmartDashboard
-        double offsetX = DashboardHelper.getNumber(Category.SETTINGS, "Aim/TrenchOffsetX", 0.0);
-        double offsetY = DashboardHelper.getNumber(Category.SETTINGS, "Aim/TrenchOffsetY", 0.0);
+        double offsetX = DashboardHelper.getNumber(Category.TUNING, "Aim/TrenchOffsetX", 0.0);
+        double offsetY = DashboardHelper.getNumber(Category.TUNING, "Aim/TrenchOffsetY", 0.0);
         
         return new Translation2d(basePosition.getX() + offsetX, basePosition.getY() + offsetY);
     }
@@ -525,7 +513,9 @@ public class LimelightSubsystem extends SubsystemBase {
 
     /**
      * Updates the robot pose estimate from Limelight data.
-     * Uses alliance-appropriate botpose entry.
+     * ALWAYS uses botpose_wpiblue for absolute field coordinates.
+     * This gives us the true robot position regardless of alliance,
+     * and other subsystems handle alliance-specific targeting.
      */
     private void updatePoseEstimate() {
         // No pose if no target
@@ -534,15 +524,11 @@ public class LimelightSubsystem extends SubsystemBase {
             return;
         }
 
-        // Get botpose array based on alliance
-        Alliance alliance = DriverStation.getAlliance().orElse(Alliance.Blue);
-        double[] botpose;
-        
-        if (alliance == Alliance.Blue) {
-            botpose = botposeBlueEntry.getDoubleArray(new double[7]);
-        } else {
-            botpose = botposeRedEntry.getDoubleArray(new double[7]);
-        }
+        // ALWAYS use Blue alliance botpose - this gives us absolute field coordinates
+        // The Limelight's botpose_wpiblue provides the actual robot position on the field
+        // regardless of which alliance we're on. Other subsystems will handle
+        // alliance-specific coordinate transforms for targeting.
+        double[] botpose = botposeBlueEntry.getDoubleArray(new double[7]);
         
         // Validate pose data
         if (botpose.length < 7) {
@@ -582,8 +568,8 @@ public class LimelightSubsystem extends SubsystemBase {
         telemetryCounter++;
         
         // Essential target info every cycle
-        DashboardHelper.putBoolean(Category.TELEOP, "Limelight/HasTarget", hasTarget());
-        DashboardHelper.putBoolean(Category.TELEOP, "Limelight/HasPose", hasPoseEstimate());
+        DashboardHelper.putBoolean(Category.MATCH, "Limelight/HasTarget", hasTarget());
+        DashboardHelper.putBoolean(Category.MATCH, "Limelight/HasPose", hasPoseEstimate());
         
         // Less critical telemetry every 10 cycles (200ms)
         if (telemetryCounter >= 10) {
@@ -599,8 +585,8 @@ public class LimelightSubsystem extends SubsystemBase {
     private void updateAimTelemetry() {
         boolean isShuttleMode = gameState.isShuttleMode();
         String targetName = isShuttleMode ? "TRENCH" : "HUB";
-        DashboardHelper.putString(Category.SETTINGS, "Aim/CurrentTarget", targetName);
-        DashboardHelper.putBoolean(Category.SETTINGS, "Aim/InShuttleZone", isInShuttleZone());
+        DashboardHelper.putString(Category.MATCH, "Aim/CurrentTarget", targetName);
+        DashboardHelper.putBoolean(Category.MATCH, "Aim/InShuttleZone", isInShuttleZone());
     }
 
     /**
@@ -609,7 +595,7 @@ public class LimelightSubsystem extends SubsystemBase {
      */
     public boolean isInShuttleZone() {
         Alliance alliance = DriverStation.getAlliance().orElse(Alliance.Blue);
-        double boundaryX = DashboardHelper.getNumber(Category.SETTINGS, "Aim/AutoShuttleLineX", Constants.Field.AUTO_SHUTTLE_BOUNDARY_X);
+        double boundaryX = Constants.Field.AUTO_SHUTTLE_BOUNDARY_X;
         double robotX = getRobotPose().getX();
         
         if (alliance == Alliance.Blue) {

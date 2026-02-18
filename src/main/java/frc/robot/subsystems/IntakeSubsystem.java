@@ -204,14 +204,8 @@ public class IntakeSubsystem extends SubsystemBase {
     }
     
     private void updateDashboard() {
-        DashboardHelper.putNumber(Category.TELEOP, "Intake/PivotAngleDeg", currentPivotAngle);
-        DashboardHelper.putNumber(Category.TELEOP, "Intake/TargetPivotAngleDeg", targetPivotAngle);
-        DashboardHelper.putBoolean(Category.TELEOP, "Intake/IsDeployed", isDeployed);
-        DashboardHelper.putBoolean(Category.TELEOP, "Intake/PivotAtTarget", isPivotAtTarget());
-        DashboardHelper.putNumber(Category.TELEOP, "Intake/RollerSpeed", targetRollerSpeed);
-        
-        DashboardHelper.putNumber(Category.DEBUG, "Intake/CANcoderDeg", currentPivotAngle);
-        DashboardHelper.putNumber(Category.DEBUG, "Intake/PivotOutput", pivotMotor.get());
+        DashboardHelper.putBoolean(Category.MATCH, "Intake/Deployed", isDeployed);
+        DashboardHelper.putNumber(Category.DEBUG, "Intake/PivotAngle", currentPivotAngle);
         DashboardHelper.putNumber(Category.DEBUG, "Intake/PivotError", targetPivotAngle - currentPivotAngle);
     }
 

@@ -2,6 +2,7 @@ package frc.robot.subsystems;
 
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.DutyCycleOut;
+import com.ctre.phoenix6.controls.VelocityVoltage;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
@@ -12,7 +13,6 @@ import frc.robot.util.Elastic.NotificationLevel;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
-import frc.robot.GameStateManager;
 
 import java.util.Map;
 import java.util.TreeMap;
@@ -33,17 +33,18 @@ public class ShooterSubsystem extends SubsystemBase {
     private final TalonFX bottomMotor;
     private final DutyCycleOut topControl;
     private final DutyCycleOut bottomControl;
+    private final VelocityVoltage topVelocityControl;
+    private final VelocityVoltage bottomVelocityControl;
 
     // Hardware Healthy
     public boolean isHealthy;
-
-    // Cached reference to avoid repeated getInstance() calls
-    private final GameStateManager gameState = GameStateManager.getInstance();
-    private final frc.robot.CalibrationManager calibrationManager = frc.robot.CalibrationManager.getInstance();
     
     // State
     private double targetTopPower = 0.0;
     private double targetBottomPower = 0.0;
+    private double targetTopRPS = 0.0;    // Target velocity in rotations per second
+    private double targetBottomRPS = 0.0; // Target velocity in rotations per second
+    private boolean useVelocityControl = false; // Whether to use velocity PID vs duty cycle
     private double currentDistance = 0.0;
     private boolean isSpunUp = false;
     private long spinUpStartTime = 0;
@@ -52,10 +53,6 @@ public class ShooterSubsystem extends SubsystemBase {
     private static final double TEMP_WARNING_THRESHOLD = 70.0;
     private boolean hasWarnedHighTemp = false;
     private int tempCheckCounter = 0; // Only check temps every N cycles
-    
-    // RPM recovery compensation - auto-boosts power when balls sap flywheel speed
-    private double topRpmBoost = 0.0;
-    private double bottomRpmBoost = 0.0;
     
     // Reusable array not safe for potential multi-threaded/command usage, switching to local
     // private final double[] interpolatedPowers = new double[2];
@@ -68,6 +65,8 @@ public class ShooterSubsystem extends SubsystemBase {
         bottomMotor = new TalonFX(Constants.Shooter.BOTTOM_MOTOR_ID);
         topControl = new DutyCycleOut(0);
         bottomControl = new DutyCycleOut(0);
+        topVelocityControl = new VelocityVoltage(0).withSlot(0);
+        bottomVelocityControl = new VelocityVoltage(0).withSlot(0);
         
         configureMotor(topMotor, Constants.Shooter.TOP_MOTOR_INVERTED);
         configureMotor(bottomMotor, Constants.Shooter.BOTTOM_MOTOR_INVERTED);
@@ -79,6 +78,12 @@ public class ShooterSubsystem extends SubsystemBase {
         config.MotorOutput.Inverted = inverted ? 
             com.ctre.phoenix6.signals.InvertedValue.Clockwise_Positive : 
             com.ctre.phoenix6.signals.InvertedValue.CounterClockwise_Positive;
+        // Velocity PID gains for RPM-based control (Slot 0)
+        // kV = feedforward (volts per RPS), kP = proportional gain
+        config.Slot0.kV = 0.12;  // ~12V / 100 RPS = 0.12 V per RPS
+        config.Slot0.kP = 0.11;  // Proportional correction
+        config.Slot0.kI = 0.0;   // No integral for flywheel
+        config.Slot0.kD = 0.0;   // No derivative for flywheel
         motor.getConfigurator().apply(config);
     }
 
@@ -96,11 +101,10 @@ public class ShooterSubsystem extends SubsystemBase {
     // POWER CONTROL METHODS
     
     /**
-     * Set shooter power based on distance to HUB target.
-     * Uses the hub calibration table to determine appropriate powers.
-     * 
-     * @param distanceMeters Distance to hub in meters
+     * @deprecated Calibration tables now store RPM values, not duty cycle power.
+     * Use {@link #setTargetRPM(double, double)} instead.
      */
+    @Deprecated
     public void setForDistance(double distanceMeters) {
         this.currentDistance = distanceMeters;
         
@@ -118,11 +122,10 @@ public class ShooterSubsystem extends SubsystemBase {
     }
     
     /**
-     * Set shooter power based on distance to TRENCH target (for shuttling).
-     * Uses the trench calibration table (typically flatter trajectory).
-     * 
-     * @param distanceMeters Distance to trench target in meters
+     * @deprecated Calibration tables now store RPM values, not duty cycle power.
+     * Use {@link #setTargetRPM(double, double)} instead.
      */
+    @Deprecated
     public void setForDistanceTrench(double distanceMeters) {
         this.currentDistance = distanceMeters;
         
@@ -148,17 +151,36 @@ public class ShooterSubsystem extends SubsystemBase {
     public void setManualPower(double topPower, double bottomPower) {
         targetTopPower = clamp(topPower, Constants.Shooter.MIN_POWER, Constants.Shooter.MAX_POWER);
         targetBottomPower = clamp(bottomPower, Constants.Shooter.MIN_POWER, Constants.Shooter.MAX_POWER);
+        useVelocityControl = false;
         spinUpStartTime = System.currentTimeMillis();
     }
     
     /**
-     * Set shooter power based on distance with additional offsets.
-     * Used for calibration to test global offset values.
+     * Set shooter target RPM using closed-loop velocity control.
+     * This is more accurate than duty cycle since it compensates for battery voltage
+     * and load changes automatically via the motor controller's PID loop.
      * 
-     * @param distanceMeters Distance to target in meters
-     * @param topOffset Additional offset for top motor power
-     * @param bottomOffset Additional offset for bottom motor power
+     * @param topRPM Target RPM for top motor (0 to ~6000)
+     * @param bottomRPM Target RPM for bottom motor (0 to ~6000)
      */
+    public void setTargetRPM(double topRPM, double bottomRPM) {
+        // Convert RPM to RPS for TalonFX (it uses rotations per second)
+        targetTopRPS = topRPM / 60.0;
+        targetBottomRPS = bottomRPM / 60.0;
+        
+        // Also set duty cycle equivalents for telemetry/fallback
+        targetTopPower = clamp(topRPM / (Constants.Shooter.MOTOR_FREE_SPEED_RPS * 60.0), 0.0, 1.0);
+        targetBottomPower = clamp(bottomRPM / (Constants.Shooter.MOTOR_FREE_SPEED_RPS * 60.0), 0.0, 1.0);
+        
+        useVelocityControl = true;
+        spinUpStartTime = System.currentTimeMillis();
+    }
+    
+    /**
+     * @deprecated Calibration tables now store RPM values, not duty cycle power.
+     * Use {@link #setTargetRPM(double, double)} instead.
+     */
+    @Deprecated
     public void setForDistanceWithOffset(double distanceMeters, double topOffset, double bottomOffset) {
         this.currentDistance = distanceMeters;
         
@@ -175,13 +197,10 @@ public class ShooterSubsystem extends SubsystemBase {
     }
     
     /**
-     * Set shooter power based on distance to TRENCH with additional offsets.
-     * Uses the trench calibration table with training adjustments.
-     * 
-     * @param distanceMeters Distance to trench target in meters
-     * @param topOffset Additional offset for top motor power (from training)
-     * @param bottomOffset Additional offset for bottom motor power (from training)
+     * @deprecated Calibration tables now store RPM values, not duty cycle power.
+     * Use {@link #setTargetRPM(double, double)} instead.
      */
+    @Deprecated
     public void setForDistanceTrenchWithOffset(double distanceMeters, double topOffset, double bottomOffset) {
         this.currentDistance = distanceMeters;
         
@@ -215,7 +234,7 @@ public class ShooterSubsystem extends SubsystemBase {
      * @return true if ready to fire
      */
     public boolean isReady() {
-        return isSpunUp && targetTopPower > 0.05;
+        return isSpunUp;
     }
     
     /**
@@ -258,6 +277,22 @@ public class ShooterSubsystem extends SubsystemBase {
      */
     public double getCurrentDistance() {
         return currentDistance;
+    }
+    
+    /**
+     * Get the current top motor RPM.
+     * @return RPM (rotations per minute)
+     */
+    public double getTopRPM() {
+        return topMotor.getVelocity().getValueAsDouble() * 60.0; // RPS to RPM
+    }
+    
+    /**
+     * Get the current bottom motor RPM.
+     * @return RPM (rotations per minute)
+     */
+    public double getBottomRPM() {
+        return bottomMotor.getVelocity().getValueAsDouble() * 60.0; // RPS to RPM
     }
     
     // INTERPOLATION
@@ -312,43 +347,6 @@ public class ShooterSubsystem extends SubsystemBase {
         return Math.max(min, Math.min(max, value));
     }
     
-    // RPM RECOVERY COMPENSATION
-    
-    /**
-     * Calculates how much extra power to add when flywheel RPM drops below target.
-     * This compensates for energy loss when balls hit the flywheels during rapid fire.
-     * 
-     * How it works:
-     *   1. Expected RPM = targetPower x motor free speed
-     *   2. Actual RPM = read from motor velocity sensor
-     *   3. If actual < threshold% of expected -> boost proportionally to the deficit
-     *   4. Boost is clamped to RPM_RECOVERY_MAX_BOOST to prevent runaway
-     * 
-     * @param targetPower The desired power (0.0 to 1.0)
-     * @param actualVelocityRps The actual motor velocity in rotations per second
-     * @return Extra power to add (0.0 if no recovery needed)
-     */
-    private double calculateRpmRecoveryBoost(double targetPower, double actualVelocityRps) {
-        // Don't compensate if we're not trying to spin
-        if (targetPower < 0.05) return 0.0;
-        
-        // Expected velocity based on target duty cycle
-        double expectedRps = targetPower * Constants.Shooter.MOTOR_FREE_SPEED_RPS;
-        
-        // If actual RPM is below threshold of expected, calculate boost
-        double rpmRatio = (expectedRps > 0) ? Math.abs(actualVelocityRps) / expectedRps : 1.0;
-        
-        if (rpmRatio < Constants.Shooter.RPM_RECOVERY_THRESHOLD) {
-            // How far below target we are, as a fraction (e.g. 0.10 = 10% below)
-            double deficit = 1.0 - rpmRatio;
-            // Proportional boost, clamped to max
-            return Math.min(deficit * Constants.Shooter.RPM_RECOVERY_GAIN, 
-                           Constants.Shooter.RPM_RECOVERY_MAX_BOOST);
-        }
-        
-        return 0.0;
-    }
-    
     // PERIODIC UPDATE
     
     @Override
@@ -359,65 +357,37 @@ public class ShooterSubsystem extends SubsystemBase {
             topMotor.setControl(topControl.withOutput(0));
             bottomMotor.setControl(bottomControl.withOutput(0));
             isSpunUp = false;
-            DashboardHelper.putNumber(Category.TELEOP, "Shooter/TopPower", 0.0);
-            DashboardHelper.putNumber(Category.TELEOP, "Shooter/BottomPower", 0.0);
-            DashboardHelper.putBoolean(Category.TELEOP, "Shooter/Ready", false);
+            useVelocityControl = false;
+            DashboardHelper.putNumber(Category.MATCH, "Shooter/TopPower", 0.0);
+            DashboardHelper.putNumber(Category.MATCH, "Shooter/BottomPower", 0.0);
+            DashboardHelper.putBoolean(Category.MATCH, "Shooter/Ready", false);
             return;
         }
         
-        // Check if shooter should be disabled
-        boolean shooterDisabled = !gameState.shouldShooterRun();
-        
-        // Get speed limit (cache to avoid multiple dashboard reads)
-        double speedLimit = gameState.isPracticeSlowMotion() ? 0.5 : 
-            DashboardHelper.getNumber(Category.PRACTICE, "ShooterSpeedLimit", 1.0);
-        
-        // Manual control overrides (only check in test mode)
-        if (gameState.isManualShooterControl()) {
-            double manualPower = gameState.getManualShooterRPM() / 6000.0;
-            targetTopPower = clamp(manualPower * speedLimit, 0, 1.0);
-            targetBottomPower = targetTopPower;
-        }
-        
-        // CalibrationManager manual override (for tuning shot power)
-        if (calibrationManager.useManualShooterPower()) {
-            targetTopPower = calibrationManager.getShooterTopPower();
-            targetBottomPower = calibrationManager.getShooterBottomPower();
-        }
-        
         // Calculate effective power
-        double effectiveTopPower = shooterDisabled ? 0 : targetTopPower * speedLimit;
-        double effectiveBottomPower = shooterDisabled ? 0 : targetBottomPower * speedLimit;
+        double effectiveTopPower = targetTopPower;
+        double effectiveBottomPower = targetBottomPower;
         
-        // RPM recovery: read actual motor speed and boost power if RPM has dropped
-        // (e.g. when balls sap flywheel energy during rapid fire)
-        if (!shooterDisabled && effectiveTopPower > 0.05) {
-            double topVelocityRps = topMotor.getVelocity().getValueAsDouble();
-            double bottomVelocityRps = bottomMotor.getVelocity().getValueAsDouble();
-            
-            topRpmBoost = calculateRpmRecoveryBoost(effectiveTopPower, topVelocityRps);
-            bottomRpmBoost = calculateRpmRecoveryBoost(effectiveBottomPower, bottomVelocityRps);
-            
-            effectiveTopPower = clamp(effectiveTopPower + topRpmBoost, 0, Constants.Shooter.MAX_POWER);
-            effectiveBottomPower = clamp(effectiveBottomPower + bottomRpmBoost, 0, Constants.Shooter.MAX_POWER);
+        // Apply motor outputs - use velocity control or duty cycle
+        if (useVelocityControl && targetTopRPS > 0.1) {
+            // Closed-loop velocity control: motor PID handles RPM recovery automatically
+            topMotor.setControl(topVelocityControl.withVelocity(targetTopRPS));
+            bottomMotor.setControl(bottomVelocityControl.withVelocity(targetBottomRPS));
         } else {
-            topRpmBoost = 0.0;
-            bottomRpmBoost = 0.0;
+            // Open-loop duty cycle control (manual / calibration / disabled)
+            topMotor.setControl(topControl.withOutput(effectiveTopPower));
+            bottomMotor.setControl(bottomControl.withOutput(effectiveBottomPower));
         }
-        
-        // Apply motor outputs
-        topMotor.setControl(topControl.withOutput(effectiveTopPower));
-        bottomMotor.setControl(bottomControl.withOutput(effectiveBottomPower));
         
         // Check spin-up status
         double elapsedSeconds = (System.currentTimeMillis() - spinUpStartTime) / 1000.0;
-        isSpunUp = elapsedSeconds >= Constants.Shooter.SPIN_UP_TIME_SECONDS && effectiveTopPower > 0.05;
+        isSpunUp = elapsedSeconds >= Constants.Shooter.SPIN_UP_TIME_SECONDS && 
+                   (effectiveTopPower > 0.05 || targetTopRPS > 0.1);
         
         // Publish essential telemetry only
-        DashboardHelper.putNumber(Category.TELEOP, "Shooter/TopPower", effectiveTopPower);
-        DashboardHelper.putNumber(Category.TELEOP, "Shooter/BottomPower", effectiveBottomPower);
-        DashboardHelper.putBoolean(Category.TELEOP, "Shooter/Ready", isSpunUp);
-        DashboardHelper.putNumber(Category.TELEOP, "Shooter/RPM_Boost", Math.max(topRpmBoost, bottomRpmBoost));
+        DashboardHelper.putNumber(Category.MATCH, "Shooter/TopRPM", targetTopRPS * 60.0);
+        DashboardHelper.putNumber(Category.MATCH, "Shooter/BottomRPM", targetBottomRPS * 60.0);
+        DashboardHelper.putBoolean(Category.MATCH, "Shooter/Ready", isSpunUp);
         
         // Check motor temps every 25 cycles (~500ms) to reduce CAN traffic
         tempCheckCounter++;

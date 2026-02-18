@@ -1,264 +1,300 @@
 package frc.robot.subsystems;
 
-import com.ctre.phoenix6.configs.Slot0Configs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.PositionDutyCycle;
 import com.ctre.phoenix6.hardware.TalonFX;
+import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
-import frc.robot.util.DashboardHelper;
-import frc.robot.util.DashboardHelper.Category;
-import frc.robot.util.Elastic;
-import frc.robot.util.Elastic.NotificationLevel;
-import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
-import frc.robot.GameStateManager;
 
 /**
- * Turret subsystem with bounded 0-360 deg internal position tracking.
+ * Turret subsystem using a TalonFX motor with PositionDutyCycle control.
  * 
- * Internal position is bounded [0, 360] and never counts beyond. The turret starts
- * at STARTUP_ANGLE_DEG (180 deg) which represents "forward" (0 deg external).
+ * COORDINATE SYSTEM:
+ *   External angles: -180 to +180 degrees, where 0 = robot forward.
+ *     Positive = CCW when viewed from above (standard math convention).
+ *   Internal angles: 0 to 360 degrees, where STARTUP_ANGLE_DEG (180) = robot forward.
+ *     This is the raw motor position * gear ratio, offset so power-on is 180.
  * 
- * There is a physical dead zone between MAX_ANGLE_DEG and MIN_ANGLE_DEG (going through
- * 360/0). If the target is on the other side of the dead zone, the turret takes the
- * long way around through the usable range to avoid the dead zone.
+ * DEAD ZONE:
+ *   The turret has a physical dead zone between MAX_ANGLE_DEG and MIN_ANGLE_DEG
+ *   going THROUGH 360/0. The turret cannot traverse this region.
+ *   Usable range: MIN_ANGLE_DEG (45) to MAX_ANGLE_DEG (236), going CW through 90,180,etc.
  * 
- * External interface: setTargetAngle() accepts -180 to +180 (0 = forward).
- *                     getCurrentAngle() returns -180 to +180 (0 = forward).
+ * POSITION TRACKING:
+ *   On startup, the motor encoder reads 0.0 rotations. We define this as STARTUP_ANGLE_DEG (180).
+ *   currentInternalAngle = STARTUP_ANGLE_DEG + (motorRotations / GEAR_RATIO) * 360.0
+ *   We then wrap to 0-360 to keep the internal representation bounded.
  */
 public class TurretSubsystem extends SubsystemBase {
-    
+
     private final TalonFX motor;
-    private final PositionDutyCycle positionControl;
-    private final GameStateManager gameState = GameStateManager.getInstance();
-    
-    /** Internal position in bounded 0-360 degrees. 180 = forward at startup. */
-    private double currentAngle = Constants.Turret.STARTUP_ANGLE_DEG;
-    /** Target in bounded 0-360 degrees. */
-    private double targetAngle = Constants.Turret.STARTUP_ANGLE_DEG;
-    /** Smoothed commanded angle in bounded 0-360 degrees. */
-    private double commandedAngle = Constants.Turret.STARTUP_ANGLE_DEG;
-    
-    private long lastTimestampNanos = System.nanoTime();
-    private boolean initialized = false;
-    private boolean hasWarnedNearLimit = false;
-    private int telemetryCounter = 0;
+    private final PositionDutyCycle positionRequest = new PositionDutyCycle(0.0);
+
+    /** Current internal angle (0-360, bounded). Updated every cycle. */
+    private double currentInternalAngle = Constants.Turret.STARTUP_ANGLE_DEG;
+
+    /** Target internal angle the turret is moving toward. */
+    private double targetInternalAngle = Constants.Turret.STARTUP_ANGLE_DEG;
+
+    /** Whether we have a valid target set (false = hold current position). */
+    private boolean hasTarget = false;
 
     public TurretSubsystem() {
         motor = new TalonFX(Constants.Turret.MOTOR_ID);
-        positionControl = new PositionDutyCycle(0);
-        
-        var config = new TalonFXConfiguration();
+
+        // Configure motor
+        TalonFXConfiguration config = new TalonFXConfiguration();
+
+        // Motor direction
+        config.MotorOutput.Inverted = Constants.Turret.MOTOR_INVERTED
+                ? InvertedValue.Clockwise_Positive
+                : InvertedValue.CounterClockwise_Positive;
         config.MotorOutput.NeutralMode = NeutralModeValue.Brake;
+
+        // PID (slot 0) - operates on motor rotations
+        config.Slot0.kP = Constants.Turret.PID_P;
+        config.Slot0.kI = Constants.Turret.PID_I;
+        config.Slot0.kD = Constants.Turret.PID_D;
+
+        // Peak output limit
         config.MotorOutput.PeakForwardDutyCycle = Constants.Turret.MAX_OUTPUT;
         config.MotorOutput.PeakReverseDutyCycle = -Constants.Turret.MAX_OUTPUT;
-        
-        var pidConfig = new Slot0Configs();
-        pidConfig.kP = Constants.Turret.PID_P;
-        pidConfig.kI = Constants.Turret.PID_I;
-        pidConfig.kD = Constants.Turret.PID_D;
-        config.Slot0 = pidConfig;
-        
+
         motor.getConfigurator().apply(config);
-        initializeOffsets();
-        lastTimestampNanos = System.nanoTime();
+
+        // Motor starts at position 0.0 rotations = STARTUP_ANGLE_DEG internally
+        motor.setPosition(0.0);
+
+        System.out.println("[Turret] Initialized | Internal startup=" + Constants.Turret.STARTUP_ANGLE_DEG
+                + " | Range=[" + Constants.Turret.MIN_ANGLE_DEG + ", " + Constants.Turret.MAX_ANGLE_DEG + "]"
+                + " | Gear ratio=" + Constants.Turret.GEAR_RATIO);
     }
 
-    /** 
-     * Set target angle in external coordinates (-180 to +180, 0 = forward).
-     * Converts to internal 0-360 and routes around the dead zone if needed.
-     */
-    public void setTargetAngle(double externalAngle) {
-        // Convert external angle (-180..+180) to internal (0..360)
-        double internalTarget = externalToInternal(externalAngle);
-        
-        // Clamp to usable range
-        internalTarget = clamp(internalTarget, Constants.Turret.MIN_ANGLE_DEG, Constants.Turret.MAX_ANGLE_DEG);
-        
-        // Check if the shortest path crosses the dead zone.
-        // If so, go the long way around through the usable range.
-        targetAngle = routeAroundDeadZone(currentAngle, internalTarget);
-    }
-
-    /** Get current angle in external coordinates (-180 to +180, 0 = forward). */
-    public double getCurrentAngle() { return internalToExternal(currentAngle); }
-    
-    /** Get current angle in internal coordinates (0-360). */
-    public double getCurrentAbsoluteAngle() { return currentAngle; }
-    
-    /** Get target angle in external coordinates (-180 to +180, 0 = forward). */
-    public double getTargetAngle() { return internalToExternal(targetAngle); }
-    
-    /** Get target angle in internal coordinates (0-360). */
-    public double getTargetAbsoluteAngle() { return targetAngle; }
-    
-    public double getMotorRotations() { return motor.getPosition().getValueAsDouble(); }
-    
-    public boolean isOnTarget() {
-        return Math.abs(currentAngle - targetAngle) < Constants.Turret.ON_TARGET_TOLERANCE_DEG;
-    }
-
-    /** Get angle offset for a specific AprilTag. */
-    public double getAngleOffset(int tagId) {
-        return DashboardHelper.getNumber(Category.SETTINGS, "Offset/Angle_Tag" + tagId, 
-            Constants.Turret.TAG_ANGLE_OFFSETS.getOrDefault(tagId, 0.0));
-    }
-
-    /** Get distance offset for a specific AprilTag. */
-    public double getDistanceOffset(int tagId) {
-        return DashboardHelper.getNumber(Category.SETTINGS, "Offset/Distance_Tag" + tagId, 
-            Constants.Turret.TAG_DISTANCE_OFFSETS.getOrDefault(tagId, 0.0));
-    }
-
-    public void updatePIDGains(double p, double i, double d) {
-        Slot0Configs pidConfig = new Slot0Configs();
-        pidConfig.kP = p;
-        pidConfig.kI = i;
-        pidConfig.kD = d;
-        motor.getConfigurator().apply(pidConfig);
-    }
+    // ========================================================================
+    // PERIODIC
+    // ========================================================================
 
     @Override
     public void periodic() {
+        // Update position from motor encoder
         updateCurrentAngle();
-        
-        if (!initialized) {
-            commandedAngle = currentAngle;
-            targetAngle = currentAngle;
-            initialized = true;
+
+        // Command motor if we have a target
+        if (hasTarget) {
+            // Convert target internal angle to motor rotations
+            double targetRotations = internalAngleToMotorRotations(targetInternalAngle);
+            motor.setControl(positionRequest.withPosition(targetRotations));
         }
-        
-        // SAFETY: When robot is disabled, do NOT command any motor outputs.
-        // Brake mode will hold position passively without drawing current.
-        if (DriverStation.isDisabled()) {
-            telemetryCounter++;
-            DashboardHelper.putNumber(Category.TELEOP, "Turret/Angle", getCurrentAngle());
-            DashboardHelper.putBoolean(Category.TELEOP, "Turret/OnTarget", isOnTarget());
-            return;
-        }
-        
-        if (gameState.isManualTurretControl()) {
-            setTargetAngle(gameState.getManualTurretAngle());
-        }
-        
-        double speedLimit = gameState.isPracticeSlowMotion() ? 0.5 : 1.0;
-        smoothCommandedAngle(speedLimit);
-        
-        if (gameState.shouldTurretRun()) {
-            updateMotorPosition();
-        } else {
-            motor.setControl(positionControl.withPosition(motor.getPosition().getValueAsDouble()));
-        }
-        
-        telemetryCounter++;
-        DashboardHelper.putNumber(Category.TELEOP, "Turret/Angle", getCurrentAngle());
-        DashboardHelper.putBoolean(Category.TELEOP, "Turret/OnTarget", isOnTarget());
-        
-        if (telemetryCounter >= 10) {
-            telemetryCounter = 0;
-            DashboardHelper.putNumber(Category.DEBUG, "Turret/InternalAngle", currentAngle);
-            checkLimitWarnings();
-        }
-    }
-    
-    private void checkLimitWarnings() {
-        boolean nearLimit = isAtLimit();
-        if (nearLimit && !hasWarnedNearLimit) {
-            hasWarnedNearLimit = true;
-            Elastic.sendNotification(new Elastic.Notification()
-                .withLevel(NotificationLevel.WARNING)
-                .withTitle("Turret Near Limit!")
-                .withDescription("At " + (int)currentAngle + " deg internal (" + (int)getCurrentAngle() + " deg)")
-                .withDisplaySeconds(2.0));
-        } else if (!nearLimit) {
-            hasWarnedNearLimit = false;
-        }
+
+        // Telemetry (just what matters)
+        SmartDashboard.putNumber("Turret/Angle", getCurrentAngle());
+        SmartDashboard.putNumber("Turret/Target", getTargetExternalAngle());
+        SmartDashboard.putBoolean("Turret/OnTarget", isOnTarget());
     }
 
+    // ========================================================================
+    // POSITION TRACKING
+    // ========================================================================
+
+    /**
+     * Updates currentInternalAngle from the motor encoder.
+     * Motor rotations are converted to degrees and offset from STARTUP_ANGLE_DEG.
+     * Result is wrapped to [0, 360).
+     */
     private void updateCurrentAngle() {
         double motorRotations = motor.getPosition().getValueAsDouble();
-        double turretRotations = motorRotations / Constants.Turret.GEAR_RATIO;
-        double rawAngle = turretRotations * 360.0;
-        if (Constants.Turret.MOTOR_INVERTED) rawAngle = -rawAngle;
-        // Motor position 0 = STARTUP_ANGLE internally
-        currentAngle = clamp(Constants.Turret.STARTUP_ANGLE_DEG + rawAngle, 0.0, 360.0);
+        double degreesFromStartup = (motorRotations / Constants.Turret.GEAR_RATIO) * 360.0;
+        double raw = Constants.Turret.STARTUP_ANGLE_DEG + degreesFromStartup;
+
+        // Wrap to [0, 360)
+        currentInternalAngle = ((raw % 360.0) + 360.0) % 360.0;
     }
 
-    private void updateMotorPosition() {
-        // Convert internal commanded angle back to motor rotations
-        // Motor position 0 = STARTUP_ANGLE internally
-        double turretDegrees = commandedAngle - Constants.Turret.STARTUP_ANGLE_DEG;
-        if (Constants.Turret.MOTOR_INVERTED) turretDegrees = -turretDegrees;
-        double motorRots = (turretDegrees / 360.0) * Constants.Turret.GEAR_RATIO;
-        motor.setControl(positionControl.withPosition(motorRots));
+    // ========================================================================
+    // ANGLE CONVERSIONS
+    // ========================================================================
+
+    /**
+     * Convert external angle (-180 to +180, 0=forward) to internal angle (0-360).
+     * external = internal - STARTUP_ANGLE_DEG, normalized to [-180, +180)
+     * So: internal = external + STARTUP_ANGLE_DEG, wrapped to [0, 360)
+     */
+    private double externalToInternal(double externalDeg) {
+        double internal = externalDeg + Constants.Turret.STARTUP_ANGLE_DEG;
+        return ((internal % 360.0) + 360.0) % 360.0;
     }
 
-    private void smoothCommandedAngle(double speedMultiplier) {
-        long now = System.nanoTime();
-        double dt = (now - lastTimestampNanos) / 1e9;
-        if (dt <= 0 || dt > 1.0) dt = 0.02;
-        lastTimestampNanos = now;
-
-        double maxDelta = Constants.Turret.MAX_ANGULAR_SPEED_DEG_PER_SEC * dt * speedMultiplier;
-        double delta = targetAngle - commandedAngle;
-        
-        commandedAngle = (Math.abs(delta) <= maxDelta) 
-            ? targetAngle 
-            : commandedAngle + Math.signum(delta) * maxDelta;
-        
-        // Clamp to usable range for safety
-        commandedAngle = clamp(commandedAngle, Constants.Turret.MIN_ANGLE_DEG, Constants.Turret.MAX_ANGLE_DEG);
-    }
-
-    private void initializeOffsets() {
-        for (int tagId : Constants.Turret.TAG_ANGLE_OFFSETS.keySet()) {
-            DashboardHelper.putNumber(Category.SETTINGS, "Offset/Angle_Tag" + tagId, 
-                Constants.Turret.TAG_ANGLE_OFFSETS.get(tagId));
-            DashboardHelper.putNumber(Category.SETTINGS, "Offset/Distance_Tag" + tagId, 
-                Constants.Turret.TAG_DISTANCE_OFFSETS.get(tagId));
-        }
-    }
-
-    // ===== Coordinate Conversion =====
-
-    /** Convert external angle (-180..+180, 0=forward) to internal (0..360). */
-    private double externalToInternal(double externalAngle) {
-        double internal = Constants.Turret.STARTUP_ANGLE_DEG + externalAngle;
-        // Wrap to 0-360
-        internal = ((internal % 360.0) + 360.0) % 360.0;
-        return internal;
-    }
-
-    /** Convert internal angle (0..360) to external (-180..+180, 0=forward). */
-    private double internalToExternal(double internalAngle) {
-        double external = internalAngle - Constants.Turret.STARTUP_ANGLE_DEG;
-        // Normalize to -180..+180
+    /**
+     * Convert internal angle (0-360) to external angle (-180 to +180, 0=forward).
+     * external = internal - STARTUP_ANGLE_DEG, normalized to [-180, +180)
+     */
+    private double internalToExternal(double internalDeg) {
+        double external = internalDeg - Constants.Turret.STARTUP_ANGLE_DEG;
+        // Normalize to [-180, +180)
         external = ((external + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
         return external;
     }
 
-    // ===== Dead Zone Routing =====
-    private double routeAroundDeadZone(double from, double to) {
-
-        return to;
+    /**
+     * Convert internal angle to motor rotations (relative to startup position).
+     * At startup, motor is at 0 rotations and internal angle is STARTUP_ANGLE_DEG.
+     * 
+     * We compute the shortest-path delta from STARTUP to target, then convert to rotations.
+     * This handles wrapping correctly -- the motor position is unbounded (it can go negative).
+     */
+    private double internalAngleToMotorRotations(double targetInternal) {
+        // Delta from startup position in degrees
+        double delta = targetInternal - Constants.Turret.STARTUP_ANGLE_DEG;
+        // Normalize to [-180, +180) to take shortest path
+        delta = ((delta + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
+        // Convert degrees to motor rotations
+        return (delta / 360.0) * Constants.Turret.GEAR_RATIO;
     }
 
-    private double clamp(double value, double min, double max) {
-        return Math.max(min, Math.min(max, value));
+    // ========================================================================
+    // DEAD ZONE HANDLING
+    // ========================================================================
+
+    /**
+     * Check if an internal angle is in the dead zone.
+     * Dead zone is the arc from MAX_ANGLE_DEG through 360/0 to MIN_ANGLE_DEG.
+     * 
+     * Usable range: [MIN_ANGLE_DEG, MAX_ANGLE_DEG]
+     * Dead zone: (MAX_ANGLE_DEG, 360) ∪ [0, MIN_ANGLE_DEG)
+     */
+    private boolean isInDeadZone(double internalAngle) {
+        return internalAngle > Constants.Turret.MAX_ANGLE_DEG
+                || internalAngle < Constants.Turret.MIN_ANGLE_DEG;
     }
-    
-    public boolean isAtLimit() {
-        double margin = Constants.Turret.LIMIT_SAFETY_MARGIN_DEG;
-        return currentAngle <= Constants.Turret.MIN_ANGLE_DEG + margin
-            || currentAngle >= Constants.Turret.MAX_ANGLE_DEG - margin;
+
+    /**
+     * Clamp an internal angle to the nearest usable limit.
+     * If the angle is in the dead zone, snap to whichever limit is closer.
+     */
+    private double clampToUsableRange(double internalAngle) {
+        if (!isInDeadZone(internalAngle)) {
+            return internalAngle; // Already in usable range
+        }
+
+        // Distance to each limit, going through the dead zone
+        double distToMin = shortestAngularDistance(internalAngle, Constants.Turret.MIN_ANGLE_DEG);
+        double distToMax = shortestAngularDistance(internalAngle, Constants.Turret.MAX_ANGLE_DEG);
+
+        // Apply safety margin so we don't sit right on the edge
+        if (distToMin <= distToMax) {
+            return Constants.Turret.MIN_ANGLE_DEG + Constants.Turret.LIMIT_SAFETY_MARGIN_DEG;
+        } else {
+            return Constants.Turret.MAX_ANGLE_DEG - Constants.Turret.LIMIT_SAFETY_MARGIN_DEG;
+        }
     }
-    
+
+    /**
+     * Shortest angular distance between two angles (unsigned, 0-180).
+     */
+    private double shortestAngularDistance(double from, double to) {
+        double diff = ((to - from) % 360.0 + 360.0) % 360.0;
+        return diff > 180.0 ? 360.0 - diff : diff;
+    }
+
+    // ========================================================================
+    // PUBLIC API
+    // ========================================================================
+
+    /**
+     * Set the target turret angle in EXTERNAL coordinates.
+     * 
+     * @param externalAngleDeg Target angle in degrees, -180 to +180, where 0 = forward.
+     *                         Positive = CCW (standard math convention).
+     */
+    public void setTargetAngle(double externalAngleDeg) {
+        double internal = externalToInternal(externalAngleDeg);
+        targetInternalAngle = clampToUsableRange(internal);
+        hasTarget = true;
+    }
+
+    /**
+     * Get the current turret angle in EXTERNAL coordinates.
+     * 
+     * @return Current angle in degrees, -180 to +180, where 0 = forward.
+     */
+    public double getCurrentAngle() {
+        return internalToExternal(currentInternalAngle);
+    }
+
+    /**
+     * Get the current target angle in external coordinates.
+     * 
+     * @return Target angle in degrees, -180 to +180, where 0 = forward.
+     */
+    public double getTargetExternalAngle() {
+        return internalToExternal(targetInternalAngle);
+    }
+
+    /**
+     * Check if the turret is within tolerance of the target angle.
+     * 
+     * @return true if error is less than ON_TARGET_TOLERANCE_DEG
+     */
+    public boolean isOnTarget() {
+        if (!hasTarget) return false;
+        double error = shortestAngularDistance(currentInternalAngle, targetInternalAngle);
+        return error < Constants.Turret.ON_TARGET_TOLERANCE_DEG;
+    }
+
+    /**
+     * Reset the turret position to assume it is currently facing forward.
+     * Use after physically centering the turret.
+     */
     public void resetPosition() {
-        motor.setPosition(0);
-        currentAngle = Constants.Turret.STARTUP_ANGLE_DEG;
-        commandedAngle = Constants.Turret.STARTUP_ANGLE_DEG;
-        targetAngle = Constants.Turret.STARTUP_ANGLE_DEG;
+        motor.setPosition(0.0);
+        currentInternalAngle = Constants.Turret.STARTUP_ANGLE_DEG;
+        targetInternalAngle = Constants.Turret.STARTUP_ANGLE_DEG;
+        hasTarget = false;
+        System.out.println("[Turret] Position reset to forward (internal=" + Constants.Turret.STARTUP_ANGLE_DEG + ")");
+    }
+
+    /**
+     * Stop the turret motor and clear the target.
+     */
+    public void stop() {
+        hasTarget = false;
+        motor.stopMotor();
+    }
+
+    /**
+     * Get the raw motor position in rotations (for calibration/debugging).
+     */
+    public double getMotorRotations() {
+        return motor.getPosition().getValueAsDouble();
+    }
+
+    /**
+     * Get the motor velocity in rotations per second (for calibration/debugging).
+     */
+    public double getMotorVelocity() {
+        return motor.getVelocity().getValueAsDouble();
+    }
+
+    /**
+     * Update PID gains live on the motor (for calibration).
+     * Applies new Slot0 PID values without full motor reconfiguration.
+     * 
+     * @param p Proportional gain
+     * @param i Integral gain
+     * @param d Derivative gain
+     */
+    public void updatePIDGains(double p, double i, double d) {
+        TalonFXConfiguration config = new TalonFXConfiguration();
+        // Read current config first (preserves other settings)
+        motor.getConfigurator().refresh(config);
+        config.Slot0.kP = p;
+        config.Slot0.kI = i;
+        config.Slot0.kD = d;
+        motor.getConfigurator().apply(config);
+        System.out.println("[Turret] PID updated: P=" + p + " I=" + i + " D=" + d);
     }
 }
