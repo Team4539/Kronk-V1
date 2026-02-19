@@ -100,6 +100,13 @@ public class LEDSubsystem extends SubsystemBase {
     private boolean hasNotifiedEStop = false;
     private boolean hasNotifiedEndgame = false;
     
+    // CAN frame deduplication — only send when color actually changes
+    private int lastSentR = -1, lastSentG = -1, lastSentB = -1;
+    
+    // LED update throttle — animations don't need 50Hz, 10Hz looks the same
+    private int ledUpdateCounter = 0;
+    private static final int LED_UPDATE_DIVISOR = 5; // Update every 5th cycle = 10Hz
+    
     /**
      * LED states for the pre-match sequence and robot operation
      */
@@ -344,11 +351,19 @@ public class LEDSubsystem extends SubsystemBase {
      * Sets all LEDs to a solid color using Phoenix6 API.
      * This is the core method - all animations use this!
      * Colors are RGB format {Red, Green, Blue}
+     * Only sends a CAN frame if the color has actually changed to avoid bus spam.
      */
     private void setSolidColor(int[] color) {
         int r = (int)(color[0] * masterBrightness);
         int g = (int)(color[1] * masterBrightness);
         int b = (int)(color[2] * masterBrightness);
+        // Skip if color hasn't changed — avoids flooding CAN bus
+        if (r == lastSentR && g == lastSentG && b == lastSentB) {
+            return;
+        }
+        lastSentR = r;
+        lastSentG = g;
+        lastSentB = b;
         RGBWColor rgbw = new RGBWColor(r, g, b, 0);
         candle.setControl(solidColorRequest.withColor(rgbw));
     }
@@ -1846,8 +1861,12 @@ public class LEDSubsystem extends SubsystemBase {
         updateAllianceColor();
         checkEStop();
         
-        // --- Pattern Dispatch ---
-        updateLEDPattern();
+        // --- Pattern Dispatch (throttled to ~10Hz to reduce CAN traffic) ---
+        ledUpdateCounter++;
+        if (ledUpdateCounter >= LED_UPDATE_DIVISOR) {
+            ledUpdateCounter = 0;
+            updateLEDPattern();
+        }
         
         // --- Dashboard Telemetry ---
         DashboardHelper.putString(Category.DEBUG, "LED/Pattern", currentPatternName);

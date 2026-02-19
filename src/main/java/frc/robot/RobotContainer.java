@@ -17,7 +17,7 @@ import frc.robot.commands.AutoShootCommand;
 import frc.robot.commands.calibrations.CalibrateTurretGearRatioCommand;
 import frc.robot.commands.calibrations.DistanceOffsetCalibrationCommand;
 import frc.robot.commands.calibrations.FullShooterCalibrationCommand;
-import frc.robot.commands.calibrations.LimelightCalibrationCommand;
+import frc.robot.commands.calibrations.VisionCalibrationCommand;
 import frc.robot.commands.calibrations.ShootingCalibrationCommand;
 import frc.robot.commands.calibrations.TurretPIDCalibrationCommand;
 import frc.robot.commands.intake.DeployIntakeCommand;
@@ -27,7 +27,7 @@ import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.IntakeSubsystem;
 import frc.robot.subsystems.LEDSubsystem;
-import frc.robot.subsystems.LimelightSubsystem;
+import frc.robot.subsystems.VisionSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.TurretFeedSubsystem;
 import frc.robot.subsystems.TurretSubsystem;
@@ -50,7 +50,7 @@ public class RobotContainer {
     private final CommandSwerveDrivetrain drivetrain;
     private final TurretSubsystem turret;
     private final ShooterSubsystem shooter;
-    private final LimelightSubsystem limelight;
+    private final VisionSubsystem vision;
     private final TurretFeedSubsystem turretFeed;
     private final IntakeSubsystem intake;
     private final LEDSubsystem leds;
@@ -77,6 +77,9 @@ public class RobotContainer {
     private boolean useRobotCentric = false;
     private final SendableChooser<Command> autoChooser;
 
+    /** Whether vision has seeded the gyro heading at least once since boot. */
+    private boolean hasSeededHeadingFromVision = false;
+
     // =========================================================================
     // CONSTRUCTOR
     // =========================================================================
@@ -86,7 +89,7 @@ public class RobotContainer {
         drivetrain = Constants.SubsystemEnabled.DRIVETRAIN  ? TunerConstants.createDrivetrain() : null;
         turret     = Constants.SubsystemEnabled.TURRET      ? new TurretSubsystem()             : null;
         shooter    = Constants.SubsystemEnabled.SHOOTER     ? new ShooterSubsystem()             : null;
-        limelight  = Constants.SubsystemEnabled.LIMELIGHT   ? new LimelightSubsystem()           : null;
+        vision     = Constants.SubsystemEnabled.VISION      ? new VisionSubsystem()              : null;
         turretFeed = Constants.SubsystemEnabled.TURRET_FEED ? new TurretFeedSubsystem()          : null;
         intake     = Constants.SubsystemEnabled.INTAKE      ? new IntakeSubsystem()              : null;
         leds       = Constants.SubsystemEnabled.LEDS        ? new LEDSubsystem()                 : null;
@@ -110,7 +113,7 @@ public class RobotContainer {
     private void logSubsystemStatus() {
         System.out.println("[Subsystems] Drive=" + (drivetrain != null)
                 + " Turret=" + (turret != null) + " Shooter=" + (shooter != null)
-                + " Limelight=" + (limelight != null) + " Feed=" + (turretFeed != null)
+                + " Vision=" + (vision != null) + " Feed=" + (turretFeed != null)
                 + " Intake=" + (intake != null) + " LEDs=" + (leds != null));
     }
 
@@ -119,17 +122,17 @@ public class RobotContainer {
     // =========================================================================
 
     private void registerNamedCommands() {
-        if (turret != null && shooter != null && limelight != null) {
+        if (turret != null && shooter != null && vision != null) {
             NamedCommands.registerCommand("autoShoot",
-                    new AutoShootCommand(turret, shooter, limelight, leds, turretFeed, drivetrain)
+                    new AutoShootCommand(turret, shooter, vision, leds, turretFeed, drivetrain)
                             .withTimeout(3.0));
             NamedCommands.registerCommand("quickShoot",
-                    new AutoShootCommand(turret, shooter, limelight, leds, turretFeed, drivetrain)
+                    new AutoShootCommand(turret, shooter, vision, leds, turretFeed, drivetrain)
                             .withTimeout(1.5));
         }
-        if (turret != null && limelight != null) {
+        if (turret != null && vision != null) {
             NamedCommands.registerCommand("aimAtPose",
-                    new AimTurretToPoseCommand(turret, limelight).withTimeout(2.0));
+                    new AimTurretToPoseCommand(turret, vision).withTimeout(2.0));
         }
         if (shooter != null) {
             NamedCommands.registerCommand("spinUpShooter",
@@ -142,6 +145,12 @@ public class RobotContainer {
         if (turret != null) {
             NamedCommands.registerCommand("centerTurret",
                     Commands.runOnce(() -> turret.setTargetAngle(0), turret));
+        }
+        // TrainingShot: shoot with no alliance window check, used by Training Run auto
+        if (turret != null && shooter != null && vision != null) {
+            NamedCommands.registerCommand("TrainingShot",
+                    new AutoShootCommand(turret, shooter, vision, leds, turretFeed, drivetrain)
+                            .withTimeout(2.5));
         }
         NamedCommands.registerCommand("enableShuttleMode",
                 Commands.runOnce(() -> gameState.setShuttleMode(true)));
@@ -182,9 +191,9 @@ public class RobotContainer {
         }));
 
         // A: Auto-shoot
-        if (turret != null && shooter != null && limelight != null) {
+        if (turret != null && shooter != null && vision != null) {
             driver.a().whileTrue(
-                    new AutoShootCommand(turret, shooter, limelight, leds, turretFeed, drivetrain));
+                    new AutoShootCommand(turret, shooter, vision, leds, turretFeed, drivetrain));
         }
 
         // B: Force shoot toggle
@@ -212,9 +221,9 @@ public class RobotContainer {
 
     private void configureOperatorBindings() {
         // RT: Auto-shoot
-        if (turret != null && shooter != null && limelight != null) {
+        if (turret != null && shooter != null && vision != null) {
             operator.rightTrigger(0.5).whileTrue(
-                    new AutoShootCommand(turret, shooter, limelight, leds, turretFeed, drivetrain));
+                    new AutoShootCommand(turret, shooter, vision, leds, turretFeed, drivetrain));
         }
 
         // LT: Pre-spool shooter
@@ -252,8 +261,8 @@ public class RobotContainer {
         }
 
         // B: Aim turret only
-        if (turret != null && limelight != null) {
-            operator.b().whileTrue(new AimTurretToPoseCommand(turret, limelight));
+        if (turret != null && vision != null) {
+            operator.b().whileTrue(new AimTurretToPoseCommand(turret, vision));
         }
 
         // X: E-stop motors
@@ -303,19 +312,20 @@ public class RobotContainer {
         }
 
         // Turret: auto-aim at current target
-        if (turret != null && limelight != null) {
-            turret.setDefaultCommand(new AimTurretToPoseCommand(turret, limelight));
+        if (turret != null && vision != null) {
+            turret.setDefaultCommand(new AimTurretToPoseCommand(turret, vision));
         }
 
-        // Shooter: idle pre-spool at calculated RPM (only when target mode is active)
-        // When DISABLED, ShootingCalculator already outputs 0 RPM, so shooter idles naturally.
-        // This avoids wasting battery/heating motors when we can't score.
+        // Shooter: idle at low RPM to keep flywheels warm.
+        // Tunable via SmartDashboard "Shooter/IdleRPM". Set to 0 to fully stop.
+        // Full spool-up only happens when operator holds LT or during AutoShoot.
         if (shooter != null) {
+            SmartDashboard.putNumber("Shooter/IdleRPM", Constants.Shooter.DEFAULT_IDLE_RPM);
             shooter.setDefaultCommand(Commands.run(() -> {
-                double topRPM = shootingCalc.getTargetTopRPM();
-                double bottomRPM = shootingCalc.getTargetBottomRPM();
-                if (topRPM > 0.1 || bottomRPM > 0.1) {
-                    shooter.setTargetRPM(topRPM, bottomRPM);
+                double idleRPM = SmartDashboard.getNumber("Shooter/IdleRPM",
+                        Constants.Shooter.DEFAULT_IDLE_RPM);
+                if (idleRPM > 0.1) {
+                    shooter.setTargetRPM(idleRPM, idleRPM);
                 } else {
                     shooter.stop();
                 }
@@ -331,15 +341,15 @@ public class RobotContainer {
         SmartDashboard.putData("Auto Chooser", autoChooser);
 
         // Calibration commands for pit use
-        if (turret != null && shooter != null && limelight != null) {
+        if (turret != null && shooter != null && vision != null) {
             SmartDashboard.putData("Tuning/Cal: Full Shooter",
-                    new FullShooterCalibrationCommand(turret, shooter, limelight, turretFeed));
+                    new FullShooterCalibrationCommand(turret, shooter, vision, turretFeed));
         }
-        if (shooter != null && limelight != null) {
+        if (shooter != null && vision != null) {
             SmartDashboard.putData("Tuning/Cal: Shooting",
-                    new ShootingCalibrationCommand(shooter, limelight));
+                    new ShootingCalibrationCommand(shooter, vision));
             SmartDashboard.putData("Tuning/Cal: Distance Offset",
-                    new DistanceOffsetCalibrationCommand(shooter, limelight));
+                    new DistanceOffsetCalibrationCommand(shooter, vision));
         }
         if (turret != null) {
             SmartDashboard.putData("Tuning/Cal: Turret Gear Ratio",
@@ -347,9 +357,9 @@ public class RobotContainer {
             SmartDashboard.putData("Tuning/Cal: Turret PID",
                     new TurretPIDCalibrationCommand(turret));
         }
-        if (limelight != null) {
-            SmartDashboard.putData("Tuning/Cal: Limelight",
-                    new LimelightCalibrationCommand(limelight));
+        if (vision != null) {
+            SmartDashboard.putData("Tuning/Cal: Vision",
+                    new VisionCalibrationCommand(vision));
         }
     }
 
@@ -370,20 +380,54 @@ public class RobotContainer {
             calibration.setCurrentDistance(shootingCalc.getDistance());
         }
 
-        if (limelight == null || drivetrain == null) return;
+        if (vision == null || drivetrain == null) return;
 
-        // Feed drivetrain pose to limelight for MegaTag
-        limelight.setDrivetrainPose(drivetrain.getState().Pose);
+        // Feed drivetrain pose to vision for fallback
+        vision.setDrivetrainPose(drivetrain.getState().Pose);
+
+        // Feed gyro heading to vision pose estimator for better single-tag estimates.
+        // PhotonVision uses this as a reference pose for the fallback strategy when
+        // only 1 tag is visible. Multi-tag PNP doesn't need it but it doesn't hurt.
+        double yawDegrees = drivetrain.getState().Pose.getRotation().getDegrees();
+        double yawRate = Math.toDegrees(drivetrain.getState().Speeds.omegaRadiansPerSecond);
+        vision.setRobotOrientation(yawDegrees, yawRate, 0, 0, 0, 0);
 
         // Auto-shuttle zone check
         gameState.update(isInShuttleZone());
 
-        // Fuse vision into drivetrain odometry
-        if (limelight.hasVisionPose()) {
-            double[] std = limelight.getVisionStdDevs();
+        // Fuse vision into drivetrain odometry.
+        // We trust vision as the primary pose source — whenever we see tags,
+        // vision is the authority. Gyro/odometry is just the fallback.
+        if (vision.hasVisionPose()) {
+            // On first detection, hard-reset the pose so odometry immediately
+            // snaps to the correct position (no gradual convergence needed).
+            if (!hasSeededHeadingFromVision) {
+                drivetrain.resetPose(vision.getRobotPose());
+                hasSeededHeadingFromVision = true;
+                // Tell vision the heading is now correct so it can switch
+                // from LowestAmbiguity (PNP rotation) to PnpDistanceTrigSolve
+                // (which uses the now-correct gyro heading for rotation).
+                vision.notifyHeadingSeeded();
+                System.out.println("[RobotContainer] Vision pose initialized: "
+                        + String.format("(%.2f, %.2f) @ %.1f°",
+                                vision.getRobotPose().getX(),
+                                vision.getRobotPose().getY(),
+                                vision.getRobotPose().getRotation().getDegrees()));
+                Elastic.sendNotification(
+                        new Elastic.Notification(NotificationLevel.INFO,
+                                "Vision Pose Initialized",
+                                String.format("Pose set to (%.1f, %.1f) @ %.1f° from %d tag(s)",
+                                        vision.getRobotPose().getX(),
+                                        vision.getRobotPose().getY(),
+                                        vision.getRobotPose().getRotation().getDegrees(),
+                                        vision.getTargetCount())));
+            }
+
+            // Every cycle: fuse vision with very tight std devs so it dominates
+            double[] std = vision.getVisionStdDevs();
             drivetrain.addVisionMeasurement(
-                    limelight.getRobotPose(),
-                    limelight.getPoseTimestamp(),
+                    vision.getRobotPose(),
+                    vision.getPoseTimestamp(),
                     VecBuilder.fill(std[0], std[1], std[2]));
         }
     }

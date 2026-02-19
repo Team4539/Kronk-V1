@@ -4,7 +4,7 @@ import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import frc.robot.Constants;
 import frc.robot.GameStateManager;
-import frc.robot.subsystems.LimelightSubsystem;
+import frc.robot.subsystems.VisionSubsystem;
 import frc.robot.subsystems.TurretSubsystem;
 import frc.robot.util.ShootingCalculator;
 
@@ -23,7 +23,7 @@ public class AimTurretToPoseCommand extends Command {
     // SUBSYSTEMS
     
     private final TurretSubsystem turret;
-    private final LimelightSubsystem limelight;
+    private final VisionSubsystem vision;
     private final ShootingCalculator shootingCalc;
     
     // STATE
@@ -43,11 +43,11 @@ public class AimTurretToPoseCommand extends Command {
      * Creates the pose-based turret aiming command.
      * 
      * @param turret The turret subsystem to control
-     * @param limelight The limelight subsystem (used for pose availability checks)
+     * @param vision The vision subsystem (used for pose availability checks)
      */
-    public AimTurretToPoseCommand(TurretSubsystem turret, LimelightSubsystem limelight) {
+    public AimTurretToPoseCommand(TurretSubsystem turret, VisionSubsystem vision) {
         this.turret = turret;
-        this.limelight = limelight;
+        this.vision = vision;
         this.shootingCalc = ShootingCalculator.getInstance();
         
         // This command requires exclusive control of the turret
@@ -73,7 +73,7 @@ public class AimTurretToPoseCommand extends Command {
         }
         
         // ----- Check for valid pose -----
-        if (!limelight.hasPoseEstimate()) {
+        if (!vision.hasPoseEstimate()) {
             SmartDashboard.putString("AimPose/Status", "No Pose - Holding");
             // Keep turret at last known position when we lose tracking
             return;
@@ -93,7 +93,10 @@ public class AimTurretToPoseCommand extends Command {
         turret.setTargetAngle(targetTurretAngle);
         
         // ----- Publish telemetry -----
-        SmartDashboard.putString("AimPose/Status", "Tracking " + targetName);
+        // Show whether we're using vision or gyro/odometry fallback
+        boolean hasVision = vision.hasVisionPose();
+        String source = hasVision ? "Vision" : "Gyro";
+        SmartDashboard.putString("AimPose/Status", "Tracking " + targetName + " [" + source + "]");
     }
     
     // STATUS METHODS

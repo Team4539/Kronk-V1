@@ -144,9 +144,8 @@ public class TurretFeedSubsystem extends SubsystemBase {
      */
     @Override
     public void periodic() {
-        // SAFETY: When robot is disabled, send zero power to motor.
+        // SAFETY: When robot is disabled, do NOT send any CAN frames.
         if (DriverStation.isDisabled()) {
-            motor.setControl(control.withOutput(0));
             updateDashboard();
             return;
         }

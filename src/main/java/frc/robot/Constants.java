@@ -26,11 +26,9 @@ public final class Constants {
     public static final int SHOOTER_TOP_MOTOR = 20;
     public static final int SHOOTER_BOTTOM_MOTOR = 21;
     public static final int TURRET_FEED_MOTOR = 23;
-    public static final int INTAKE_LEFT_PIVOT_MOTOR = 24;
-    public static final int INTAKE_RIGHT_PIVOT_MOTOR = 25;
+    public static final int INTAKE_PIVOT_MOTOR = 25;
     public static final int INTAKE_ROLLER_MOTOR = 26;
-    public static final int INTAKE_LEFT_CANCODER = 27;
-    public static final int INTAKE_RIGHT_CANCODER = 28;
+    public static final int INTAKE_CANCODER = 28;
     public static final int CANDLE = 30;
   }
 
@@ -39,7 +37,7 @@ public final class Constants {
     public static final boolean DRIVETRAIN = true;
     public static final boolean TURRET = true;
     public static final boolean SHOOTER = true;
-    public static final boolean LIMELIGHT = true;
+    public static final boolean VISION = true;
     public static final boolean TURRET_FEED = true;
     public static final boolean INTAKE = true;
     public static final boolean LEDS = true;
@@ -92,6 +90,11 @@ public final class Constants {
     public static final double TOP_MOTOR_POWER_OFFSET = 0.0;
     public static final double BOTTOM_MOTOR_POWER_OFFSET = 0.0;
     
+    /** Idle RPM for both motors when not actively spooling. 
+     *  Keeps flywheels warm so spin-up is faster. Tunable via SmartDashboard "Shooter/IdleRPM". 
+     *  Set to 0 to fully stop when idle. */
+    public static final double DEFAULT_IDLE_RPM = 500.0;
+    
     /** Free speed of the motor in rotations per second (Kraken X60 ~100 rps) */
     public static final double MOTOR_FREE_SPEED_RPS = 100.0;
     
@@ -124,15 +127,12 @@ public final class Constants {
   }
 
   public static final class Intake {
-    public static final int LEFT_PIVOT_MOTOR_ID = CANIds.INTAKE_LEFT_PIVOT_MOTOR;
-    public static final int RIGHT_PIVOT_MOTOR_ID = CANIds.INTAKE_RIGHT_PIVOT_MOTOR;
+    public static final int PIVOT_MOTOR_ID = CANIds.INTAKE_PIVOT_MOTOR;
     public static final int ROLLER_MOTOR_ID = CANIds.INTAKE_ROLLER_MOTOR;
-    public static final int LEFT_CANCODER_ID = CANIds.INTAKE_LEFT_CANCODER;
-    public static final int RIGHT_CANCODER_ID = CANIds.INTAKE_RIGHT_CANCODER;
-    public static final boolean LEFT_PIVOT_MOTOR_INVERTED = false;
-    public static final boolean RIGHT_PIVOT_MOTOR_INVERTED = true;
+    public static final int CANCODER_ID = CANIds.INTAKE_CANCODER;
+    public static final boolean PIVOT_MOTOR_INVERTED = true;
     public static final boolean ROLLER_MOTOR_INVERTED = false;
-    public static final double RIGHT_CANCODER_OFFSET_DEG = -100.107;
+    public static final double CANCODER_OFFSET_DEG = -100.107;
     public static final double PIVOT_GEAR_RATIO = 45.0;
     
     // Pivot PID (WPILib PID -- works in degrees, outputs duty cycle)
@@ -158,15 +158,33 @@ public final class Constants {
     public static final double STOP_SPEED = 0.0;
   }
 
-  public static final class Limelight {
-    public static final String TABLE_NAME = "limelight-turret";
+  /** PhotonVision camera configuration */
+  public static final class Vision {
+    /** Camera name as configured in PhotonVision UI (http://photonvision.local:5800) */
+    public static final String CAMERA_NAME = "Arducam_OV9782_USB_Camera";
+    
+    // Camera mounting position relative to robot center (meters)
+    /** Forward/backward from robot center (+ = forward) */
     public static final double CAMERA_X_OFFSET = 0.0;
+    /** Left/right from robot center (+ = left) */
     public static final double CAMERA_Y_OFFSET = 0.0;
+    /** Height from ground to camera lens */
     public static final double CAMERA_Z_OFFSET = 0.5;
+    /** Tilt angle in degrees (+ = tilted up) */
     public static final double CAMERA_PITCH_DEGREES = 0.0;
-    public static final double VISION_STD_DEV_X = 0.5;
-    public static final double VISION_STD_DEV_Y = 0.5;
-    public static final double VISION_STD_DEV_THETA = 0.5;
+    /** Yaw rotation in degrees (0 = facing forward, 90 = facing left, 180 = facing backward) */
+    public static final double CAMERA_YAW_DEGREES = 0.0; // Camera faces FORWARD on robot
+    
+    // Vision measurement trust (standard deviations for pose estimator)
+    // Lower = trust vision more, Higher = trust odometry more
+    // We trust vision heavily — it's the primary pose source when tags are visible.
+    // Odometry/gyro is only the fallback when no tags are in view.
+    public static final double VISION_STD_DEV_X = 0.1;
+    public static final double VISION_STD_DEV_Y = 0.1;
+    public static final double VISION_STD_DEV_THETA = 0.1;
+    
+    /** Maximum pose ambiguity to accept a vision measurement (0-1, lower = stricter) */
+    public static final double MAX_AMBIGUITY = 0.2;
   }
 
   public static final class Driver {
@@ -183,12 +201,14 @@ public final class Constants {
     public static final double GEAR_RATIO = 10.00537109375; // Calibrate with CalibrateTurretGearRatioCommand
     public static final boolean MOTOR_INVERTED = false;
     
-    // Bounded 0-360 position system. STARTUP_ANGLE is internal position at power-on (forward).
+    // Bounded 0-360 position system. STARTUP_ANGLE is internal position at power-on.
+    // HOME_ANGLE_DEG is the EXTERNAL angle the turret physically faces at power-on.
     // Usable range: MIN_ANGLE_DEG to MAX_ANGLE_DEG (going CW through 0-360).
     // Dead zone: MAX_ANGLE_DEG -> wraps through 360/0 -> MIN_ANGLE_DEG (cannot traverse).
-    public static final double STARTUP_ANGLE_DEG = 180.0; // Internal angle when turret faces forward (0 deg external)
-    public static final double MIN_ANGLE_DEG = 45.0;      // Lower usable limit (was -135 deg from forward)
-    public static final double MAX_ANGLE_DEG = 236.0;     // Upper usable limit (was +56 deg from forward)
+    public static final double STARTUP_ANGLE_DEG = 180.0; // Internal angle at power-on
+    public static final double HOME_ANGLE_DEG = 90.0;     // External angle at power-on (90 = facing left)
+    public static final double MIN_ANGLE_DEG = 45.0;      // Lower usable limit
+    public static final double MAX_ANGLE_DEG = 236.0;     // Upper usable limit
 
     public static final double LIMIT_SAFETY_MARGIN_DEG = 10.0;
     
@@ -224,7 +244,7 @@ public final class Constants {
   
   public static final class LEDs {
     public static final int CANDLE_ID = CANIds.CANDLE;
-    public static final int LED_COUNT = 68;
+    public static final int LED_COUNT = 65;
     public static final int ONBOARD_LED_COUNT = 8;   // CANdle's built-in LEDs (indices 0-7)
     public static final int STRIP_START = 8;          // External strip starts at index 8
     public static final int STRIP_COUNT = LED_COUNT - ONBOARD_LED_COUNT;  // 60 strip LEDs

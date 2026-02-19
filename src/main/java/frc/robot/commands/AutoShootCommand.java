@@ -8,7 +8,7 @@ import frc.robot.GameStateManager.TargetMode;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.LEDSubsystem;
 import frc.robot.subsystems.LEDSubsystem.ActionState;
-import frc.robot.subsystems.LimelightSubsystem;
+import frc.robot.subsystems.VisionSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.TurretFeedSubsystem;
 import frc.robot.subsystems.TurretSubsystem;
@@ -33,7 +33,7 @@ public class AutoShootCommand extends Command {
     
     private final TurretSubsystem turret;
     private final ShooterSubsystem shooter;
-    private final LimelightSubsystem limelight;
+    private final VisionSubsystem vision;
     @SuppressWarnings("unused")
     private final CommandSwerveDrivetrain drivetrain; // Reserved for future use (e.g., auto-stop while shooting)
     private final GameStateManager gameState;
@@ -80,10 +80,10 @@ public class AutoShootCommand extends Command {
      * 
      * @param turret The turret subsystem for aiming
      * @param shooter The shooter subsystem for launching
-     * @param limelight The limelight subsystem for pose estimation
+     * @param vision The vision subsystem for pose estimation
      */
-    public AutoShootCommand(TurretSubsystem turret, ShooterSubsystem shooter, LimelightSubsystem limelight) {
-        this(turret, shooter, limelight, null, null, null);
+    public AutoShootCommand(TurretSubsystem turret, ShooterSubsystem shooter, VisionSubsystem vision) {
+        this(turret, shooter, vision, null, null, null);
     }
     
     /**
@@ -91,11 +91,11 @@ public class AutoShootCommand extends Command {
      * 
      * @param turret The turret subsystem for aiming
      * @param shooter The shooter subsystem for launching
-     * @param limelight The limelight subsystem for pose estimation
+     * @param vision The vision subsystem for pose estimation
      * @param leds The LED subsystem for visual feedback (optional, can be null)
      */
-    public AutoShootCommand(TurretSubsystem turret, ShooterSubsystem shooter, LimelightSubsystem limelight, LEDSubsystem leds) {
-        this(turret, shooter, limelight, leds, null, null);
+    public AutoShootCommand(TurretSubsystem turret, ShooterSubsystem shooter, VisionSubsystem vision, LEDSubsystem leds) {
+        this(turret, shooter, vision, leds, null, null);
     }
     
     /**
@@ -104,13 +104,13 @@ public class AutoShootCommand extends Command {
      * 
      * @param turret The turret subsystem for aiming
      * @param shooter The shooter subsystem for launching
-     * @param limelight The limelight subsystem for pose estimation
+     * @param vision The vision subsystem for pose estimation
      * @param leds The LED subsystem for visual feedback (optional, can be null)
      * @param turretFeed The turret feed subsystem for feeding balls (optional, can be null)
      */
-    public AutoShootCommand(TurretSubsystem turret, ShooterSubsystem shooter, LimelightSubsystem limelight, 
+    public AutoShootCommand(TurretSubsystem turret, ShooterSubsystem shooter, VisionSubsystem vision, 
                            LEDSubsystem leds, TurretFeedSubsystem turretFeed) {
-        this(turret, shooter, limelight, leds, turretFeed, null);
+        this(turret, shooter, vision, leds, turretFeed, null);
     }
     
     /**
@@ -120,17 +120,17 @@ public class AutoShootCommand extends Command {
      * 
      * @param turret The turret subsystem for aiming
      * @param shooter The shooter subsystem for launching
-     * @param limelight The limelight subsystem for pose estimation
+     * @param vision The vision subsystem for pose estimation
      * @param leds The LED subsystem for visual feedback (optional, can be null)
      * @param turretFeed The turret feed subsystem for feeding balls (optional, can be null)
      * @param drivetrain The swerve drivetrain (optional, reserved for future use)
      */
-    public AutoShootCommand(TurretSubsystem turret, ShooterSubsystem shooter, LimelightSubsystem limelight, 
+    public AutoShootCommand(TurretSubsystem turret, ShooterSubsystem shooter, VisionSubsystem vision, 
                            LEDSubsystem leds, TurretFeedSubsystem turretFeed,
                            CommandSwerveDrivetrain drivetrain) {
         this.turret = turret;
         this.shooter = shooter;
-        this.limelight = limelight;
+        this.vision = vision;
         this.drivetrain = drivetrain;
         this.leds = leds;
         this.turretFeed = turretFeed;
@@ -174,7 +174,7 @@ public class AutoShootCommand extends Command {
         allianceActive = gameState.isOurAllianceActive();
         
         // ----- Check for valid pose -----
-        if (!limelight.hasPoseEstimate()) {
+        if (!vision.hasPoseEstimate()) {
             SmartDashboard.putString("AutoShoot/Status", "No Pose - Cannot Aim");
             shooter.stop();
             stopBallHandling();

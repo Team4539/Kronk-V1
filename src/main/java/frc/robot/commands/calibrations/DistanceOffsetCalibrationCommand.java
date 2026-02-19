@@ -3,7 +3,7 @@ package frc.robot.commands.calibrations;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import frc.robot.CalibrationManager;
-import frc.robot.subsystems.LimelightSubsystem;
+import frc.robot.subsystems.VisionSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.util.Elastic;
 
@@ -38,7 +38,7 @@ public class DistanceOffsetCalibrationCommand extends Command {
     // SUBSYSTEMS
     
     private final ShooterSubsystem shooter;
-    private final LimelightSubsystem limelight;
+    private final VisionSubsystem vision;
     
     // CALIBRATION MANAGER
     
@@ -50,13 +50,13 @@ public class DistanceOffsetCalibrationCommand extends Command {
      * Creates a distance offset calibration command.
      * 
      * @param shooter The shooter subsystem  
-     * @param limelight The limelight subsystem
+     * @param vision The vision subsystem
      */
     public DistanceOffsetCalibrationCommand(
             ShooterSubsystem shooter,
-            LimelightSubsystem limelight) {
+            VisionSubsystem vision) {
         this.shooter = shooter;
-        this.limelight = limelight;
+        this.vision = vision;
         this.calibration = CalibrationManager.getInstance();
         
         addRequirements(shooter);
@@ -83,10 +83,10 @@ public class DistanceOffsetCalibrationCommand extends Command {
     
     @Override
     public void execute() {
-        // ----- Update distance from limelight -----
+        // ----- Update distance from vision -----
         double distance = 3.0; // Default if no vision
-        if (limelight.hasPoseEstimate()) {
-            distance = limelight.getDistanceToHub();
+        if (vision.hasPoseEstimate()) {
+            distance = vision.getDistanceToHub();
             calibration.setCurrentDistance(distance);
         }
         
@@ -97,7 +97,7 @@ public class DistanceOffsetCalibrationCommand extends Command {
         
         // ----- Update status display -----
         String status;
-        if (!limelight.hasPoseEstimate()) {
+        if (!vision.hasPoseEstimate()) {
             status = String.format("WARNING: No pose | Top=%.2f Bot=%.2f", topPower, bottomPower);
         } else {
             status = String.format("OK Dist: %.2fm | Top=%.2f Bot=%.2f | %s",

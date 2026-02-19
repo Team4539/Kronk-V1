@@ -41,9 +41,9 @@ public class IntakeSubsystem extends SubsystemBase {
     private boolean isHealthy = true;
 
     public IntakeSubsystem() {
-        pivotMotor = new TalonFX(Constants.Intake.RIGHT_PIVOT_MOTOR_ID);
+        pivotMotor = new TalonFX(Constants.Intake.PIVOT_MOTOR_ID);
         rollerMotor = new TalonFX(Constants.Intake.ROLLER_MOTOR_ID);
-        pivotCANcoder = new CANcoder(Constants.Intake.RIGHT_CANCODER_ID);
+        pivotCANcoder = new CANcoder(Constants.Intake.CANCODER_ID);
         
         pivotControl = new DutyCycleOut(0);
         rollerControl = new DutyCycleOut(0);
@@ -70,7 +70,7 @@ public class IntakeSubsystem extends SubsystemBase {
     
     private void configureCANcoder() {
         CANcoderConfiguration config = new CANcoderConfiguration();
-        config.MagnetSensor.MagnetOffset = Constants.Intake.RIGHT_CANCODER_OFFSET_DEG / 360.0;
+        config.MagnetSensor.MagnetOffset = Constants.Intake.CANCODER_OFFSET_DEG / 360.0;
         config.MagnetSensor.SensorDirection = SensorDirectionValue.Clockwise_Positive;
         pivotCANcoder.getConfigurator().apply(config);
     }
@@ -78,7 +78,7 @@ public class IntakeSubsystem extends SubsystemBase {
     private void configurePivotMotor() {
         TalonFXConfiguration config = new TalonFXConfiguration();
         config.MotorOutput.NeutralMode = NeutralModeValue.Brake;
-        config.MotorOutput.Inverted = Constants.Intake.RIGHT_PIVOT_MOTOR_INVERTED ? 
+        config.MotorOutput.Inverted = Constants.Intake.PIVOT_MOTOR_INVERTED ? 
             com.ctre.phoenix6.signals.InvertedValue.Clockwise_Positive : 
             com.ctre.phoenix6.signals.InvertedValue.CounterClockwise_Positive;
         pivotMotor.getConfigurator().apply(config);
@@ -216,11 +216,8 @@ public class IntakeSubsystem extends SubsystemBase {
         // 1. Read current angle directly from CANcoder in degrees
         currentPivotAngle = pivotCANcoder.getAbsolutePosition().getValueAsDouble() * 360.0;
         
-        // SAFETY: When robot is disabled, send zero to all motors.
-        // No PID, no roller - just read sensors for telemetry.
+        // SAFETY: When robot is disabled, do NOT send any CAN frames.
         if (DriverStation.isDisabled()) {
-            pivotMotor.setControl(pivotControl.withOutput(0));
-            rollerMotor.setControl(rollerControl.withOutput(0));
             updateDashboard();
             return;
         }

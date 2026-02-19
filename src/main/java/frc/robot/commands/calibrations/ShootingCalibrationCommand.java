@@ -3,7 +3,7 @@ package frc.robot.commands.calibrations;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import frc.robot.CalibrationManager;
-import frc.robot.subsystems.LimelightSubsystem;
+import frc.robot.subsystems.VisionSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.util.Elastic;
 
@@ -26,7 +26,7 @@ public class ShootingCalibrationCommand extends Command {
     // Subsystems
     
     private final ShooterSubsystem shooter;
-    private final LimelightSubsystem limelight;
+    private final VisionSubsystem vision;
     
     // Calibration Manager
     
@@ -38,11 +38,11 @@ public class ShootingCalibrationCommand extends Command {
      * Creates a new shooter calibration command.
      * 
      * @param shooter   The shooter subsystem to control
-     * @param limelight The limelight for distance measurement
+     * @param vision The vision for distance measurement
      */
-    public ShootingCalibrationCommand(ShooterSubsystem shooter, LimelightSubsystem limelight) {
+    public ShootingCalibrationCommand(ShooterSubsystem shooter, VisionSubsystem vision) {
         this.shooter = shooter;
-        this.limelight = limelight;
+        this.vision = vision;
         this.calibration = CalibrationManager.getInstance();
         addRequirements(shooter);
     }
@@ -74,12 +74,12 @@ public class ShootingCalibrationCommand extends Command {
         shooter.setManualPower(topPower, bottomPower);
         
         // ----- Update CalibrationManager with sensor data -----
-        if (limelight.hasPoseEstimate()) {
-            calibration.setCurrentDistance(limelight.getDistanceToHub());
+        if (vision.hasPoseEstimate()) {
+            calibration.setCurrentDistance(vision.getDistanceToHub());
         }
         
         // ----- Update status display -----
-        double distance = limelight.hasPoseEstimate() ? limelight.getDistanceToHub() : -1;
+        double distance = vision.hasPoseEstimate() ? vision.getDistanceToHub() : -1;
         SmartDashboard.putBoolean("Cal/Shooter/ShooterReady", shooter.isReady());
         
         if (distance < 0) {

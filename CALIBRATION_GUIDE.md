@@ -176,7 +176,7 @@ The turret operates from **-135 deg to +135 deg** (270 deg total range):
 1. Manually position the intake to its **retracted/stowed** position
 2. Read the raw CANcoder value from `Intake/CANcoderDeg` on dashboard
 3. Calculate the offset so that the retracted position reads the `IDLE_ANGLE_DEG` value in Constants
-4. Update `Constants.Intake.RIGHT_CANCODER_OFFSET_DEG`
+4. Update `Constants.Intake.CANCODER_OFFSET_DEG`
 
 ### Pivot Angles
 1. Check `Constants.Intake` values:
@@ -434,7 +434,7 @@ Before each match:
 | `SPIN_UP_TIME_SECONDS` | `Shooter` | -- | Time to reach full speed |
 | `IDLE_ANGLE_DEG` | `Intake` | `0.0` | Intake retracted angle |
 | `DEPLOYED_ANGLE_DEG` | `Intake` | `90.0` | Intake deployed angle |
-| `RIGHT_CANCODER_OFFSET_DEG` | `Intake` | -- | CANcoder zero offset |
+| `CANCODER_OFFSET_DEG` | `Intake` | -- | CANcoder zero offset |
 | `PIVOT_PID_P` | `Intake` | `0.008` | Intake pivot PID |
 | `VISION_STD_DEV_X/Y/THETA` | `Limelight` | -- | Vision trust levels |
 

@@ -6,6 +6,7 @@ import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
@@ -16,8 +17,12 @@ import frc.robot.Constants;
  * COORDINATE SYSTEM:
  *   External angles: -180 to +180 degrees, where 0 = robot forward.
  *     Positive = CCW when viewed from above (standard math convention).
- *   Internal angles: 0 to 360 degrees, where STARTUP_ANGLE_DEG (180) = robot forward.
- *     This is the raw motor position * gear ratio, offset so power-on is 180.
+ *   Internal angles: 0 to 360 degrees, offset so power-on position is STARTUP_ANGLE_DEG.
+ * 
+ * HOME ANGLE:
+ *   HOME_ANGLE_DEG defines the external angle the turret physically faces at power-on.
+ *   Currently 90 (turret faces left at power-on). The conversions account for this
+ *   so that external 0 always means "robot forward" regardless of home position.
  * 
  * DEAD ZONE:
  *   The turret has a physical dead zone between MAX_ANGLE_DEG and MIN_ANGLE_DEG
@@ -83,6 +88,14 @@ public class TurretSubsystem extends SubsystemBase {
         // Update position from motor encoder
         updateCurrentAngle();
 
+        // SAFETY: When robot is disabled, do NOT send any CAN frames.
+        if (DriverStation.isDisabled()) {
+            SmartDashboard.putNumber("Turret/Angle", getCurrentAngle());
+            SmartDashboard.putNumber("Turret/Target", getTargetExternalAngle());
+            SmartDashboard.putBoolean("Turret/OnTarget", isOnTarget());
+            return;
+        }
+
         // Command motor if we have a target
         if (hasTarget) {
             // Convert target internal angle to motor rotations
@@ -120,20 +133,22 @@ public class TurretSubsystem extends SubsystemBase {
 
     /**
      * Convert external angle (-180 to +180, 0=forward) to internal angle (0-360).
-     * external = internal - STARTUP_ANGLE_DEG, normalized to [-180, +180)
-     * So: internal = external + STARTUP_ANGLE_DEG, wrapped to [0, 360)
+     * 
+     * At power-on: internal = STARTUP_ANGLE_DEG, external = HOME_ANGLE_DEG.
+     * So: internal = external - HOME_ANGLE_DEG + STARTUP_ANGLE_DEG, wrapped to [0, 360).
      */
     private double externalToInternal(double externalDeg) {
-        double internal = externalDeg + Constants.Turret.STARTUP_ANGLE_DEG;
+        double internal = externalDeg - Constants.Turret.HOME_ANGLE_DEG + Constants.Turret.STARTUP_ANGLE_DEG;
         return ((internal % 360.0) + 360.0) % 360.0;
     }
 
     /**
      * Convert internal angle (0-360) to external angle (-180 to +180, 0=forward).
-     * external = internal - STARTUP_ANGLE_DEG, normalized to [-180, +180)
+     * 
+     * external = internal - STARTUP_ANGLE_DEG + HOME_ANGLE_DEG, normalized to [-180, +180).
      */
     private double internalToExternal(double internalDeg) {
-        double external = internalDeg - Constants.Turret.STARTUP_ANGLE_DEG;
+        double external = internalDeg - Constants.Turret.STARTUP_ANGLE_DEG + Constants.Turret.HOME_ANGLE_DEG;
         // Normalize to [-180, +180)
         external = ((external + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
         return external;

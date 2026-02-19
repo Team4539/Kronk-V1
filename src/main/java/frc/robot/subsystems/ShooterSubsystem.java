@@ -355,11 +355,9 @@ public class ShooterSubsystem extends SubsystemBase {
     
     @Override
     public void periodic() {
-        // SAFETY: When robot is disabled, send zero power and skip all motor logic.
-        // Coast mode means flywheels spin down naturally without drawing current.
+        // SAFETY: When robot is disabled, do NOT send any CAN frames.
+        // Phoenix 6 blocks motor control while disabled, causing "Could not transmit" errors.
         if (DriverStation.isDisabled()) {
-            topMotor.setControl(topControl.withOutput(0));
-            bottomMotor.setControl(bottomControl.withOutput(0));
             isSpunUp = false;
             useVelocityControl = false;
             DashboardHelper.putNumber(Category.MATCH, "Shooter/TopPower", 0.0);

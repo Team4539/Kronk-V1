@@ -3,7 +3,7 @@ package frc.robot.commands.calibrations;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import frc.robot.CalibrationManager;
-import frc.robot.subsystems.LimelightSubsystem;
+import frc.robot.subsystems.VisionSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.TurretFeedSubsystem;
 import frc.robot.subsystems.TurretSubsystem;
@@ -59,7 +59,7 @@ public class FullShooterCalibrationCommand extends Command {
     
     private final TurretSubsystem turret;
     private final ShooterSubsystem shooter;
-    private final LimelightSubsystem limelight;
+    private final VisionSubsystem vision;
     private final TurretFeedSubsystem turretFeed; // Optional - can be null
     
     // CALIBRATION MANAGER
@@ -73,13 +73,13 @@ public class FullShooterCalibrationCommand extends Command {
      * 
      * @param turret The turret subsystem (for angle control)
      * @param shooter The shooter subsystem (for power control)
-     * @param limelight The limelight subsystem (for target detection)
+     * @param vision The vision subsystem (for target detection)
      */
     public FullShooterCalibrationCommand(
             TurretSubsystem turret, 
             ShooterSubsystem shooter, 
-            LimelightSubsystem limelight) {
-        this(turret, shooter, limelight, null);
+            VisionSubsystem vision) {
+        this(turret, shooter, vision, null);
     }
     
     /**
@@ -87,17 +87,17 @@ public class FullShooterCalibrationCommand extends Command {
      * 
      * @param turret The turret subsystem (for angle control)
      * @param shooter The shooter subsystem (for power control)
-     * @param limelight The limelight subsystem (for target detection)
+     * @param vision The vision subsystem (for target detection)
      * @param turretFeed The turret feed subsystem for feeding balls (optional, can be null)
      */
     public FullShooterCalibrationCommand(
             TurretSubsystem turret, 
             ShooterSubsystem shooter, 
-            LimelightSubsystem limelight,
+            VisionSubsystem vision,
             TurretFeedSubsystem turretFeed) {
         this.turret = turret;
         this.shooter = shooter;
-        this.limelight = limelight;
+        this.vision = vision;
         this.turretFeed = turretFeed;
         this.calibration = CalibrationManager.getInstance();
         
@@ -134,9 +134,9 @@ public class FullShooterCalibrationCommand extends Command {
     
     @Override
     public void execute() {
-        // ----- Update distance from limelight -----
-        if (limelight.hasPoseEstimate()) {
-            calibration.setCurrentDistance(limelight.getDistanceToHub());
+        // ----- Update distance from vision -----
+        if (vision.hasPoseEstimate()) {
+            calibration.setCurrentDistance(vision.getDistanceToHub());
         }
         
         // ----- Apply manual turret angle from slider -----
@@ -203,7 +203,7 @@ public class FullShooterCalibrationCommand extends Command {
         double bottomPower = calibration.getShooterBottomPower();
         
         String status;
-        if (!limelight.hasTarget()) {
+        if (!vision.hasTarget()) {
             status = "WARNING: NO TARGET - Move to see AprilTags";
         } else if (distance <= 0) {
             status = String.format("WARNING: Tag visible, no pose");
@@ -215,8 +215,8 @@ public class FullShooterCalibrationCommand extends Command {
         SmartDashboard.putString("Cal/Status", status);
         
         // Also show raw TX for reference
-        if (limelight.hasTarget()) {
-            SmartDashboard.putNumber("Cal/RawTX", limelight.getHorizontalOffset());
+        if (vision.hasTarget()) {
+            SmartDashboard.putNumber("Cal/RawTX", vision.getHorizontalOffset());
         }
     }
 }
