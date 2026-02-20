@@ -384,7 +384,7 @@ public class ShooterSubsystem extends SubsystemBase {
         // Check spin-up status
         double elapsedSeconds = (System.currentTimeMillis() - spinUpStartTime) / 1000.0;
         isSpunUp = elapsedSeconds >= Constants.Shooter.SPIN_UP_TIME_SECONDS && 
-                   (effectiveTopPower > 0.05 || targetTopRPS > 0.1);
+                   (effectiveTopPower > 0.05 || targetTopRPS > 0.01);
         
         // Publish essential telemetry only
         DashboardHelper.putNumber(Category.MATCH, "Shooter/TopRPM", targetTopRPS * 60.0);

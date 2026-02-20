@@ -99,9 +99,14 @@ public class ShootingCalculator {
      * @param chassisSpeeds     Current robot velocity (robot-relative)
      * @param targetMode        Current target mode (HUB, TRENCH, or DISABLED)
      * @param turretAngleOffset Tunable turret angle offset from CalibrationManager (degrees)
+     * @param topRPMOffset      RPM offset added to calculated top motor RPM (positive = more power)
+     * @param bottomRPMOffset   RPM offset added to calculated bottom motor RPM (positive = more power)
+     * @param turretRotationOffset Live turret rotation offset from CalibrationManager for calibration (degrees)
      */
     public void update(Pose2d robotPose, ChassisSpeeds chassisSpeeds,
-                       TargetMode targetMode, double turretAngleOffset) {
+                       TargetMode targetMode, double turretAngleOffset,
+                       double topRPMOffset, double bottomRPMOffset,
+                       double turretRotationOffset) {
         
         if (targetMode == TargetMode.DISABLED) {
             turretAngle = 0.0;
@@ -172,8 +177,9 @@ public class ShootingCalculator {
             leadAngle = 0.0;
         }
 
-        // --- 6. Apply turret angle offset ---
-        turretAngle += turretAngleOffset;
+        // --- 6. Apply turret angle offset (global + distance-based + live rotation calibration) ---
+        double distanceRotationOffset = interpolateRotation(distance, Constants.Turret.ROTATION_CALIBRATION);
+        turretAngle += turretAngleOffset + distanceRotationOffset + turretRotationOffset;
         turretAngle = normalizeAngle(turretAngle);
 
         // --- 7. Interpolate shooter RPM from calibration table ---
@@ -183,18 +189,26 @@ public class ShootingCalculator {
         
         double[] rpms = interpolate(distance, calibration);
         double maxRPM = Constants.Shooter.MOTOR_FREE_SPEED_RPS * 60.0;
-        targetTopRPM = clamp(rpms[0], 0, maxRPM);
-        targetBottomRPM = clamp(rpms[1], 0, maxRPM);
+        targetTopRPM = clamp(rpms[0] + topRPMOffset, 0, maxRPM);
+        targetBottomRPM = clamp(rpms[1] + bottomRPMOffset, 0, maxRPM);
 
         // --- 8. Publish telemetry ---
         publishTelemetry();
     }
 
     /**
-     * Simplified update without turret angle offset.
+     * Update with turret angle offset but no RPM offsets or rotation offset.
+     */
+    public void update(Pose2d robotPose, ChassisSpeeds chassisSpeeds,
+                       TargetMode targetMode, double turretAngleOffset) {
+        update(robotPose, chassisSpeeds, targetMode, turretAngleOffset, 0.0, 0.0, 0.0);
+    }
+
+    /**
+     * Simplified update without turret angle offset or RPM offsets.
      */
     public void update(Pose2d robotPose, ChassisSpeeds chassisSpeeds, TargetMode targetMode) {
-        update(robotPose, chassisSpeeds, targetMode, 0.0);
+        update(robotPose, chassisSpeeds, targetMode, 0.0, 0.0, 0.0, 0.0);
     }
 
     // ========================================================================
@@ -234,6 +248,24 @@ public class ShootingCalculator {
             lower.getValue()[0] + (upper.getValue()[0] - lower.getValue()[0]) * t,
             lower.getValue()[1] + (upper.getValue()[1] - lower.getValue()[1]) * t
         };
+    }
+
+    /**
+     * Linearly interpolates a single double value from a distance-keyed calibration table.
+     * Used for turret rotation offset interpolation.
+     * Clamps to boundary values if distance is outside the table range.
+     */
+    private double interpolateRotation(double dist, TreeMap<Double, Double> table) {
+        Map.Entry<Double, Double> lower = table.floorEntry(dist);
+        Map.Entry<Double, Double> upper = table.ceilingEntry(dist);
+
+        if (lower == null && upper == null) return 0.0;
+        if (lower == null) return upper.getValue();
+        if (upper == null) return lower.getValue();
+        if (lower.getKey().equals(upper.getKey())) return lower.getValue();
+
+        double t = (dist - lower.getKey()) / (upper.getKey() - lower.getKey());
+        return lower.getValue() + (upper.getValue() - lower.getValue()) * t;
     }
 
     // ========================================================================

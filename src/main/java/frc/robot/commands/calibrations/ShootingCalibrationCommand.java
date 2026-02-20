@@ -14,8 +14,8 @@ import frc.robot.util.Elastic;
  * 
  * HOW TO USE:
  * 1. Run this command from SmartDashboard ("Tuning/Cal: Shooting")
- * 2. Adjust Tuning/Shooter/TopPower and BottomPower sliders
- * 3. Shooter spins at the set power so you can shoot
+ * 2. Adjust Tuning/Shooter/TopRPM and BottomRPM sliders
+ * 3. Shooter spins at the set RPM so you can shoot
  * 4. Click Tuning/RecordPoint to log the calibration point
  * 5. Move to new distance and repeat
  * 6. Click Tuning/PrintTable to export ready-to-paste Java code
@@ -57,9 +57,9 @@ public class ShootingCalibrationCommand extends Command {
         // Display instructions
         SmartDashboard.putString("Cal/Status", "SHOOTING CALIBRATION - Adjust powers and shoot!");
         SmartDashboard.putString("Cal/Instructions", 
-            "1. Adjust Cal/Shooter/TopPower (height) and BottomPower (distance). " +
-            "2. Click Cal/RecordShootingPoint after a good shot. " +
-            "3. Click Cal/PrintShooterTable when done.");
+            "1. Adjust Tuning/Shooter/TopRPM (height) and BottomRPM (distance). " +
+            "2. Click Tuning/RecordPoint after a good shot. " +
+            "3. Click Tuning/PrintTable when done.");
         
         Elastic.sendNotification(new Elastic.Notification(
             Elastic.NotificationLevel.INFO, "Shooting Calibration Started",
@@ -68,10 +68,10 @@ public class ShootingCalibrationCommand extends Command {
 
     @Override
     public void execute() {
-        // ----- Apply power from CalibrationManager (reads Cal/Shooter/ sliders) -----
-        double topPower = calibration.getShooterTopPower();
-        double bottomPower = calibration.getShooterBottomPower();
-        shooter.setManualPower(topPower, bottomPower);
+        // ----- Apply RPM from CalibrationManager sliders -----
+        double topRPM = calibration.getShooterTopRPM();
+        double bottomRPM = calibration.getShooterBottomRPM();
+        shooter.setTargetRPM(topRPM, bottomRPM);
         
         // ----- Update CalibrationManager with sensor data -----
         if (vision.hasPoseEstimate()) {
@@ -86,8 +86,8 @@ public class ShootingCalibrationCommand extends Command {
             SmartDashboard.putString("Cal/Status", "WARNING: No pose - distance unknown");
         } else {
             SmartDashboard.putString("Cal/Status", 
-                String.format("Distance: %.2fm | Top: %.2f | Bottom: %.2f | %s", 
-                    distance, topPower, bottomPower,
+                String.format("Distance: %.2fm | Top: %.0f RPM | Bottom: %.0f RPM | %s", 
+                    distance, topRPM, bottomRPM,
                     shooter.isReady() ? "READY" : "Spinning..."));
         }
     }

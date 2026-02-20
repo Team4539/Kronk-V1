@@ -61,7 +61,7 @@ public class TurretFeedSubsystem extends SubsystemBase {
         TalonFXConfiguration config = new TalonFXConfiguration();
         
         // Brake mode for precise control
-        config.MotorOutput.NeutralMode = NeutralModeValue.Brake;
+        config.MotorOutput.NeutralMode = NeutralModeValue.Coast;
         
         // Set motor direction
         config.MotorOutput.Inverted = Constants.TurretFeed.MOTOR_INVERTED ? 

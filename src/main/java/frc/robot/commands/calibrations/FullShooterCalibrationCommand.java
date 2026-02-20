@@ -14,8 +14,8 @@ import frc.robot.util.Elastic;
  * 
  * Provides full manual control over:
  * - Turret angle (via SmartDashboard slider)
- * - Top motor power (via SmartDashboard slider)
- * - Bottom motor power (via SmartDashboard slider)
+ * - Top motor RPM (via SmartDashboard slider)
+ * - Bottom motor RPM (via SmartDashboard slider)
  * 
  * Also displays:
  * - Current AprilTag detection (ID, TX offset)
@@ -28,8 +28,8 @@ import frc.robot.util.Elastic;
  * 2. Run this command from SmartDashboard
  * 3. Use sliders to adjust:
  *    - Cal/Turret/ManualAngle: Point turret at target
- *    - Cal/Shooter/TopPower: Adjust shot arc/height
- *    - Cal/Shooter/BottomPower: Adjust shot distance
+ *    - Tuning/Shooter/TopRPM: Adjust shot arc/height
+ *    - Tuning/Shooter/BottomRPM: Adjust shot distance
  * 4. Shoot a ball and observe
  * 5. When the shot is good, click "Cal/RecordShootingPoint"
  * 6. Move to a new distance and repeat
@@ -38,8 +38,8 @@ import frc.robot.util.Elastic;
  * DASHBOARD BUTTONS AVAILABLE DURING CALIBRATION:
  * 
  * - Cal/Turret/ManualAngle: Aim turret (slider)
- * - Cal/Shooter/TopPower: Shot arc/height (slider)
- * - Cal/Shooter/BottomPower: Shot distance (slider)
+ * - Tuning/Shooter/TopRPM: Shot arc/height (slider)
+ * - Tuning/Shooter/BottomRPM: Shot distance (slider)
  * - Cal/FeedBall: Feed a ball into the shooter (button)
  * - Cal/RecordShootingPoint: Record current shot as calibration point (button)
  * - Cal/PrintShooterTable: Export all recorded points as Java code (button)
@@ -48,7 +48,7 @@ import frc.robot.util.Elastic;
  * 
  * 1. Start at close range (~2m) and work outward
  * 2. Record 3-5 shots at each distance to verify consistency
- * 3. Small changes first! (0.05 power increments)
+ * 3. Small changes first! (50-100 RPM increments)
  * 4. TOP MOTOR = HEIGHT/ARC (more = higher shot)
  * 5. BOTTOM MOTOR = DISTANCE (more = farther shot)
  * 6. Turret angle offset can compensate for camera alignment issues
@@ -123,9 +123,9 @@ public class FullShooterCalibrationCommand extends Command {
         SmartDashboard.putString("Cal/Status", "FULL CALIBRATION MODE - Adjust sliders and shoot!");
         SmartDashboard.putString("Cal/Instructions", 
             "1. Use Cal/Turret/ManualAngle to aim. " +
-            "2. Use Cal/Shooter/Top/BottomPower to tune shot. " +
+            "2. Use Tuning/Shooter/TopRPM and BottomRPM to tune shot. " +
             "3. Click Cal/FeedBall to feed a ball. " +
-            "4. Click Cal/RecordShootingPoint after a good shot.");
+            "4. Click Tuning/RecordPoint after a good shot.");
         
         Elastic.sendNotification(new Elastic.Notification(
             Elastic.NotificationLevel.INFO, "Full Calibration Started",
@@ -144,10 +144,10 @@ public class FullShooterCalibrationCommand extends Command {
         angle += calibration.getTurretAngleOffset();
         turret.setTargetAngle(angle);
         
-        // ----- Apply manual shooter power -----
-        double topPower = calibration.getShooterTopPower();
-        double bottomPower = calibration.getShooterBottomPower();
-        shooter.setManualPower(topPower, bottomPower);
+        // ----- Apply manual shooter RPM -----
+        double topRPM = calibration.getShooterTopRPM();
+        double bottomRPM = calibration.getShooterBottomRPM();
+        shooter.setTargetRPM(topRPM, bottomRPM);
         
         // ----- Handle feed ball button -----
         if (turretFeed != null) {
@@ -199,8 +199,8 @@ public class FullShooterCalibrationCommand extends Command {
     private void updateStatusDisplay() {
         double distance = calibration.getCurrentDistance();
         double turretAngle = SmartDashboard.getNumber("Cal/Turret/ManualAngle", 0.0);
-        double topPower = calibration.getShooterTopPower();
-        double bottomPower = calibration.getShooterBottomPower();
+        double topRPM = calibration.getShooterTopRPM();
+        double bottomRPM = calibration.getShooterBottomRPM();
         
         String status;
         if (!vision.hasTarget()) {
@@ -208,8 +208,8 @@ public class FullShooterCalibrationCommand extends Command {
         } else if (distance <= 0) {
             status = String.format("WARNING: Tag visible, no pose");
         } else {
-            status = String.format("OK Dist: %.2fm | Angle: %.1f deg | Top: %.2f | Bot: %.2f", 
-                distance, turretAngle, topPower, bottomPower);
+            status = String.format("OK Dist: %.2fm | Angle: %.1f deg | Top: %.0f RPM | Bot: %.0f RPM", 
+                distance, turretAngle, topRPM, bottomRPM);
         }
         
         SmartDashboard.putString("Cal/Status", status);

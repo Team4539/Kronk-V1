@@ -20,6 +20,7 @@ import frc.robot.commands.calibrations.FullShooterCalibrationCommand;
 import frc.robot.commands.calibrations.VisionCalibrationCommand;
 import frc.robot.commands.calibrations.ShootingCalibrationCommand;
 import frc.robot.commands.calibrations.TurretPIDCalibrationCommand;
+import frc.robot.commands.calibrations.TurretRotationCalibrationCommand;
 import frc.robot.commands.intake.DeployIntakeCommand;
 import frc.robot.commands.intake.RetractIntakeCommand;
 import frc.robot.commands.turret.AimTurretToPoseCommand;
@@ -288,6 +289,15 @@ public class RobotContainer {
             gameState.clearShuttleModeOverride();
             notify("Auto-Shuttle Enabled");
         }));
+
+        // POV Down: Feed shot (for calibration - feeds ball into shooter while held)
+        if (turretFeed != null) {
+            operator.povDown().whileTrue(
+                    Commands.startEnd(
+                            () -> turretFeed.setShoot(),
+                            () -> turretFeed.stop(),
+                            turretFeed));
+        }
     }
 
     // =========================================================================
@@ -298,11 +308,16 @@ public class RobotContainer {
         // Drivetrain: swerve drive with slow-mode on RT
         if (drivetrain != null) {
             drivetrain.setDefaultCommand(drivetrain.applyRequest(() -> {
+                // SAFETY: Don't drive while disabled — send idle/brake request
+                if (DriverStation.isDisabled()) {
+                    return brake;
+                }
+
                 double slow = driver.getRightTriggerAxis() > 0.3
                         ? Constants.Driver.SLOW_MODE_MULTIPLIER : 1.0;
                 double vx = -driver.getLeftY()  * Constants.Driver.MAX_DRIVE_SPEED_MPS  * slow;
                 double vy = -driver.getLeftX()  * Constants.Driver.MAX_DRIVE_SPEED_MPS  * slow;
-                double vr = -driver.getRightX() * Constants.Driver.MAX_ANGULAR_SPEED_RAD * slow;
+                double vr = driver.getRightX() * Constants.Driver.MAX_ANGULAR_SPEED_RAD * slow;
 
                 if (useRobotCentric) {
                     return robotCentric.withVelocityX(vx).withVelocityY(vy).withRotationalRate(vr);
@@ -357,9 +372,25 @@ public class RobotContainer {
             SmartDashboard.putData("Tuning/Cal: Turret PID",
                     new TurretPIDCalibrationCommand(turret));
         }
+        if (turret != null && vision != null) {
+            SmartDashboard.putData("Tuning/Cal: Turret Rotation",
+                    new TurretRotationCalibrationCommand(turret, vision));
+        }
         if (vision != null) {
             SmartDashboard.putData("Tuning/Cal: Vision",
                     new VisionCalibrationCommand(vision));
+        }
+
+        // Quick-fire button for calibration: feeds a ball into the shooter
+        // without needing alliance windows or full AutoShoot.
+        // Use while tuning RPM offset sliders to test shots.
+        if (turretFeed != null) {
+            SmartDashboard.putData("Tuning/Feed Shot",
+                    Commands.startEnd(
+                            () -> turretFeed.setShoot(),
+                            () -> turretFeed.stop(),
+                            turretFeed
+                    ).withName("Feed Shot"));
         }
     }
 
@@ -376,7 +407,10 @@ public class RobotContainer {
                     drivetrain.getState().Pose,
                     drivetrain.getState().Speeds,
                     gameState.getTargetMode(),
-                    calibration.getTurretAngleOffset());
+                    calibration.getTurretAngleOffset(),
+                    calibration.getTopRPMOffset(),
+                    calibration.getBottomRPMOffset(),
+                    calibration.getTurretRotationOffset());
             calibration.setCurrentDistance(shootingCalc.getDistance());
         }
 
@@ -396,39 +430,68 @@ public class RobotContainer {
         gameState.update(isInShuttleZone());
 
         // Fuse vision into drivetrain odometry.
-        // We trust vision as the primary pose source — whenever we see tags,
-        // vision is the authority. Gyro/odometry is just the fallback.
+        // Multi-tag: highly trusted (tight std devs for x, y, AND theta).
+        // Single-tag: trust x/y but NOT theta — single-tag rotation from PNP is very unreliable
+        //   and can corrupt the gyro heading, which breaks all aiming.
         if (vision.hasVisionPose()) {
-            // On first detection, hard-reset the pose so odometry immediately
-            // snaps to the correct position (no gradual convergence needed).
-            if (!hasSeededHeadingFromVision) {
-                drivetrain.resetPose(vision.getRobotPose());
-                hasSeededHeadingFromVision = true;
-                // Tell vision the heading is now correct so it can switch
-                // from LowestAmbiguity (PNP rotation) to PnpDistanceTrigSolve
-                // (which uses the now-correct gyro heading for rotation).
-                vision.notifyHeadingSeeded();
-                System.out.println("[RobotContainer] Vision pose initialized: "
-                        + String.format("(%.2f, %.2f) @ %.1f°",
-                                vision.getRobotPose().getX(),
-                                vision.getRobotPose().getY(),
-                                vision.getRobotPose().getRotation().getDegrees()));
-                Elastic.sendNotification(
-                        new Elastic.Notification(NotificationLevel.INFO,
-                                "Vision Pose Initialized",
-                                String.format("Pose set to (%.1f, %.1f) @ %.1f° from %d tag(s)",
-                                        vision.getRobotPose().getX(),
-                                        vision.getRobotPose().getY(),
-                                        vision.getRobotPose().getRotation().getDegrees(),
-                                        vision.getTargetCount())));
-            }
+            edu.wpi.first.math.geometry.Pose2d visionPose = vision.getRobotPose();
+            
+            if (vision.isMultiTag()) {
+                // Multi-tag: trust everything including rotation.
+                // On first multi-tag detection, seed the heading so PnpDistanceTrigSolve
+                // can use the (now correct) gyro heading for future single-tag estimates.
+                if (!hasSeededHeadingFromVision) {
+                    drivetrain.resetPose(visionPose);
+                    hasSeededHeadingFromVision = true;
+                    vision.notifyHeadingSeeded();
+                    System.out.println("[RobotContainer] Vision pose initialized (MultiTag): "
+                            + String.format("(%.2f, %.2f) @ %.1f°",
+                                    visionPose.getX(), visionPose.getY(),
+                                    visionPose.getRotation().getDegrees()));
+                    Elastic.sendNotification(
+                            new Elastic.Notification(NotificationLevel.INFO,
+                                    "Vision Pose Initialized",
+                                    String.format("MultiTag: (%.1f, %.1f) @ %.1f° from %d tags",
+                                            visionPose.getX(), visionPose.getY(),
+                                            visionPose.getRotation().getDegrees(),
+                                            vision.getTargetCount())));
+                }
 
-            // Every cycle: fuse vision with very tight std devs so it dominates
-            double[] std = vision.getVisionStdDevs();
-            drivetrain.addVisionMeasurement(
-                    vision.getRobotPose(),
-                    vision.getPoseTimestamp(),
-                    VecBuilder.fill(std[0], std[1], std[2]));
+                // Multi-tag: tight std devs — trust fully
+                double[] std = vision.getVisionStdDevs();
+                drivetrain.addVisionMeasurement(
+                        visionPose,
+                        vision.getPoseTimestamp(),
+                        VecBuilder.fill(std[0], std[1], std[2]));
+            } else {
+                // Single-tag: trust X/Y position but NOT rotation.
+                // Single-tag PNP rotation is unreliable and will fight the gyro,
+                // causing the pose to oscillate and aiming to break.
+                // Use very loose theta std dev so gyro stays dominant for heading.
+                double[] std = vision.getVisionStdDevs();
+                double looseTheta = 999.0; // Effectively ignore vision rotation
+                drivetrain.addVisionMeasurement(
+                        visionPose,
+                        vision.getPoseTimestamp(),
+                        VecBuilder.fill(std[0], std[1], looseTheta));
+                        
+                // If heading hasn't been seeded yet and we only see single tags,
+                // still notify so PnpDistanceTrigSolve can be used (it will use
+                // the gyro heading which starts at 0 — user must manually seed
+                // via Y button / gyro reset when facing a known direction).
+                if (!hasSeededHeadingFromVision) {
+                    hasSeededHeadingFromVision = true;
+                    vision.notifyHeadingSeeded();
+                    System.out.println("[RobotContainer] Vision X/Y initialized (SingleTag, gyro heading kept): "
+                            + String.format("(%.2f, %.2f)", visionPose.getX(), visionPose.getY()));
+                    Elastic.sendNotification(
+                            new Elastic.Notification(NotificationLevel.INFO,
+                                    "Vision X/Y Initialized",
+                                    String.format("SingleTag ID %d: (%.1f, %.1f) — heading from gyro",
+                                            vision.getTargetId(),
+                                            visionPose.getX(), visionPose.getY())));
+                }
+            }
         }
     }
 
@@ -450,6 +513,7 @@ public class RobotContainer {
 
     /** Stop all motors - called from Robot.disabledInit(). */
     public void stopAllMotors() {
+        if (drivetrain != null) drivetrain.setControl(brake);
         if (shooter != null)    shooter.stop();
         if (turretFeed != null) turretFeed.stop();
         if (intake != null) {

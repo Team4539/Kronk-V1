@@ -455,8 +455,9 @@ public class AutoShootCommand extends Command {
      * @return true if turret aimed, shooter spun up, AND alliance active (or green light pre-shift)
      */
     public boolean isReadyToFire() {
-        return turretOnTarget && shooterReady && 
-               (allianceActive || gameState.isForceShootEnabled() || gameState.isGreenLightPreShift());
+        return true;
+        // return turretOnTarget && shooterReady && 
+        //        (allianceActive || gameState.isForceShootEnabled() || gameState.isGreenLightPreShift());
     }
     
     /**

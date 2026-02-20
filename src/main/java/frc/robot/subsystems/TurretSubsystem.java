@@ -15,19 +15,32 @@ import frc.robot.Constants;
  * Turret subsystem using a TalonFX motor with PositionDutyCycle control.
  * 
  * COORDINATE SYSTEM:
- *   External angles: -180 to +180 degrees, where 0 = robot forward.
+ *   External angles: -180 to +180 degrees, where 0 = ROBOT FORWARD.
+ *     +90 = left, -90 = right, ±180 = backward.
  *     Positive = CCW when viewed from above (standard math convention).
  *   Internal angles: 0 to 360 degrees, offset so power-on position is STARTUP_ANGLE_DEG.
  * 
+ * MOTOR DIRECTION:
+ *   MOTOR_INVERTED = true. The physical motor CW = positive encoder counts,
+ *   but we need increasing internal angle = CCW (math convention).
+ *   Phoenix 6 inversion flips both encoder and output together, so the math
+ *   stays consistent: positive motor rotations = CCW turret movement.
+ * 
  * HOME ANGLE:
- *   HOME_ANGLE_DEG defines the external angle the turret physically faces at power-on.
- *   Currently 90 (turret faces left at power-on). The conversions account for this
- *   so that external 0 always means "robot forward" regardless of home position.
+ *   The turret physically faces LEFT (90° external) at power-on.
+ *   HOME_ANGLE_DEG = 90 tells the conversion math about this offset.
+ *   The conversions ensure external 0° always means "robot forward" regardless
+ *   of where the turret physically starts.
+ * 
+ *   Example mappings (HOME=90, STARTUP=180):
+ *     External  90° (left/home)    → Internal 180° (startup position, no motor movement)
+ *     External   0° (forward)      → Internal  90° (motor turns CW from left to forward)
+ *     External -90° (right)        → Internal   0°/360° (near dead zone)
  * 
  * DEAD ZONE:
- *   The turret has a physical dead zone between MAX_ANGLE_DEG and MIN_ANGLE_DEG
- *   going THROUGH 360/0. The turret cannot traverse this region.
- *   Usable range: MIN_ANGLE_DEG (45) to MAX_ANGLE_DEG (236), going CW through 90,180,etc.
+ *   Usable range: Internal [75, 224] — contains 90 (forward) and 180 (home).
+ *   Dead zone: Internal (224, 360) ∪ [0, 75) — turret cannot traverse this arc.
+ *   External usable range: roughly -105° (right) through 0° (forward) to 134° (left/rear).
  * 
  * POSITION TRACKING:
  *   On startup, the motor encoder reads 0.0 rotations. We define this as STARTUP_ANGLE_DEG (180).
@@ -91,6 +104,8 @@ public class TurretSubsystem extends SubsystemBase {
         // SAFETY: When robot is disabled, do NOT send any CAN frames.
         if (DriverStation.isDisabled()) {
             SmartDashboard.putNumber("Turret/Angle", getCurrentAngle());
+            SmartDashboard.putNumber("Turret/InternalAngle", currentInternalAngle);
+            SmartDashboard.putNumber("Turret/MotorRotations", motor.getPosition().getValueAsDouble());
             SmartDashboard.putNumber("Turret/Target", getTargetExternalAngle());
             SmartDashboard.putBoolean("Turret/OnTarget", isOnTarget());
             return;
@@ -105,6 +120,8 @@ public class TurretSubsystem extends SubsystemBase {
 
         // Telemetry (just what matters)
         SmartDashboard.putNumber("Turret/Angle", getCurrentAngle());
+        SmartDashboard.putNumber("Turret/InternalAngle", currentInternalAngle);
+        SmartDashboard.putNumber("Turret/MotorRotations", motor.getPosition().getValueAsDouble());
         SmartDashboard.putNumber("Turret/Target", getTargetExternalAngle());
         SmartDashboard.putBoolean("Turret/OnTarget", isOnTarget());
     }
@@ -176,10 +193,10 @@ public class TurretSubsystem extends SubsystemBase {
 
     /**
      * Check if an internal angle is in the dead zone.
-     * Dead zone is the arc from MAX_ANGLE_DEG through 360/0 to MIN_ANGLE_DEG.
      * 
-     * Usable range: [MIN_ANGLE_DEG, MAX_ANGLE_DEG]
-     * Dead zone: (MAX_ANGLE_DEG, 360) ∪ [0, MIN_ANGLE_DEG)
+     * Usable range: [MIN_ANGLE_DEG (75), MAX_ANGLE_DEG (224)]
+     *   This arc contains 90 (forward) and 180 (home/startup).
+     * Dead zone: (224, 360) ∪ [0, 75) — the arc the turret cannot traverse.
      */
     private boolean isInDeadZone(double internalAngle) {
         return internalAngle > Constants.Turret.MAX_ANGLE_DEG

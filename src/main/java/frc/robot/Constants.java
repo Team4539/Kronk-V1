@@ -100,13 +100,10 @@ public final class Constants {
     
     // Hub calibration: distance (m) -> {TopRPM, BottomRPM}
     // Values are in motor RPM (Kraken X60 free speed ~6000 RPM)
+    // Reduced ~25% from original values — was overshooting at all distances
     public static final TreeMap<Double, double[]> SHOOTING_CALIBRATION = new TreeMap<>() {{
-      put(1.5, new double[]{1800, 2400}); put(2.0, new double[]{2100, 2700});
-      put(2.5, new double[]{2400, 3000}); put(3.0, new double[]{2700, 3300});
-      put(3.5, new double[]{3000, 3600}); put(4.0, new double[]{3300, 3900});
-      put(4.5, new double[]{3600, 4200}); put(5.0, new double[]{3900, 4500});
-      put(5.5, new double[]{4200, 4800}); put(6.0, new double[]{4500, 5100});
-      put(7.0, new double[]{5100, 5700}); put(8.0, new double[]{5700, 6000});
+      put(2.00, new double[]{500, 2500}); put(3.5, new double[]{2000,2000});
+      put(5.75, new double[]{1500, 4000});
     }};
     
     // Trench calibration for shuttle shots: distance (m) -> {TopRPM, BottomRPM}
@@ -131,7 +128,7 @@ public final class Constants {
     public static final int ROLLER_MOTOR_ID = CANIds.INTAKE_ROLLER_MOTOR;
     public static final int CANCODER_ID = CANIds.INTAKE_CANCODER;
     public static final boolean PIVOT_MOTOR_INVERTED = true;
-    public static final boolean ROLLER_MOTOR_INVERTED = false;
+    public static final boolean ROLLER_MOTOR_INVERTED = true;
     public static final double CANCODER_OFFSET_DEG = -100.107;
     public static final double PIVOT_GEAR_RATIO = 45.0;
     
@@ -139,16 +136,16 @@ public final class Constants {
     // P: gets it moving toward target
     // D: currently 0 -- increase if overshoot/bounce is a problem
     public static final double PIVOT_PID_P = 0.008;
-    public static final double PIVOT_PID_I = 0.0;
+    public static final double PIVOT_PID_I = 0.00;
     public static final double PIVOT_PID_D = 0.0;
     
     // Pivot limits
     public static final double MIN_PIVOT_ANGLE_DEG = 0.0;
     public static final double MAX_PIVOT_ANGLE_DEG = 90.0;
     public static final double RETRACTED_ANGLE_DEG = 0.0;
-    public static final double DEPLOYED_ANGLE_DEG = 90.0;
+    public static final double DEPLOYED_ANGLE_DEG = 120;
     public static final double IDLE_ANGLE_DEG = 35;
-    public static final double PIVOT_MAX_OUTPUT = 0.2;
+    public static final double PIVOT_MAX_OUTPUT = 0.3;
     // Wide tolerance to stop before chain slop causes bouncing
     public static final double PIVOT_TOLERANCE_DEG = 15.0;
     
@@ -164,27 +161,28 @@ public final class Constants {
     public static final String CAMERA_NAME = "Arducam_OV9782_USB_Camera";
     
     // Camera mounting position relative to robot center (meters)
+    // Camera is at the front of the robot, about 3 inches behind the front edge
     /** Forward/backward from robot center (+ = forward) */
-    public static final double CAMERA_X_OFFSET = 0.0;
+    public static final double CAMERA_X_OFFSET = (Robot.LENGTH_INCHES / 2.0 - 3.0) * 0.0254; // ~11 inches forward = ~0.28m
     /** Left/right from robot center (+ = left) */
-    public static final double CAMERA_Y_OFFSET = 0.0;
+    public static final double CAMERA_Y_OFFSET = 0.0; // Centered left-right
     /** Height from ground to camera lens */
     public static final double CAMERA_Z_OFFSET = 0.5;
     /** Tilt angle in degrees (+ = tilted up) */
-    public static final double CAMERA_PITCH_DEGREES = 0.0;
+    public static final double CAMERA_PITCH_DEGREES = 15.0; // Slight upward pitch
     /** Yaw rotation in degrees (0 = facing forward, 90 = facing left, 180 = facing backward) */
     public static final double CAMERA_YAW_DEGREES = 0.0; // Camera faces FORWARD on robot
     
     // Vision measurement trust (standard deviations for pose estimator)
     // Lower = trust vision more, Higher = trust odometry more
-    // We trust vision heavily — it's the primary pose source when tags are visible.
-    // Odometry/gyro is only the fallback when no tags are in view.
-    public static final double VISION_STD_DEV_X = 0.1;
-    public static final double VISION_STD_DEV_Y = 0.1;
-    public static final double VISION_STD_DEV_THETA = 0.1;
+    // Balanced trust — vision corrects drift but odometry keeps things smooth.
+    // Was 0.1/0.1/0.1 which caused jitter from noisy vision updates.
+    public static final double VISION_STD_DEV_X = 0.7;
+    public static final double VISION_STD_DEV_Y = 0.7;
+    public static final double VISION_STD_DEV_THETA = 10;
     
     /** Maximum pose ambiguity to accept a vision measurement (0-1, lower = stricter) */
-    public static final double MAX_AMBIGUITY = 0.2;
+    public static final double MAX_AMBIGUITY = 0.1;
   }
 
   public static final class Driver {
@@ -199,16 +197,26 @@ public final class Constants {
   public static final class Turret {
     public static final int MOTOR_ID = CANIds.TURRET_MOTOR;
     public static final double GEAR_RATIO = 10.00537109375; // Calibrate with CalibrateTurretGearRatioCommand
-    public static final boolean MOTOR_INVERTED = false;
+    public static final boolean MOTOR_INVERTED = true;
     
     // Bounded 0-360 position system. STARTUP_ANGLE is internal position at power-on.
     // HOME_ANGLE_DEG is the EXTERNAL angle the turret physically faces at power-on.
-    // Usable range: MIN_ANGLE_DEG to MAX_ANGLE_DEG (going CW through 0-360).
-    // Dead zone: MAX_ANGLE_DEG -> wraps through 360/0 -> MIN_ANGLE_DEG (cannot traverse).
-    public static final double STARTUP_ANGLE_DEG = 180.0; // Internal angle at power-on
+    //   It tells the code "at power-on, the turret is pointing at this external angle."
+    //   External 0 = robot forward. External 90 = robot left. External -90 = robot right.
+    //   Since the turret physically starts facing left, HOME_ANGLE_DEG = 90.
+    //
+    // MOTOR_INVERTED = true because the motor's physical CW = positive encoder,
+    //   but the math convention needs positive internal angle change to go CCW.
+    //   Phoenix 6 inversion flips BOTH encoder and output together, keeping math consistent.
+    //
+    // MIN/MAX are in INTERNAL coordinates (0-360).
+    //   Internal 90 = forward, Internal 180 = home/left (startup).
+    //   Usable range WRAPS through 0/360: from MIN(75) → 0/360 → through 90,180 → to MAX(224).
+    //   Dead zone: MAX(224) → through 270,315 → MIN(75) (cannot traverse).
+    public static final double STARTUP_ANGLE_DEG = 180.0; // Internal angle at power-on (arbitrary reference)
     public static final double HOME_ANGLE_DEG = 90.0;     // External angle at power-on (90 = facing left)
-    public static final double MIN_ANGLE_DEG = 45.0;      // Lower usable limit
-    public static final double MAX_ANGLE_DEG = 236.0;     // Upper usable limit
+    public static final double MIN_ANGLE_DEG = 75.0;      // CW internal limit
+    public static final double MAX_ANGLE_DEG = 224.0;     // CCW internal limit
 
     public static final double LIMIT_SAFETY_MARGIN_DEG = 10.0;
     
@@ -229,6 +237,13 @@ public final class Constants {
     public static final double TURRET_Y_OFFSET = ((Robot.WIDTH_INCHES / 2.0) - TURRET_FROM_LEFT_INCHES) * 0.0254;
     
     public static final double ON_TARGET_TOLERANCE_DEG = 20.0;
+    
+    // Distance-based turret angle offset calibration: distance (m) -> angle offset (deg)
+    // At each distance, this offset is added to the calculated turret angle to correct aim.
+    // Use the "Cal: Turret Rotation" command to record offsets, then paste the output here.
+    public static final TreeMap<Double, Double> ROTATION_CALIBRATION = new TreeMap<>() {{
+      put(2.0, 0.0); put(3.5, 0.0);
+    }};
     
     // Per-tag calibration offsets (initialize all to 0)
     public static final Map<Integer, Double> TAG_ANGLE_OFFSETS = new HashMap<>() {{ for (int i = 1; i <= 32; i++) put(i, 0.0); }};

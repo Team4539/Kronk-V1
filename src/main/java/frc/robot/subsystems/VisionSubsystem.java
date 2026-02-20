@@ -73,6 +73,9 @@ public class VisionSubsystem extends SubsystemBase {
     /** Ambiguity of the best target (lower = more confident) */
     private double bestTargetAmbiguity = 1.0;
 
+    /** Whether the current pose estimate came from multi-tag (2+ tags) */
+    private boolean isMultiTagEstimate = false;
+
     /** Fallback pose from drivetrain odometry */
     private Pose2d drivetrainPose = new Pose2d();
 
@@ -312,6 +315,24 @@ public class VisionSubsystem extends SubsystemBase {
      */
     public int getTargetCount() {
         return targetCount;
+    }
+
+    /**
+     * Whether the current pose estimate came from multi-tag PNP (2+ tags).
+     * Multi-tag estimates have much more reliable rotation and position.
+     * @return true if current pose was computed from multiple tags
+     */
+    public boolean isMultiTag() {
+        return isMultiTagEstimate;
+    }
+
+    /**
+     * Get the ambiguity of the best currently tracked target.
+     * Lower = more confident. Typically reject poses with ambiguity > 0.2.
+     * @return Ambiguity value (0-1)
+     */
+    public double getBestAmbiguity() {
+        return bestTargetAmbiguity;
     }
 
     /**
@@ -564,7 +585,11 @@ public class VisionSubsystem extends SubsystemBase {
      * 
      * Uses MULTI_TAG_PNP_ON_COPROCESSOR as the primary strategy, which
      * computes pose from all visible tags simultaneously for best accuracy.
-     * Falls back to LOWEST_AMBIGUITY (single best tag) when only one tag is visible.
+     * Falls back to PnpDistanceTrigSolve or LOWEST_AMBIGUITY when only one tag is visible.
+     * 
+     * Filters out bad estimates:
+     *  - Single-tag poses with ambiguity above MAX_AMBIGUITY are rejected
+     *  - Poses outside the field boundaries are rejected
      */
     private void updatePoseEstimate() {
         // Get all unread results from PhotonVision
@@ -589,6 +614,7 @@ public class VisionSubsystem extends SubsystemBase {
             targetArea = 0.0;
             targetCount = 0;
             bestTargetAmbiguity = 1.0;
+            isMultiTagEstimate = false;
             return;
         }
 
@@ -602,12 +628,24 @@ public class VisionSubsystem extends SubsystemBase {
         }
         targetCount = latestResult.getTargets().size();
 
+        // --- Reject single-tag estimates with high ambiguity ---
+        // Multi-tag doesn't have ambiguity issues, so only filter single-tag.
+        if (targetCount == 1 && bestTargetAmbiguity > Constants.Vision.MAX_AMBIGUITY) {
+            hasPose = false;
+            isMultiTagEstimate = false;
+            DashboardHelper.putString(Category.DEBUG, "Vision/PoseMethod",
+                    "REJECTED: ambiguity " + String.format("%.3f", bestTargetAmbiguity));
+            return;
+        }
+
         // Use PhotonPoseEstimator to compute robot pose from the result.
         // Try multi-tag first (coprocessor-side PNP) — always best when available.
         Optional<EstimatedRobotPose> estimatedPose = poseEstimator.estimateCoprocMultiTagPose(latestResult);
         String poseMethod = "MultiTag";
+        isMultiTagEstimate = estimatedPose.isPresent();
         
         if (estimatedPose.isEmpty()) {
+            isMultiTagEstimate = false;
             if (headingSeeded) {
                 // Heading is seeded correctly, so PnpDistanceTrigSolve will give
                 // accurate X/Y (from tag distance) with correct rotation (from gyro).
@@ -639,7 +677,22 @@ public class VisionSubsystem extends SubsystemBase {
             Pose3d pose3d = estimate.estimatedPose;
 
             // Extract 2D pose for field-plane calculations
-            robotPose = pose3d.toPose2d();
+            Pose2d candidatePose = pose3d.toPose2d();
+            
+            // --- Reject poses outside the field ---
+            double margin = 0.5; // Allow small margin for camera offset
+            if (candidatePose.getX() < -margin 
+                    || candidatePose.getX() > Constants.Field.FIELD_LENGTH_METERS + margin
+                    || candidatePose.getY() < -margin 
+                    || candidatePose.getY() > Constants.Field.FIELD_WIDTH_METERS + margin) {
+                hasPose = false;
+                DashboardHelper.putString(Category.DEBUG, "Vision/PoseMethod",
+                        "REJECTED: off-field (" + String.format("%.1f, %.1f", 
+                                candidatePose.getX(), candidatePose.getY()) + ")");
+                return;
+            }
+            
+            robotPose = candidatePose;
             poseTimestamp = estimate.timestampSeconds;
             hasPose = true;
             
@@ -648,6 +701,7 @@ public class VisionSubsystem extends SubsystemBase {
             DashboardHelper.putNumber(Category.DEBUG, "Vision/RawPoseY", robotPose.getY());
             DashboardHelper.putNumber(Category.DEBUG, "Vision/RawPoseRotDeg", robotPose.getRotation().getDegrees());
             DashboardHelper.putString(Category.DEBUG, "Vision/PoseMethod", poseMethod);
+            DashboardHelper.putBoolean(Category.DEBUG, "Vision/IsMultiTag", isMultiTagEstimate);
         } else {
             hasPose = false;
         }

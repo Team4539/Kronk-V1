@@ -72,8 +72,8 @@ public class DistanceOffsetCalibrationCommand extends Command {
         SmartDashboard.putString("Cal/Status", "OFFSET CALIBRATION - Tune global power offsets");
         SmartDashboard.putString("Cal/Instructions", 
             "1. Position at various distances. " +
-            "2. Shooter uses interpolated power. " +
-            "3. Adjust Cal/Shooter/Top/BottomOffset. " +
+            "2. Shooter uses manual RPM from sliders. " +
+            "3. Adjust Tuning/Shooter/TopRPM and BottomRPM. " +
             "4. Test at multiple distances.");
         
         Elastic.sendNotification(new Elastic.Notification(
@@ -90,18 +90,18 @@ public class DistanceOffsetCalibrationCommand extends Command {
             calibration.setCurrentDistance(distance);
         }
         
-        // ----- Apply manual power from calibration sliders -----
-        double topPower = calibration.getShooterTopPower();
-        double bottomPower = calibration.getShooterBottomPower();
-        shooter.setManualPower(topPower, bottomPower);
+        // ----- Apply RPM from calibration sliders -----
+        double topRPM = calibration.getShooterTopRPM();
+        double bottomRPM = calibration.getShooterBottomRPM();
+        shooter.setTargetRPM(topRPM, bottomRPM);
         
         // ----- Update status display -----
         String status;
         if (!vision.hasPoseEstimate()) {
-            status = String.format("WARNING: No pose | Top=%.2f Bot=%.2f", topPower, bottomPower);
+            status = String.format("WARNING: No pose | Top=%.0f RPM Bot=%.0f RPM", topRPM, bottomRPM);
         } else {
-            status = String.format("OK Dist: %.2fm | Top=%.2f Bot=%.2f | %s",
-                distance, topPower, bottomPower,
+            status = String.format("OK Dist: %.2fm | Top=%.0f RPM Bot=%.0f RPM | %s",
+                distance, topRPM, bottomRPM,
                 shooter.isReady() ? "READY" : "Spinning...");
         }
         
@@ -117,7 +117,7 @@ public class DistanceOffsetCalibrationCommand extends Command {
         
         Elastic.sendNotification(new Elastic.Notification(
             Elastic.NotificationLevel.INFO, "Offset Calibration Ended",
-            String.format("Final Top=%.3f Bot=%.3f", calibration.getShooterTopPower(), calibration.getShooterBottomPower())));
+            String.format("Final Top=%.0f RPM Bot=%.0f RPM", calibration.getShooterTopRPM(), calibration.getShooterBottomRPM())));
     }
     
     @Override
