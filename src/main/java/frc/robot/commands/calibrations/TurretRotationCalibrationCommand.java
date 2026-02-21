@@ -9,27 +9,25 @@ import frc.robot.util.Elastic;
 import frc.robot.util.ShootingCalculator;
 
 /**
- * Calibration command for building the turret rotation offset table.
+ * @deprecated Use FullShooterCalibrationCommand instead — calibration is now unified.
+ * This command is kept for backwards compatibility but records to the same
+ * unified calibration table (x, y, bearing, turretOffset, topRPM, bottomRPM).
  * 
- * At different distances the turret may need a different angle correction
- * to hit the target. This command lets you drive to various distances,
- * adjust the Tuning/Turret/RotationOffset slider until shots are on-target,
- * then record the distance-offset pair. When done, print the table and
- * paste it into Constants.Turret.ROTATION_CALIBRATION.
- * 
- * The turret aims using ShootingCalculator (auto-tracking the target) while
- * applying the live RotationOffset on top, so you can see the effect in
- * real-time.
+ * The turret angle offset depends on BOTH distance to target AND the robot's
+ * orientation relative to the target (bearing). This command lets you drive 
+ * to various positions, adjust the RotationOffset slider, and record unified
+ * calibration points.
  * 
  * HOW TO USE:
  * 1. Run this command from SmartDashboard ("Tuning/Cal: Turret Rotation")
- * 2. Drive to a known distance from the target
+ * 2. Drive to a position — note BOTH the distance AND bearing on the dashboard
  * 3. Adjust Tuning/Turret/RotationOffset slider until turret is aimed correctly
- * 4. Click Tuning/RecordRotationPoint to save the distance+offset pair
- * 5. Move to a new distance and repeat
- * 6. Click Tuning/PrintRotationTable to get copy-paste code for Constants.java
+ * 4. Click Tuning/RecordPoint to save the unified calibration point
+ * 5. Move to a new distance OR turn the robot to a different orientation and repeat
+ * 6. Click Tuning/PrintTable to get copy-paste code for Constants.java
  * 7. Cancel the command when done
  */
+@Deprecated
 public class TurretRotationCalibrationCommand extends Command {
 
     private final TurretSubsystem turret;
@@ -56,15 +54,15 @@ public class TurretRotationCalibrationCommand extends Command {
         SmartDashboard.putString("Cal/Status",
                 "ROTATION CALIBRATION - Adjust RotationOffset slider, record at each distance");
         SmartDashboard.putString("Cal/Instructions",
-                "1. Drive to a distance. " +
+                "1. Drive to a distance & orientation. " +
                 "2. Adjust Tuning/Turret/RotationOffset until turret aims correctly. " +
-                "3. Click Tuning/RecordRotationPoint. " +
-                "4. Repeat at more distances. " +
+                "3. Click Tuning/RecordRotationPoint (records distance + bearing + offset). " +
+                "4. Repeat at different distances AND orientations. " +
                 "5. Click Tuning/PrintRotationTable when done.");
 
         Elastic.sendNotification(new Elastic.Notification(
                 Elastic.NotificationLevel.INFO, "Turret Rotation Calibration Started",
-                "Adjust rotation offset at various distances."));
+                "Adjust rotation offset at various distances and orientations."));
     }
 
     @Override
@@ -80,20 +78,22 @@ public class TurretRotationCalibrationCommand extends Command {
             calibration.setCurrentDistance(vision.getDistanceToHub());
         }
 
-        // Status display
+        // Status display — now shows bearing (robot orientation relative to target)
         double distance = calibration.getCurrentDistance();
+        double bearing = shootingCalc.getRawBearing();
         double rotationOffset = calibration.getTurretRotationOffset();
 
         String status;
         if (!vision.hasPoseEstimate()) {
             status = String.format("WARNING: No pose | RotOffset: %.2f°", rotationOffset);
         } else {
-            status = String.format("Dist: %.2fm | RotOffset: %.2f° | TurretCmd: %.1f°",
-                    distance, rotationOffset, angle);
+            status = String.format("Dist: %.2fm | Bearing: %.0f° | RotOffset: %.2f° | TurretCmd: %.1f°",
+                    distance, bearing, rotationOffset, angle);
         }
 
         SmartDashboard.putString("Cal/Status", status);
         SmartDashboard.putNumber("Cal/Rotation/Distance", distance);
+        SmartDashboard.putNumber("Cal/Rotation/Bearing", bearing);
         SmartDashboard.putNumber("Cal/Rotation/Offset", rotationOffset);
     }
 

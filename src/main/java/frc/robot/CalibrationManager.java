@@ -1,8 +1,10 @@
 package frc.robot;
 
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import frc.robot.util.ShootingCalculator;
 
-import java.util.TreeMap;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Live-tuning sliders for calibration sessions.
@@ -39,21 +41,30 @@ public class CalibrationManager {
     /** Live RPM offset added to calculated bottom motor RPM (positive = more power) */
     private double bottomRPMOffset = 0.0;
     
-    // --- Recorded data ---
+    // --- Recorded data (unified: x, y, bearing, turretOffset, topRPM, bottomRPM) ---
     
-    private final TreeMap<Double, double[]> recordedPoints = new TreeMap<>();
+    /** Recorded unified calibration points: {robotX, robotY, bearingDeg, turretOffsetDeg, topRPM, bottomRPM} */
+    private final List<double[]> recordedPoints = new ArrayList<>();
     private int recordCount = 0;
-    
-    /** Recorded turret rotation offset points: distance (m) -> angle offset (deg) */
-    private final TreeMap<Double, Double> recordedRotationPoints = new TreeMap<>();
-    private int rotationRecordCount = 0;
     
     /** Live turret rotation offset being tuned (degrees) */
     private double turretRotationOffset = 0.0;
     
-    // --- Live measurement (set externally) ---
+    /** Whether a calibration session is active (offsets have been zeroed) */
+    private boolean calibrationSessionActive = false;
+    
+    // --- Live measurement (set externally from ShootingCalculator) ---
     
     private double currentDistance = 0.0;
+    
+    /** Robot-relative bearing to target (degrees, -180 to +180). Set from ShootingCalculator. */
+    private double currentBearing = 0.0;
+    
+    /** Turret X position relative to target (meters). Alliance-independent. */
+    private double currentX = 0.0;
+    
+    /** Turret Y position relative to target (meters). Alliance-independent. */
+    private double currentY = 0.0;
     
     // ========================================================================
     // INIT
@@ -75,19 +86,22 @@ public class CalibrationManager {
         SmartDashboard.putNumber("Tuning/Turret/I", turretI);
         SmartDashboard.putNumber("Tuning/Turret/D", turretD);
         
-        // Recording controls
+        // Recording controls (unified: records turret + shooter together)
         SmartDashboard.putBoolean("Tuning/RecordPoint", false);
         SmartDashboard.putBoolean("Tuning/PrintTable", false);
         SmartDashboard.putBoolean("Tuning/ClearData", false);
         SmartDashboard.putNumber("Tuning/RecordCount", 0);
         SmartDashboard.putString("Tuning/Status", "Ready");
         
-        // Turret rotation offset calibration (per-distance turret angle offset)
+        // Turret rotation offset (still live-tunable per-session)
         SmartDashboard.putNumber("Tuning/Turret/RotationOffset", turretRotationOffset);
-        SmartDashboard.putBoolean("Tuning/RecordRotationPoint", false);
-        SmartDashboard.putBoolean("Tuning/PrintRotationTable", false);
-        SmartDashboard.putBoolean("Tuning/ClearRotationData", false);
-        SmartDashboard.putNumber("Tuning/RotationRecordCount", 0);
+        
+        // Start/End calibration buttons
+        // Start: zeroes ALL offsets + bypasses baked-in Constants offsets
+        // End: re-enables baked-in Constants offsets for normal operation
+        SmartDashboard.putBoolean("Tuning/StartCalibration", false);
+        SmartDashboard.putBoolean("Tuning/EndCalibration", false);
+        SmartDashboard.putBoolean("Tuning/CalibrationActive", false);
     }
     
     // ========================================================================
@@ -95,6 +109,18 @@ public class CalibrationManager {
     // ========================================================================
     
     public void update() {
+        // --- Start Calibration button: zero ALL offsets + bypass baked-in for a clean session ---
+        if (SmartDashboard.getBoolean("Tuning/StartCalibration", false)) {
+            resetAllOffsets();
+            SmartDashboard.putBoolean("Tuning/StartCalibration", false);
+        }
+        
+        // --- End Calibration button: re-enable baked-in Constants offsets ---
+        if (SmartDashboard.getBoolean("Tuning/EndCalibration", false)) {
+            endCalibration();
+            SmartDashboard.putBoolean("Tuning/EndCalibration", false);
+        }
+        
         // Read tuning values
         shooterTopRPM = SmartDashboard.getNumber("Tuning/Shooter/TopRPM", shooterTopRPM);
         shooterBottomRPM = SmartDashboard.getNumber("Tuning/Shooter/BottomRPM", shooterBottomRPM);
@@ -106,7 +132,7 @@ public class CalibrationManager {
         turretD = SmartDashboard.getNumber("Tuning/Turret/D", turretD);
         turretRotationOffset = SmartDashboard.getNumber("Tuning/Turret/RotationOffset", turretRotationOffset);
         
-        // Check button presses - Shooting calibration
+        // Check button presses - Unified shooting + turret calibration
         if (SmartDashboard.getBoolean("Tuning/RecordPoint", false)) {
             recordShootingPoint();
             SmartDashboard.putBoolean("Tuning/RecordPoint", false);
@@ -119,20 +145,70 @@ public class CalibrationManager {
             clearData();
             SmartDashboard.putBoolean("Tuning/ClearData", false);
         }
+    }
+    
+    // ========================================================================
+    // RESET ALL OFFSETS
+    // ========================================================================
+    
+    /**
+     * Zeros every live offset slider AND bypasses baked-in Constants offsets
+     * so the next calibration session starts from a completely raw baseline.
+     * 
+     * Call this BEFORE adjusting any sliders to avoid stacking offsets on top of old offsets.
+     * 
+     * Resets (live sliders):
+     *   - Turret angle offset → 0
+     *   - Turret rotation offset → 0
+     *   - Top RPM offset → 0
+     *   - Bottom RPM offset → 0
+     *   - Recorded data (shooting + rotation points)
+     * 
+     * Bypasses (baked-in Constants — can't be zeroed, so ShootingCalculator skips them):
+     *   - Constants.Turret.GLOBAL_ANGLE_OFFSET_DEG
+     *   - Constants.Shooter.SHOOTING_CALIBRATION (unified pose-based calibration table)
+     */
+    private void resetAllOffsets() {
+        // Zero all live offset values
+        turretAngleOffset = 0.0;
+        turretRotationOffset = 0.0;
+        topRPMOffset = 0.0;
+        bottomRPMOffset = 0.0;
         
-        // Check button presses - Rotation offset calibration
-        if (SmartDashboard.getBoolean("Tuning/RecordRotationPoint", false)) {
-            recordRotationPoint();
-            SmartDashboard.putBoolean("Tuning/RecordRotationPoint", false);
-        }
-        if (SmartDashboard.getBoolean("Tuning/PrintRotationTable", false)) {
-            printRotationCalibrationTable();
-            SmartDashboard.putBoolean("Tuning/PrintRotationTable", false);
-        }
-        if (SmartDashboard.getBoolean("Tuning/ClearRotationData", false)) {
-            clearRotationData();
-            SmartDashboard.putBoolean("Tuning/ClearRotationData", false);
-        }
+        // Push zeroes back to SmartDashboard so the sliders visually reset
+        SmartDashboard.putNumber("Tuning/Turret/AngleOffset", 0.0);
+        SmartDashboard.putNumber("Tuning/Turret/RotationOffset", 0.0);
+        SmartDashboard.putNumber("Tuning/Shooter/TopRPMOffset", 0.0);
+        SmartDashboard.putNumber("Tuning/Shooter/BottomRPMOffset", 0.0);
+        
+        // Tell ShootingCalculator to bypass ALL baked-in Constants offsets
+        // (GLOBAL_ANGLE_OFFSET_DEG, unified SHOOTING_CALIBRATION) so we're tuning from raw
+        ShootingCalculator.getInstance().setCalibrationMode(true);
+        
+        // Clear any previously recorded points so they don't mix with new session
+        recordedPoints.clear();
+        recordCount = 0;
+        SmartDashboard.putNumber("Tuning/RecordCount", 0);
+        
+        // Mark session active
+        calibrationSessionActive = true;
+        SmartDashboard.putBoolean("Tuning/CalibrationActive", true);
+        SmartDashboard.putString("Tuning/Status", "✓ CALIBRATION STARTED — All offsets zeroed + baked-in bypassed");
+        System.out.println("[CAL] === CALIBRATION SESSION STARTED — All offsets reset, baked-in offsets bypassed ===");
+    }
+    
+    /**
+     * Ends the calibration session and re-enables baked-in Constants offsets.
+     * Call this when done calibrating to return to normal operation.
+     */
+    private void endCalibration() {
+        // Re-enable baked-in Constants offsets in ShootingCalculator
+        ShootingCalculator.getInstance().setCalibrationMode(false);
+        
+        calibrationSessionActive = false;
+        SmartDashboard.putBoolean("Tuning/CalibrationActive", false);
+        SmartDashboard.putString("Tuning/Status", "Calibration ended — baked-in offsets re-enabled");
+        System.out.println("[CAL] === CALIBRATION SESSION ENDED — baked-in offsets re-enabled ===");
     }
     
     // ========================================================================
@@ -145,11 +221,21 @@ public class CalibrationManager {
             return;
         }
         
-        double roundedDist = Math.round(currentDistance * 4.0) / 4.0;
-        recordedPoints.put(roundedDist, new double[]{shooterTopRPM, shooterBottomRPM});
+        // Record unified point: {relX, relY, bearingDeg, turretOffsetDeg, topRPM, bottomRPM}
+        // relX/relY are relative to the target (turret pos - target pos), so alliance-independent.
+        double roundedX = Math.round(currentX * 100.0) / 100.0;
+        double roundedY = Math.round(currentY * 100.0) / 100.0;
+        double roundedBearing = Math.round(currentBearing);
+        
+        recordedPoints.add(new double[]{
+            roundedX, roundedY, roundedBearing,
+            turretRotationOffset, shooterTopRPM, shooterBottomRPM
+        });
         recordCount++;
         
-        String code = String.format("put(%.2f, new double[]{%.0f, %.0f});", roundedDist, shooterTopRPM, shooterBottomRPM);
+        String code = String.format("add(new double[]{%.2f, %.2f, %.0f, %.2f, %.0f, %.0f});",
+                roundedX, roundedY, roundedBearing,
+                turretRotationOffset, shooterTopRPM, shooterBottomRPM);
         SmartDashboard.putNumber("Tuning/RecordCount", recordCount);
         SmartDashboard.putString("Tuning/Status", "Recorded #" + recordCount + ": " + code);
         System.out.println("[CAL] " + code);
@@ -162,10 +248,12 @@ public class CalibrationManager {
         }
         
         System.out.println("\n=== COPY TO Constants.Shooter.SHOOTING_CALIBRATION ===");
-        System.out.println("public static final TreeMap<Double, double[]> SHOOTING_CALIBRATION = new TreeMap<>() {{");
-        for (var entry : recordedPoints.entrySet()) {
-            System.out.printf("  put(%.2f, new double[]{%.0f, %.0f});%n",
-                entry.getKey(), entry.getValue()[0], entry.getValue()[1]);
+        System.out.println("public static final List<double[]> SHOOTING_CALIBRATION = new ArrayList<>() {{");
+        for (double[] point : recordedPoints) {
+            System.out.printf("  add(new double[]{%.2f, %.2f, %.0f, %.2f, %.0f, %.0f}); " +
+                            "// relX=%.2f relY=%.2f bearing=%.0f° offset=%.2f° top=%.0f bot=%.0f%n",
+                    point[0], point[1], point[2], point[3], point[4], point[5],
+                    point[0], point[1], point[2], point[3], point[4], point[5]);
         }
         System.out.println("}};");
         System.out.println("=====================================================\n");
@@ -181,54 +269,19 @@ public class CalibrationManager {
     }
     
     // ========================================================================
-    // ROTATION OFFSET RECORDING
-    // ========================================================================
-    
-    private void recordRotationPoint() {
-        if (currentDistance <= 0) {
-            SmartDashboard.putString("Tuning/Status", "ERROR: No distance for rotation point!");
-            return;
-        }
-        
-        double roundedDist = Math.round(currentDistance * 4.0) / 4.0;
-        recordedRotationPoints.put(roundedDist, turretRotationOffset);
-        rotationRecordCount++;
-        
-        String code = String.format("put(%.2f, %.2f);", roundedDist, turretRotationOffset);
-        SmartDashboard.putNumber("Tuning/RotationRecordCount", rotationRecordCount);
-        SmartDashboard.putString("Tuning/Status", "Rotation #" + rotationRecordCount + ": " + code);
-        System.out.println("[CAL-ROT] " + code);
-    }
-    
-    private void printRotationCalibrationTable() {
-        if (recordedRotationPoints.isEmpty()) {
-            SmartDashboard.putString("Tuning/Status", "No rotation data to print");
-            return;
-        }
-        
-        System.out.println("\n=== COPY TO Constants.Turret.ROTATION_CALIBRATION ===");
-        System.out.println("public static final TreeMap<Double, Double> ROTATION_CALIBRATION = new TreeMap<>() {{");
-        for (var entry : recordedRotationPoints.entrySet()) {
-            System.out.printf("  put(%.2f, %.2f);%n", entry.getKey(), entry.getValue());
-        }
-        System.out.println("}};");
-        System.out.println("=====================================================\n");
-        
-        SmartDashboard.putString("Tuning/Status", "Printed " + recordedRotationPoints.size() + " rotation points to console");
-    }
-    
-    private void clearRotationData() {
-        recordedRotationPoints.clear();
-        rotationRecordCount = 0;
-        SmartDashboard.putNumber("Tuning/RotationRecordCount", 0);
-        SmartDashboard.putString("Tuning/Status", "Rotation data cleared");
-    }
-    
-    // ========================================================================
     // EXTERNAL SETTERS
     // ========================================================================
     
     public void setCurrentDistance(double distance) { this.currentDistance = distance; }
+    
+    /** Set the current robot-relative bearing to target (from ShootingCalculator.getRawBearing()) */
+    public void setCurrentBearing(double bearing) { this.currentBearing = bearing; }
+    
+    /** Set the turret X position relative to target (from ShootingCalculator.getRelativeX()) */
+    public void setCurrentX(double x) { this.currentX = x; }
+    
+    /** Set the turret Y position relative to target (from ShootingCalculator.getRelativeY()) */
+    public void setCurrentY(double y) { this.currentY = y; }
     
     // ========================================================================
     // GETTERS (used by commands and subsystems)
@@ -244,5 +297,8 @@ public class CalibrationManager {
     public double getTurretI() { return turretI; }
     public double getTurretD() { return turretD; }
     public double getCurrentDistance() { return currentDistance; }
+    public double getCurrentBearing() { return currentBearing; }
+    public double getCurrentX() { return currentX; }
+    public double getCurrentY() { return currentY; }
     public int getRecordCount() { return recordCount; }
 }

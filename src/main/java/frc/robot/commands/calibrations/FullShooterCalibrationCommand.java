@@ -5,12 +5,18 @@ import edu.wpi.first.wpilibj2.command.Command;
 import frc.robot.CalibrationManager;
 import frc.robot.subsystems.VisionSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
-import frc.robot.subsystems.TurretFeedSubsystem;
 import frc.robot.subsystems.TurretSubsystem;
 import frc.robot.util.Elastic;
+import frc.robot.util.ShootingCalculator;
 
 /**
- * Comprehensive calibration command for tuning shooter AND turret together.
+ * Comprehensive ALL-IN-ONE calibration command for tuning shooter AND turret together.
+ * 
+ * Records unified calibration points that capture the full robot state:
+ *   {robotX, robotY, bearingToTarget, turretAngleOffset, topRPM, bottomRPM}
+ * 
+ * This replaces the old separate shooting and rotation calibration workflows.
+ * One button press records everything at once.
  * 
  * Provides full manual control over:
  * - Turret angle (via SmartDashboard slider)
@@ -40,7 +46,7 @@ import frc.robot.util.Elastic;
  * - Cal/Turret/ManualAngle: Aim turret (slider)
  * - Tuning/Shooter/TopRPM: Shot arc/height (slider)
  * - Tuning/Shooter/BottomRPM: Shot distance (slider)
- * - Cal/FeedBall: Feed a ball into the shooter (button)
+ * - POV Down on controller: Feed a ball into the shooter (hold button)
  * - Cal/RecordShootingPoint: Record current shot as calibration point (button)
  * - Cal/PrintShooterTable: Export all recorded points as Java code (button)
  * 
@@ -60,16 +66,19 @@ public class FullShooterCalibrationCommand extends Command {
     private final TurretSubsystem turret;
     private final ShooterSubsystem shooter;
     private final VisionSubsystem vision;
-    private final TurretFeedSubsystem turretFeed; // Optional - can be null
     
-    // CALIBRATION MANAGER
+    // CALIBRATION MANAGER & SHOOTING CALCULATOR
     
     private final CalibrationManager calibration;
+    private final ShootingCalculator shootingCalc;
     
     // CONSTRUCTOR
     
     /**
-     * Creates a full shooter calibration command (without ball feeding).
+     * Creates a full shooter calibration command.
+     * 
+     * Feed is controlled externally via the operator's "Feed Shot" button (POV Down),
+     * which avoids subsystem conflicts that would cancel calibration.
      * 
      * @param turret The turret subsystem (for angle control)
      * @param shooter The shooter subsystem (for power control)
@@ -79,33 +88,17 @@ public class FullShooterCalibrationCommand extends Command {
             TurretSubsystem turret, 
             ShooterSubsystem shooter, 
             VisionSubsystem vision) {
-        this(turret, shooter, vision, null);
-    }
-    
-    /**
-     * Creates a full shooter calibration command with ball feeding support.
-     * 
-     * @param turret The turret subsystem (for angle control)
-     * @param shooter The shooter subsystem (for power control)
-     * @param vision The vision subsystem (for target detection)
-     * @param turretFeed The turret feed subsystem for feeding balls (optional, can be null)
-     */
-    public FullShooterCalibrationCommand(
-            TurretSubsystem turret, 
-            ShooterSubsystem shooter, 
-            VisionSubsystem vision,
-            TurretFeedSubsystem turretFeed) {
         this.turret = turret;
         this.shooter = shooter;
         this.vision = vision;
-        this.turretFeed = turretFeed;
         this.calibration = CalibrationManager.getInstance();
+        this.shootingCalc = ShootingCalculator.getInstance();
         
-        // We require both turret and shooter for full control
+        // We require turret and shooter for full control.
+        // NOTE: We intentionally do NOT require turretFeed here so that the
+        // operator's "Feed Shot" button (POV Down) can be used during calibration
+        // without cancelling this command due to a subsystem conflict.
         addRequirements(turret, shooter);
-        if (turretFeed != null) {
-            addRequirements(turretFeed);
-        }
     }
     
     // COMMAND LIFECYCLE
@@ -116,16 +109,14 @@ public class FullShooterCalibrationCommand extends Command {
         SmartDashboard.putBoolean("Cal/Turret/UseManual", true);
         SmartDashboard.putBoolean("Cal/Shooter/UseManual", true);
         
-        // Feed ball button
-        SmartDashboard.putBoolean("Cal/FeedBall", false);
-        
         // Display instructions
-        SmartDashboard.putString("Cal/Status", "FULL CALIBRATION MODE - Adjust sliders and shoot!");
+        SmartDashboard.putString("Cal/Status", "UNIFIED CALIBRATION MODE - Adjust turret offset + RPMs, then record!");
         SmartDashboard.putString("Cal/Instructions", 
-            "1. Use Cal/Turret/ManualAngle to aim. " +
-            "2. Use Tuning/Shooter/TopRPM and BottomRPM to tune shot. " +
-            "3. Click Cal/FeedBall to feed a ball. " +
-            "4. Click Tuning/RecordPoint after a good shot.");
+            "1. Use Cal/Turret/ManualAngle to aim turret. " +
+            "2. Use Tuning/Turret/RotationOffset to fine-tune aim. " +
+            "3. Use Tuning/Shooter/TopRPM and BottomRPM to tune shot. " +
+            "4. Use POV Down on controller to feed a ball. " +
+            "5. Click Tuning/RecordPoint to save (x, y, bearing, offset, RPMs).");
         
         Elastic.sendNotification(new Elastic.Notification(
             Elastic.NotificationLevel.INFO, "Full Calibration Started",
@@ -149,14 +140,8 @@ public class FullShooterCalibrationCommand extends Command {
         double bottomRPM = calibration.getShooterBottomRPM();
         shooter.setTargetRPM(topRPM, bottomRPM);
         
-        // ----- Handle feed ball button -----
-        if (turretFeed != null) {
-            if (SmartDashboard.getBoolean("Cal/FeedBall", false)) {
-                turretFeed.setShoot();
-            } else {
-                turretFeed.setIdle();
-            }
-        }
+        // NOTE: Feed is controlled by the operator's POV Down button, not by this command.
+        // This avoids subsystem conflicts that would cancel calibration.
         
         // ----- Update status display -----
         updateStatusDisplay();
@@ -164,12 +149,8 @@ public class FullShooterCalibrationCommand extends Command {
     
     @Override
     public void end(boolean interrupted) {
-        // Stop shooter and feed
+        // Stop shooter
         shooter.stop();
-        if (turretFeed != null) {
-            turretFeed.stop();
-        }
-        SmartDashboard.putBoolean("Cal/FeedBall", false);
         
         // Reset to auto mode
         SmartDashboard.putBoolean("Cal/Turret/UseManual", false);
@@ -198,9 +179,12 @@ public class FullShooterCalibrationCommand extends Command {
     
     private void updateStatusDisplay() {
         double distance = calibration.getCurrentDistance();
-        double turretAngle = SmartDashboard.getNumber("Cal/Turret/ManualAngle", 0.0);
         double topRPM = calibration.getShooterTopRPM();
         double bottomRPM = calibration.getShooterBottomRPM();
+        double rotationOffset = calibration.getTurretRotationOffset();
+        double bearing = shootingCalc.getRawBearing();
+        double relX = shootingCalc.getRelativeX();
+        double relY = shootingCalc.getRelativeY();
         
         String status;
         if (!vision.hasTarget()) {
@@ -208,11 +192,15 @@ public class FullShooterCalibrationCommand extends Command {
         } else if (distance <= 0) {
             status = String.format("WARNING: Tag visible, no pose");
         } else {
-            status = String.format("OK Dist: %.2fm | Angle: %.1f deg | Top: %.0f RPM | Bot: %.0f RPM", 
-                distance, turretAngle, topRPM, bottomRPM);
+            status = String.format("OK Dist: %.2fm | RelX: %.2f RelY: %.2f | Bearing: %.0f° | Offset: %.2f° | Top: %.0f Bot: %.0f RPM", 
+                distance, relX, relY, bearing, rotationOffset, topRPM, bottomRPM);
         }
         
         SmartDashboard.putString("Cal/Status", status);
+        SmartDashboard.putNumber("Cal/Robot/RelX", relX);
+        SmartDashboard.putNumber("Cal/Robot/RelY", relY);
+        SmartDashboard.putNumber("Cal/Robot/Bearing", bearing);
+        SmartDashboard.putNumber("Cal/Robot/Distance", distance);
         
         // Also show raw TX for reference
         if (vision.hasTarget()) {

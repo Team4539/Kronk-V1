@@ -358,7 +358,7 @@ public class RobotContainer {
         // Calibration commands for pit use
         if (turret != null && shooter != null && vision != null) {
             SmartDashboard.putData("Tuning/Cal: Full Shooter",
-                    new FullShooterCalibrationCommand(turret, shooter, vision, turretFeed));
+                    new FullShooterCalibrationCommand(turret, shooter, vision));
         }
         if (shooter != null && vision != null) {
             SmartDashboard.putData("Tuning/Cal: Shooting",
@@ -412,6 +412,9 @@ public class RobotContainer {
                     calibration.getBottomRPMOffset(),
                     calibration.getTurretRotationOffset());
             calibration.setCurrentDistance(shootingCalc.getDistance());
+            calibration.setCurrentBearing(shootingCalc.getRawBearing());
+            calibration.setCurrentX(shootingCalc.getRelativeX());
+            calibration.setCurrentY(shootingCalc.getRelativeY());
         }
 
         if (vision == null || drivetrain == null) return;

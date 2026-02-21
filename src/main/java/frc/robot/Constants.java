@@ -1,8 +1,9 @@
 package frc.robot;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 
 import edu.wpi.first.math.geometry.Translation2d;
 
@@ -48,7 +49,7 @@ public final class Constants {
     public static final double FIELD_WIDTH_METERS = 8.069326;
     
     // Hub position
-    public static final double HUB_X = 4.971194;
+    public static final double HUB_X = 4.571194;
     public static final double HUB_Y = 4.034631;
     public static final double HUB_HEIGHT_METERS = 1.437087;
     
@@ -90,6 +91,17 @@ public final class Constants {
     public static final double TOP_MOTOR_POWER_OFFSET = 0.0;
     public static final double BOTTOM_MOTOR_POWER_OFFSET = 0.0;
     
+    // --- Ball properties (2026 game piece) ---
+    // Used for flight time estimation and future physics-based calculations
+    public static final double BALL_DIAMETER_METERS = 0.1500;    // 5.91in = 15.0cm
+    public static final double BALL_RADIUS_METERS = BALL_DIAMETER_METERS / 2.0;
+    public static final double BALL_MASS_KG = 0.215;             // ~0.215-0.227kg (0.448-0.500lb)
+    public static final double BALL_COMPRESSION_METERS = 0.0135; // ~0.53in compression against wheels
+    /** Effective ball radius under compression (for surface speed calculations) */
+    public static final double BALL_COMPRESSED_RADIUS_METERS = BALL_RADIUS_METERS - (BALL_COMPRESSION_METERS / 2.0);
+    /** Approximate height of the shooter exit above ground (meters) — MEASURE ON YOUR ROBOT */
+    public static final double SHOOTER_EXIT_HEIGHT_METERS = 0.50;
+    
     /** Idle RPM for both motors when not actively spooling. 
      *  Keeps flywheels warm so spin-up is faster. Tunable via SmartDashboard "Shooter/IdleRPM". 
      *  Set to 0 to fully stop when idle. */
@@ -98,20 +110,54 @@ public final class Constants {
     /** Free speed of the motor in rotations per second (Kraken X60 ~100 rps) */
     public static final double MOTOR_FREE_SPEED_RPS = 100.0;
     
-    // Hub calibration: distance (m) -> {TopRPM, BottomRPM}
-    // Values are in motor RPM (Kraken X60 free speed ~6000 RPM)
-    // Reduced ~25% from original values — was overshooting at all distances
-    public static final TreeMap<Double, double[]> SHOOTING_CALIBRATION = new TreeMap<>() {{
-      put(2.00, new double[]{500, 2500}); put(3.5, new double[]{2000,2000});
-      put(5.75, new double[]{1500, 4000});
-    }};
-    
-    // Trench calibration for shuttle shots: distance (m) -> {TopRPM, BottomRPM}
-    public static final TreeMap<Double, double[]> TRENCH_CALIBRATION = new TreeMap<>() {{
-      put(2.0, new double[]{1500, 3000}); put(3.0, new double[]{1800, 3300});
-      put(4.0, new double[]{2100, 3600}); put(5.0, new double[]{2400, 3900});
-      put(6.0, new double[]{2700, 4200}); put(7.0, new double[]{3000, 4500});
-      put(8.0, new double[]{3300, 4800});
+    // --- Unified Shooting Calibration ---
+    //
+    // All-in-one calibration table: each point stores the robot's position RELATIVE
+    // TO THE TARGET and the tuned shooting parameters at that position.
+    //
+    // Using target-relative coordinates makes this table alliance-independent:
+    // the same (relX, relY) vector applies whether you're Blue or Red, because
+    // ShootingCalculator computes (turretPos - targetPos) after resolving the
+    // correct alliance-specific target position.
+    //
+    // Each entry: {relX, relY, bearingDeg, turretOffsetDeg, topRPM, bottomRPM}
+    //   - relX:           Turret X relative to target (meters, turretX - targetX)
+    //   - relY:           Turret Y relative to target (meters, turretY - targetY)
+    //   - bearingDeg:     Robot-relative angle to target (degrees, -180 to +180, 0=facing target)
+    //   - turretOffsetDeg: Turret angle correction at this pose (degrees)
+    //   - topRPM:         Top motor RPM at this pose
+    //   - bottomRPM:      Bottom motor RPM at this pose
+    //
+    // At runtime, ShootingCalculator computes the robot's current (relX, relY, bearing)
+    // and uses inverse-distance-weighted interpolation across all points to produce
+    // the turret offset, topRPM, and bottomRPM in a single lookup.
+    //
+    // Calibration procedure:
+    //   1. Run FullShooterCalibrationCommand
+    //   2. Drive to a position, adjust turret offset + RPMs until shots are accurate
+    //   3. Press RecordPoint — it saves {relX, relY, bearing, turretOffset, topRPM, bottomRPM}
+    //   4. Move to a new position/orientation and repeat
+    //   5. Press PrintTable to get copy-paste code for this constant
+    //
+    // The table works for BOTH hub and trench shots — the relative position
+    // encodes distance and angle to whichever target the robot is aiming at.
+    // Calibrate at various positions around each target.
+    //
+    // INTERPOLATION WEIGHTS (in ShootingCalculator):
+    //   Distance in (relX, relY) space = Euclidean meters
+    //   Bearing difference = scaled by CALIBRATION_BEARING_WEIGHT
+    //   Combined = sqrt(dXY² + (dBearing * weight)²)
+    //   Points closer in this combined space have more influence.
+    //
+    // NOTE: Placeholder values below — RECALIBRATE on the real robot.
+    public static final double CALIBRATION_BEARING_WEIGHT = 0.05; // How much 1° of bearing counts vs 1m of distance
+    public static final List<double[]> SHOOTING_CALIBRATION = new ArrayList<>() {{
+      add(new double[]{2.81, 0.76, 19, 0.00, 1000, 2500}); add(new double[]{0.79, 1.95, 62, 0.00, 500, 2500});
+      add(new double[]{3.41, 0.46, 4, 0.00, 1300, 2500}); add(new double[]{2.29, 1.76, 81, 0.00, 1300, 2500});
+      add(new double[]{4.61, -0.27, 7, 0.00, 2050, 3050}); add(new double[]{5.32, 1.41, 38, 0.00, 2300, 3050});
+      add(new double[]{3.22, -0.18, 13, 0.00, 1300, 2500}); add(new double[]{1.99, 0.61, 30, 0.00, 500, 2500});
+      add(new double[]{2.48, 1.32, 35, 0.00, 1200, 2600}); add(new double[]{3.76, 1.13, 4, 0.00, 1750, 2500});
+
     }};
   }
 
@@ -135,22 +181,22 @@ public final class Constants {
     // Pivot PID (WPILib PID -- works in degrees, outputs duty cycle)
     // P: gets it moving toward target
     // D: currently 0 -- increase if overshoot/bounce is a problem
-    public static final double PIVOT_PID_P = 0.008;
-    public static final double PIVOT_PID_I = 0.00;
-    public static final double PIVOT_PID_D = 0.0;
+    public static final double PIVOT_PID_P = 0.02;
+    public static final double PIVOT_PID_I = 0.000;
+    public static final double PIVOT_PID_D = 0.00;
     
     // Pivot limits
     public static final double MIN_PIVOT_ANGLE_DEG = 0.0;
-    public static final double MAX_PIVOT_ANGLE_DEG = 90.0;
+    public static final double MAX_PIVOT_ANGLE_DEG = 130.0;
     public static final double RETRACTED_ANGLE_DEG = 0.0;
-    public static final double DEPLOYED_ANGLE_DEG = 120;
-    public static final double IDLE_ANGLE_DEG = 35;
+    public static final double DEPLOYED_ANGLE_DEG = 130;
+    public static final double IDLE_ANGLE_DEG = 20;
     public static final double PIVOT_MAX_OUTPUT = 0.3;
     // Wide tolerance to stop before chain slop causes bouncing
-    public static final double PIVOT_TOLERANCE_DEG = 15.0;
+    public static final double PIVOT_TOLERANCE_DEG = 25.0;
     
     // Roller
-    public static final double INTAKE_SPEED = 0.8;
+    public static final double INTAKE_SPEED = 0.6;
     public static final double OUTTAKE_SPEED = -0.6;
     public static final double STOP_SPEED = 0.0;
   }
@@ -163,13 +209,13 @@ public final class Constants {
     // Camera mounting position relative to robot center (meters)
     // Camera is at the front of the robot, about 3 inches behind the front edge
     /** Forward/backward from robot center (+ = forward) */
-    public static final double CAMERA_X_OFFSET = (Robot.LENGTH_INCHES / 2.0 - 3.0) * 0.0254; // ~11 inches forward = ~0.28m
+    public static final double CAMERA_X_OFFSET = 0.2032;
     /** Left/right from robot center (+ = left) */
-    public static final double CAMERA_Y_OFFSET = 0.0; // Centered left-right
+    public static final double CAMERA_Y_OFFSET = -0.1524; // Centered left-right
     /** Height from ground to camera lens */
-    public static final double CAMERA_Z_OFFSET = 0.5;
+    public static final double CAMERA_Z_OFFSET = 0.23495 ;
     /** Tilt angle in degrees (+ = tilted up) */
-    public static final double CAMERA_PITCH_DEGREES = 15.0; // Slight upward pitch
+    public static final double CAMERA_PITCH_DEGREES = 38; // Slight upward pitch
     /** Yaw rotation in degrees (0 = facing forward, 90 = facing left, 180 = facing backward) */
     public static final double CAMERA_YAW_DEGREES = 0.0; // Camera faces FORWARD on robot
     
@@ -221,9 +267,9 @@ public final class Constants {
     public static final double LIMIT_SAFETY_MARGIN_DEG = 10.0;
     
     // PID
-    public static final double PID_P = 0.2;
-    public static final double PID_I = 0.0;
-    public static final double PID_D = 0.01;
+    public static final double PID_P = 0.3;
+    public static final double PID_I = 0.05;
+    public static final double PID_D = 0.015;
     
     // Motion
     public static final double GLOBAL_ANGLE_OFFSET_DEG = 0.0;
@@ -236,14 +282,11 @@ public final class Constants {
     public static final double TURRET_X_OFFSET = (TURRET_FROM_BACK_INCHES - (Robot.LENGTH_INCHES / 2.0)) * 0.0254;
     public static final double TURRET_Y_OFFSET = ((Robot.WIDTH_INCHES / 2.0) - TURRET_FROM_LEFT_INCHES) * 0.0254;
     
-    public static final double ON_TARGET_TOLERANCE_DEG = 20.0;
+    public static final double ON_TARGET_TOLERANCE_DEG = 0.5;
     
-    // Distance-based turret angle offset calibration: distance (m) -> angle offset (deg)
-    // At each distance, this offset is added to the calculated turret angle to correct aim.
-    // Use the "Cal: Turret Rotation" command to record offsets, then paste the output here.
-    public static final TreeMap<Double, Double> ROTATION_CALIBRATION = new TreeMap<>() {{
-      put(2.0, 0.0); put(3.5, 0.0);
-    }};
+    // --- Rotation offset calibration is now part of unified SHOOTING_CALIBRATION ---
+    // See Constants.Shooter.SHOOTING_CALIBRATION — each point includes turretOffsetDeg.
+    // The bearing weight for interpolation is Constants.Shooter.CALIBRATION_BEARING_WEIGHT.
     
     // Per-tag calibration offsets (initialize all to 0)
     public static final Map<Integer, Double> TAG_ANGLE_OFFSETS = new HashMap<>() {{ for (int i = 1; i <= 32; i++) put(i, 0.0); }};

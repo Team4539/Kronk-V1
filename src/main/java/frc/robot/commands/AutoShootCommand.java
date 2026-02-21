@@ -365,6 +365,10 @@ public class AutoShootCommand extends Command {
      * 
      * NOTE: shootingCalc.update() is called from RobotContainer.updateVisionPose() every cycle,
      * so we only READ the solution here.
+     * 
+     * All turret angle offsets (global, position-based, live calibration) are already applied
+     * inside ShootingCalculator.update(). Do NOT add additional offsets here or you will
+     * double-correct, making calibration impossible to reproduce.
      */
     private void aimAtTarget() {
         // Read ShootingCalculator results -- already updated by RobotContainer
@@ -372,12 +376,7 @@ public class AutoShootCommand extends Command {
         distanceToTarget = shootingCalc.getDistance();
         isMoving = shootingCalc.isMoving();
         
-        // Apply global calibration offset (tunable via SmartDashboard)
-        double calibrationOffset = SmartDashboard.getNumber("AutoShoot/TurretOffset", 
-                                                            Constants.Turret.GLOBAL_ANGLE_OFFSET_DEG);
-        turretTargetAngle += calibrationOffset;
-        
-        // Command turret
+        // Command turret (no additional offsets — ShootingCalculator handles all of them)
         turret.setTargetAngle(turretTargetAngle);
     }
     
@@ -441,11 +440,6 @@ public class AutoShootCommand extends Command {
     private void publishTelemetry() {
         SmartDashboard.putBoolean("AutoShoot/ReadyToFire", isReadyToFire());
         SmartDashboard.putNumber("AutoShoot/Distance", distanceToTarget);
-        
-        // Editable turret offset
-        double calibrationOffset = SmartDashboard.getNumber("AutoShoot/TurretOffset", 
-                                                            Constants.Turret.GLOBAL_ANGLE_OFFSET_DEG);
-        SmartDashboard.putNumber("AutoShoot/TurretOffset", calibrationOffset);
     }
     
     // STATUS METHODS
@@ -455,9 +449,8 @@ public class AutoShootCommand extends Command {
      * @return true if turret aimed, shooter spun up, AND alliance active (or green light pre-shift)
      */
     public boolean isReadyToFire() {
-        return true;
-        // return turretOnTarget && shooterReady && 
-        //        (allianceActive || gameState.isForceShootEnabled() || gameState.isGreenLightPreShift());
+        return shooterReady && 
+               (allianceActive || gameState.isForceShootEnabled() || gameState.isGreenLightPreShift());
     }
     
     /**

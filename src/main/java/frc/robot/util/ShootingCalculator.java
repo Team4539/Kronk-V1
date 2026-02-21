@@ -10,8 +10,7 @@ import frc.robot.Constants;
 import frc.robot.GameStateManager;
 import frc.robot.GameStateManager.TargetMode;
 
-import java.util.Map;
-import java.util.TreeMap;
+import java.util.List;
 
 /**
  * On-board shooting calculator running on the roboRIO.
@@ -52,6 +51,20 @@ public class ShootingCalculator {
     /** Whether we're aiming at trench (true) or hub (false) */
     private boolean aimingAtTrench = false;
 
+    /** Robot-relative bearing to target BEFORE any offsets (degrees, -180 to +180).
+     *  This captures the robot's orientation relative to the target direction.
+     *  0 = robot facing target, 90 = target is to the robot's left, etc.
+     *  Used as the second dimension in rotation offset calibration. */
+    private double rawBearing = 0.0;
+
+    /** Turret X position relative to target (meters). Positive = turret is in +X direction from target.
+     *  Alliance-independent: computed as turretFieldPos - targetFieldPos each cycle. */
+    private double relativeX = 0.0;
+
+    /** Turret Y position relative to target (meters). Positive = turret is in +Y direction from target.
+     *  Alliance-independent: computed as turretFieldPos - targetFieldPos each cycle. */
+    private double relativeY = 0.0;
+
     // --- Tuning constants ---
     
     /** Minimum robot speed (m/s) to apply lead compensation */
@@ -62,6 +75,11 @@ public class ShootingCalculator {
      * Used to calculate lead angle: how far the target "moves" relative
      * to us during the ball's flight time. Tune this based on testing.
      * Longer distances need more lead, so this scales with distance.
+     * 
+     * For a ~0.215kg, 15cm ball launched from ~0.5m height at a target 1.44m high,
+     * the ball follows a parabolic arc. This linear model is an approximation:
+     *   flight_time ≈ BASE + distance × PER_METER
+     * Validate with high-speed video or by measuring lead angle accuracy at speed.
      */
     private static final double BASE_FLIGHT_TIME_SECONDS = 0.5;
     
@@ -71,6 +89,14 @@ public class ShootingCalculator {
     // --- References ---
     
     private final GameStateManager gameState = GameStateManager.getInstance();
+    
+    /** 
+     * When true, ALL baked-in offsets from Constants are bypassed.
+     * Only live calibration slider values (turretAngleOffset, turretRotationOffset, 
+     * topRPMOffset, bottomRPMOffset) are applied, so you're tuning from a raw baseline.
+     * Set via CalibrationManager.startCalibration().
+     */
+    private boolean calibrationMode = false;
 
     // ========================================================================
     // SINGLETON
@@ -136,6 +162,11 @@ public class ShootingCalculator {
             + Constants.Turret.TURRET_X_OFFSET * sinH 
             + Constants.Turret.TURRET_Y_OFFSET * cosH;
 
+        // Cache turret position relative to target (alliance-independent)
+        // This is what gets stored in calibration points and used for interpolation.
+        relativeX = turretX - targetPos.getX();
+        relativeY = turretY - targetPos.getY();
+
         // --- 3. Calculate distance and base angle ---
         double dx = targetPos.getX() - turretX;
         double dy = targetPos.getY() - turretY;
@@ -147,7 +178,19 @@ public class ShootingCalculator {
         turretAngle = fieldAngle - robotHeading;
         turretAngle = normalizeAngle(turretAngle);
 
+        // Save the raw bearing (robot-relative angle to target) before any offsets or lead.
+        // This captures the robot's orientation relative to the target for calibration.
+        rawBearing = turretAngle;
+
         // --- 5. Lead compensation for shooting on the fly ---
+        // The ball inherits the robot's velocity at launch. To hit a stationary
+        // target, we need to aim so that the ball's inherited lateral drift is
+        // cancelled by the turret angle correction.
+        //
+        // Physics: ball velocity = launch_velocity + robot_velocity
+        // We want the ball to arrive at the target, so we adjust the turret
+        // angle to subtract out the robot's perpendicular motion component.
+        //
         // Convert robot-relative speeds to field-relative
         double fieldVX = chassisSpeeds.vxMetersPerSecond * cosH - chassisSpeeds.vyMetersPerSecond * sinH;
         double fieldVY = chassisSpeeds.vxMetersPerSecond * sinH + chassisSpeeds.vyMetersPerSecond * cosH;
@@ -168,29 +211,42 @@ public class ShootingCalculator {
             double perpVelocity = -fieldVX * Math.sin(targetAngleRad) + fieldVY * Math.cos(targetAngleRad);
             
             // Lead angle = atan(perpendicular_velocity * flight_time / distance)
+            // SUBTRACT because the ball inherits the robot's velocity. If the robot
+            // is moving left (positive perpVelocity), the ball drifts left, so we
+            // aim right (negative correction) to compensate.
             leadAngle = Math.toDegrees(Math.atan2(perpVelocity * flightTime, distance));
             
-            // Apply lead angle
-            turretAngle += leadAngle;
+            // Apply lead angle (subtract — we aim opposite to the drift)
+            turretAngle -= leadAngle;
             turretAngle = normalizeAngle(turretAngle);
         } else {
             leadAngle = 0.0;
         }
 
-        // --- 6. Apply turret angle offset (global + distance-based + live rotation calibration) ---
-        double distanceRotationOffset = interpolateRotation(distance, Constants.Turret.ROTATION_CALIBRATION);
-        turretAngle += turretAngleOffset + distanceRotationOffset + turretRotationOffset;
+        // --- 6. Apply turret angle offsets ---
+        if (calibrationMode) {
+            // CALIBRATION MODE: Skip ALL baked-in Constants offsets.
+            // Only the live slider values (turretAngleOffset, turretRotationOffset) are applied
+            // so you're tuning from a raw, offset-free baseline.
+            turretAngle += turretAngleOffset + turretRotationOffset;
+        } else {
+            // NORMAL MODE: Apply baked-in Constants offsets + live slider offsets.
+            // Unified calibration provides the turret offset from the (relX, relY, bearing) table.
+            double[] calResult = interpolateUnified(relativeX, relativeY, rawBearing,
+                    Constants.Shooter.SHOOTING_CALIBRATION);
+            double positionTurretOffset = calResult[0]; // turretOffsetDeg from table
+            turretAngle += Constants.Turret.GLOBAL_ANGLE_OFFSET_DEG + turretAngleOffset
+                    + positionTurretOffset + turretRotationOffset;
+        }
         turretAngle = normalizeAngle(turretAngle);
 
-        // --- 7. Interpolate shooter RPM from calibration table ---
-        TreeMap<Double, double[]> calibration = aimingAtTrench
-            ? Constants.Shooter.TRENCH_CALIBRATION
-            : Constants.Shooter.SHOOTING_CALIBRATION;
-        
-        double[] rpms = interpolate(distance, calibration);
+        // --- 7. Interpolate shooter RPM from unified calibration table ---
+        // The same table provides turret offset AND RPMs based on robot pose.
+        double[] calResult = interpolateUnified(relativeX, relativeY, rawBearing,
+                Constants.Shooter.SHOOTING_CALIBRATION);
         double maxRPM = Constants.Shooter.MOTOR_FREE_SPEED_RPS * 60.0;
-        targetTopRPM = clamp(rpms[0] + topRPMOffset, 0, maxRPM);
-        targetBottomRPM = clamp(rpms[1] + bottomRPMOffset, 0, maxRPM);
+        targetTopRPM = clamp(calResult[1] + topRPMOffset, 0, maxRPM);
+        targetBottomRPM = clamp(calResult[2] + bottomRPMOffset, 0, maxRPM);
 
         // --- 8. Publish telemetry ---
         publishTelemetry();
@@ -231,41 +287,57 @@ public class ShootingCalculator {
     // ========================================================================
 
     /**
-     * Linearly interpolates RPM values from a distance-keyed calibration table.
-     * Clamps to boundary values if distance is outside the table range.
+     * Interpolates turret offset + RPMs from the unified calibration table
+     * using inverse-distance-weighted averaging in (relX, relY, bearing) space.
+     * 
+     * Each calibration point stores {relX, relY, bearingDeg, turretOffsetDeg, topRPM, bottomRPM}
+     * where relX/relY are the turret position RELATIVE TO the target (turret - target).
+     * This makes the table alliance-independent since the relative vector is the same
+     * regardless of which alliance's target coordinates are used.
+     * 
+     * @param relX    Turret X relative to target (meters, turretX - targetX)
+     * @param relY    Turret Y relative to target (meters, turretY - targetY)
+     * @param bearing Robot-relative bearing to target (degrees, -180 to +180)
+     * @param table   List of {relX, relY, bearingDeg, turretOffsetDeg, topRPM, bottomRPM}
+     * @return double[3]: {turretOffsetDeg, topRPM, bottomRPM}
      */
-    private double[] interpolate(double dist, TreeMap<Double, double[]> table) {
-        Map.Entry<Double, double[]> lower = table.floorEntry(dist);
-        Map.Entry<Double, double[]> upper = table.ceilingEntry(dist);
+    private double[] interpolateUnified(double relX, double relY, double bearing, List<double[]> table) {
+        if (table == null || table.isEmpty()) return new double[]{0.0, 3000, 3000};
+        if (table.size() == 1) {
+            double[] pt = table.get(0);
+            return new double[]{pt[3], pt[4], pt[5]};
+        }
 
-        if (lower == null && upper == null) return new double[]{3000, 3000};
-        if (lower == null) return upper.getValue().clone();
-        if (upper == null) return lower.getValue().clone();
-        if (lower.getKey().equals(upper.getKey())) return lower.getValue().clone();
+        double bearingWeight = Constants.Shooter.CALIBRATION_BEARING_WEIGHT;
+        double totalWeight = 0.0;
+        double weightedOffset = 0.0;
+        double weightedTopRPM = 0.0;
+        double weightedBottomRPM = 0.0;
 
-        double t = (dist - lower.getKey()) / (upper.getKey() - lower.getKey());
+        for (double[] point : table) {
+            double dx = relX - point[0];
+            double dy = relY - point[1];
+            // Wrap bearing difference to [-180, 180] so -170° and 170° are 20° apart
+            double dBearing = normalizeAngle(bearing - point[2]) * bearingWeight;
+            double proximity = Math.sqrt(dx * dx + dy * dy + dBearing * dBearing);
+
+            if (proximity < 0.001) {
+                // Essentially on top of this calibration point — just return it
+                return new double[]{point[3], point[4], point[5]};
+            }
+
+            double weight = 1.0 / (proximity * proximity); // Inverse-square weighting
+            totalWeight += weight;
+            weightedOffset += weight * point[3];
+            weightedTopRPM += weight * point[4];
+            weightedBottomRPM += weight * point[5];
+        }
+
         return new double[]{
-            lower.getValue()[0] + (upper.getValue()[0] - lower.getValue()[0]) * t,
-            lower.getValue()[1] + (upper.getValue()[1] - lower.getValue()[1]) * t
+            weightedOffset / totalWeight,
+            weightedTopRPM / totalWeight,
+            weightedBottomRPM / totalWeight
         };
-    }
-
-    /**
-     * Linearly interpolates a single double value from a distance-keyed calibration table.
-     * Used for turret rotation offset interpolation.
-     * Clamps to boundary values if distance is outside the table range.
-     */
-    private double interpolateRotation(double dist, TreeMap<Double, Double> table) {
-        Map.Entry<Double, Double> lower = table.floorEntry(dist);
-        Map.Entry<Double, Double> upper = table.ceilingEntry(dist);
-
-        if (lower == null && upper == null) return 0.0;
-        if (lower == null) return upper.getValue();
-        if (upper == null) return lower.getValue();
-        if (lower.getKey().equals(upper.getKey())) return lower.getValue();
-
-        double t = (dist - lower.getKey()) / (upper.getKey() - lower.getKey());
-        return lower.getValue() + (upper.getValue() - lower.getValue()) * t;
     }
 
     // ========================================================================
@@ -292,6 +364,31 @@ public class ShootingCalculator {
 
     /** Whether currently aiming at trench vs hub. */
     public boolean isAimingAtTrench() { return aimingAtTrench; }
+
+    /** Robot-relative bearing to target before offsets (degrees, -180 to +180).
+     *  0 = robot facing target, 90 = target to robot's left.
+     *  Used for position-based rotation calibration. */
+    public double getRawBearing() { return rawBearing; }
+
+    /** Turret X position relative to target (meters). Alliance-independent. For calibration recording. */
+    public double getRelativeX() { return relativeX; }
+
+    /** Turret Y position relative to target (meters). Alliance-independent. For calibration recording. */
+    public double getRelativeY() { return relativeY; }
+
+    /** Whether calibration mode is active (baked-in Constants offsets bypassed). */
+    public boolean isCalibrationMode() { return calibrationMode; }
+    
+    /** 
+     * Enable/disable calibration mode.
+     * When enabled, ALL baked-in offsets from Constants (GLOBAL_ANGLE_OFFSET_DEG, 
+     * SHOOTING_CALIBRATION) are bypassed. Only live slider values apply.
+     * Call this when starting/ending a calibration session.
+     */
+    public void setCalibrationMode(boolean enabled) { 
+        calibrationMode = enabled;
+        System.out.println("[ShootingCalculator] Calibration mode " + (enabled ? "ENABLED — baked-in offsets bypassed" : "DISABLED — using Constants offsets"));
+    }
 
     // ========================================================================
     // HELPERS

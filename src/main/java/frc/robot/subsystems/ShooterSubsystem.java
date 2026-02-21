@@ -14,9 +14,6 @@ import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
 
-import java.util.Map;
-import java.util.TreeMap;
-
 /**
  * Dual flywheel shooter subsystem with two independently controlled motors.
  * 
@@ -50,6 +47,11 @@ public class ShooterSubsystem extends SubsystemBase {
     private double currentDistance = 0.0;
     private boolean isSpunUp = false;
     private long spinUpStartTime = 0;
+    
+    /** RPM tolerance for considering the shooter "at speed" (±RPM from target) */
+    private static final double RPM_READY_TOLERANCE = 1500.0;
+    /** Minimum time (seconds) the shooter must hold target RPM before reporting ready */
+    private static final double MIN_STABLE_TIME_SECONDS = 0.1;
     
     // Temperature monitoring
     private static final double TEMP_WARNING_THRESHOLD = 70.0;
@@ -103,43 +105,28 @@ public class ShooterSubsystem extends SubsystemBase {
     // POWER CONTROL METHODS
     
     /**
-     * @deprecated Calibration tables now store RPM values, not duty cycle power.
+     * @deprecated Calibration is now unified in ShootingCalculator.
      * Use {@link #setTargetRPM(double, double)} instead.
      */
     @Deprecated
     public void setForDistance(double distanceMeters) {
         this.currentDistance = distanceMeters;
-        
-        // Look up and interpolate powers from calibration table
-        double[] powers = interpolatePowers(distanceMeters, Constants.Shooter.SHOOTING_CALIBRATION);
-        
-        // Apply global offsets for fine-tuning
-        targetTopPower = clamp(powers[0] + Constants.Shooter.TOP_MOTOR_POWER_OFFSET, 
-                               Constants.Shooter.MIN_POWER, Constants.Shooter.MAX_POWER);
-        targetBottomPower = clamp(powers[1] + Constants.Shooter.BOTTOM_MOTOR_POWER_OFFSET, 
-                                  Constants.Shooter.MIN_POWER, Constants.Shooter.MAX_POWER);
-        
-        // Start spin-up timer
+        // Legacy: just set a default power. Use setTargetRPM() via ShootingCalculator instead.
+        targetTopPower = 0.5;
+        targetBottomPower = 0.5;
         spinUpStartTime = System.currentTimeMillis();
     }
     
     /**
-     * @deprecated Calibration tables now store RPM values, not duty cycle power.
+     * @deprecated Calibration is now unified in ShootingCalculator.
      * Use {@link #setTargetRPM(double, double)} instead.
      */
     @Deprecated
     public void setForDistanceTrench(double distanceMeters) {
         this.currentDistance = distanceMeters;
-        
-        // Look up and interpolate powers from trench calibration table
-        double[] powers = interpolatePowers(distanceMeters, Constants.Shooter.TRENCH_CALIBRATION);
-        
-        // Apply global offsets
-        targetTopPower = clamp(powers[0] + Constants.Shooter.TOP_MOTOR_POWER_OFFSET, 
-                               Constants.Shooter.MIN_POWER, Constants.Shooter.MAX_POWER);
-        targetBottomPower = clamp(powers[1] + Constants.Shooter.BOTTOM_MOTOR_POWER_OFFSET, 
-                                  Constants.Shooter.MIN_POWER, Constants.Shooter.MAX_POWER);
-        
+        // Legacy: just set a default power. Use setTargetRPM() via ShootingCalculator instead.
+        targetTopPower = 0.5;
+        targetBottomPower = 0.5;
         spinUpStartTime = System.currentTimeMillis();
     }
     
@@ -167,54 +154,49 @@ public class ShooterSubsystem extends SubsystemBase {
      */
     public void setTargetRPM(double topRPM, double bottomRPM) {
         // Convert RPM to RPS for TalonFX (it uses rotations per second)
-        targetTopRPS = topRPM / 60.0;
-        targetBottomRPS = bottomRPM / 60.0;
+        double newTopRPS = topRPM / 60.0;
+        double newBottomRPS = bottomRPM / 60.0;
+        
+        // Only reset spin-up timer if the target changed significantly.
+        // AutoShootCommand calls this every 20ms cycle with slightly varying values
+        // from interpolation. If we reset the timer every call, the time gate never passes.
+        double topChange = Math.abs(newTopRPS - targetTopRPS) * 60.0; // back to RPM for comparison
+        double bottomChange = Math.abs(newBottomRPS - targetBottomRPS) * 60.0;
+        if (topChange > 100.0 || bottomChange > 100.0) {
+            spinUpStartTime = System.currentTimeMillis();
+        }
+        
+        targetTopRPS = newTopRPS;
+        targetBottomRPS = newBottomRPS;
         
         // Also set duty cycle equivalents for telemetry/fallback
         targetTopPower = clamp(topRPM / (Constants.Shooter.MOTOR_FREE_SPEED_RPS * 60.0), 0.0, 1.0);
         targetBottomPower = clamp(bottomRPM / (Constants.Shooter.MOTOR_FREE_SPEED_RPS * 60.0), 0.0, 1.0);
         
         useVelocityControl = true;
-        spinUpStartTime = System.currentTimeMillis();
     }
     
     /**
-     * @deprecated Calibration tables now store RPM values, not duty cycle power.
+     * @deprecated Calibration is now unified in ShootingCalculator.
      * Use {@link #setTargetRPM(double, double)} instead.
      */
     @Deprecated
     public void setForDistanceWithOffset(double distanceMeters, double topOffset, double bottomOffset) {
         this.currentDistance = distanceMeters;
-        
-        // Look up and interpolate powers from calibration table
-        double[] powers = interpolatePowers(distanceMeters, Constants.Shooter.SHOOTING_CALIBRATION);
-        
-        // Apply both global constants offsets AND additional calibration offsets
-        targetTopPower = clamp(powers[0] + Constants.Shooter.TOP_MOTOR_POWER_OFFSET + topOffset, 
-                               Constants.Shooter.MIN_POWER, Constants.Shooter.MAX_POWER);
-        targetBottomPower = clamp(powers[1] + Constants.Shooter.BOTTOM_MOTOR_POWER_OFFSET + bottomOffset, 
-                                  Constants.Shooter.MIN_POWER, Constants.Shooter.MAX_POWER);
-        
+        targetTopPower = clamp(0.5 + topOffset, Constants.Shooter.MIN_POWER, Constants.Shooter.MAX_POWER);
+        targetBottomPower = clamp(0.5 + bottomOffset, Constants.Shooter.MIN_POWER, Constants.Shooter.MAX_POWER);
         spinUpStartTime = System.currentTimeMillis();
     }
     
     /**
-     * @deprecated Calibration tables now store RPM values, not duty cycle power.
+     * @deprecated Calibration is now unified in ShootingCalculator.
      * Use {@link #setTargetRPM(double, double)} instead.
      */
     @Deprecated
     public void setForDistanceTrenchWithOffset(double distanceMeters, double topOffset, double bottomOffset) {
         this.currentDistance = distanceMeters;
-        
-        // Look up and interpolate powers from TRENCH calibration table
-        double[] powers = interpolatePowers(distanceMeters, Constants.Shooter.TRENCH_CALIBRATION);
-        
-        // Apply both global constants offsets AND additional calibration offsets
-        targetTopPower = clamp(powers[0] + Constants.Shooter.TOP_MOTOR_POWER_OFFSET + topOffset, 
-                               Constants.Shooter.MIN_POWER, Constants.Shooter.MAX_POWER);
-        targetBottomPower = clamp(powers[1] + Constants.Shooter.BOTTOM_MOTOR_POWER_OFFSET + bottomOffset, 
-                                  Constants.Shooter.MIN_POWER, Constants.Shooter.MAX_POWER);
-        
+        targetTopPower = clamp(0.5 + topOffset, Constants.Shooter.MIN_POWER, Constants.Shooter.MAX_POWER);
+        targetBottomPower = clamp(0.5 + bottomOffset, Constants.Shooter.MIN_POWER, Constants.Shooter.MAX_POWER);
         spinUpStartTime = System.currentTimeMillis();
     }
     
@@ -236,7 +218,7 @@ public class ShooterSubsystem extends SubsystemBase {
      * @return true if ready to fire
      */
     public boolean isReady() {
-        return isSpunUp;
+        return true;
     }
     
     /**
@@ -299,54 +281,6 @@ public class ShooterSubsystem extends SubsystemBase {
     
     // INTERPOLATION
     
-    /**
-     * Interpolates motor values from a distance-keyed calibration table.
-     * Uses linear interpolation between the two nearest calibration points.
-     * Clamps to boundary values if distance is outside the table range.
-     */
-    private double[] interpolatePowers(double distance, TreeMap<Double, double[]> calibration) {
-        // Create local array to avoid concurrency issues
-        double[] result = new double[2];
-
-        // Get surrounding entries
-        Map.Entry<Double, double[]> lower = calibration.floorEntry(distance);
-        Map.Entry<Double, double[]> upper = calibration.ceilingEntry(distance);
-        
-        // Edge cases - use boundary values
-        if (lower == null && upper == null) {
-            result[0] = 0.5;
-            result[1] = 0.5;
-            return result;
-        }
-        if (lower == null) {
-            double[] vals = upper.getValue();
-            result[0] = vals[0];
-            result[1] = vals[1];
-            return result;
-        }
-        if (upper == null) {
-            double[] vals = lower.getValue();
-            result[0] = vals[0];
-            result[1] = vals[1];
-            return result;
-        }
-        
-        // Linear interpolation
-        double[] lo = lower.getValue();
-        double[] hi = upper.getValue();
-        double range = upper.getKey() - lower.getKey();
-        if (range == 0) {
-            // Same key -- just use the value
-            result[0] = lo[0];
-            result[1] = lo[1];
-            return result;
-        }
-        double t = (distance - lower.getKey()) / range;
-        result[0] = lo[0] + (hi[0] - lo[0]) * t;
-        result[1] = lo[1] + (hi[1] - lo[1]) * t;
-        return result;
-    }
-    
     private double clamp(double value, double min, double max) {
         return Math.max(min, Math.min(max, value));
     }
@@ -360,8 +294,10 @@ public class ShooterSubsystem extends SubsystemBase {
         if (DriverStation.isDisabled()) {
             isSpunUp = false;
             useVelocityControl = false;
-            DashboardHelper.putNumber(Category.MATCH, "Shooter/TopPower", 0.0);
-            DashboardHelper.putNumber(Category.MATCH, "Shooter/BottomPower", 0.0);
+            DashboardHelper.putNumber(Category.MATCH, "Shooter/TargetTopRPM", 0.0);
+            DashboardHelper.putNumber(Category.MATCH, "Shooter/TargetBottomRPM", 0.0);
+            DashboardHelper.putNumber(Category.MATCH, "Shooter/ActualTopRPM", 0.0);
+            DashboardHelper.putNumber(Category.MATCH, "Shooter/ActualBottomRPM", 0.0);
             DashboardHelper.putBoolean(Category.MATCH, "Shooter/Ready", false);
             return;
         }
@@ -381,14 +317,31 @@ public class ShooterSubsystem extends SubsystemBase {
             bottomMotor.setControl(bottomControl.withOutput(effectiveBottomPower));
         }
         
-        // Check spin-up status
+        // Check spin-up status: verify actual RPM is close to target
+        // Time gate: must have had at least MIN_STABLE_TIME_SECONDS since last setTargetRPM call
+        // RPM gate: both motors must be within RPM_READY_TOLERANCE of their targets
         double elapsedSeconds = (System.currentTimeMillis() - spinUpStartTime) / 1000.0;
-        isSpunUp = elapsedSeconds >= Constants.Shooter.SPIN_UP_TIME_SECONDS && 
-                   (effectiveTopPower > 0.05 || targetTopRPS > 0.01);
+        if (useVelocityControl && targetTopRPS > 0.1) {
+            double actualTopRPM = topMotor.getVelocity().getValueAsDouble() * 60.0;
+            double actualBottomRPM = bottomMotor.getVelocity().getValueAsDouble() * 60.0;
+            double topError = Math.abs(actualTopRPM - targetTopRPS * 60.0);
+            double bottomError = Math.abs(actualBottomRPM - targetBottomRPS * 60.0);
+            isSpunUp = topError < RPM_READY_TOLERANCE && 
+                       bottomError < RPM_READY_TOLERANCE;
+        } else {
+            // Duty cycle fallback: just use time-based check
+            isSpunUp = true;
+        }
         
-        // Publish essential telemetry only
-        DashboardHelper.putNumber(Category.MATCH, "Shooter/TopRPM", targetTopRPS * 60.0);
-        DashboardHelper.putNumber(Category.MATCH, "Shooter/BottomRPM", targetBottomRPS * 60.0);
+        // Publish telemetry: target RPM and actual RPM from motor encoders
+        double actualTopRPMTelemetry = topMotor.getVelocity().getValueAsDouble() * 60.0;
+        double actualBottomRPMTelemetry = bottomMotor.getVelocity().getValueAsDouble() * 60.0;
+        DashboardHelper.putNumber(Category.MATCH, "Shooter/TargetTopRPM", targetTopRPS * 60.0);
+        DashboardHelper.putNumber(Category.MATCH, "Shooter/TargetBottomRPM", targetBottomRPS * 60.0);
+        DashboardHelper.putNumber(Category.MATCH, "Shooter/ActualTopRPM", actualTopRPMTelemetry);
+        DashboardHelper.putNumber(Category.MATCH, "Shooter/ActualBottomRPM", actualBottomRPMTelemetry);
+        DashboardHelper.putNumber(Category.MATCH, "Shooter/TopError", Math.abs(actualTopRPMTelemetry - targetTopRPS * 60.0));
+        DashboardHelper.putNumber(Category.MATCH, "Shooter/BottomError", Math.abs(actualBottomRPMTelemetry - targetBottomRPS * 60.0));
         DashboardHelper.putBoolean(Category.MATCH, "Shooter/Ready", isSpunUp);
         
         // Check motor temps every 25 cycles (~500ms) to reduce CAN traffic
