@@ -286,7 +286,7 @@ public class AutoShootCommand extends Command {
             Elastic.sendNotification(new Elastic.Notification()
                 .withLevel(NotificationLevel.WARNING)
                 .withTitle("<- HEAD BACK!")
-                .withDescription(String.format("Our shift starts in %.0fs - get in position!", 
+                .withDescription(String.format("Our shift starts in %.0fs - get in position", 
                     gameState.getSecondsUntilOurNextShift()))
                 .withDisplaySeconds(2.0));
         } else if (!gameState.isHeadBackWarning()) {
@@ -318,10 +318,10 @@ public class AutoShootCommand extends Command {
         
         // Determine priority action state
         if (wasFiring) {
-            // Balls are actively being launched! Most dramatic animation.
+            // Game pieces are actively being launched; highest priority animation.
             leds.setAction(ActionState.FIRING);
         } else if (turretOnTarget && shooterReady && (allianceActive || gameState.isGreenLightPreShift() || gameState.isForceShootEnabled())) {
-            // Ready to shoot but not yet feeding -- tell driver to hold/fire!
+            // Ready to shoot but not yet feeding; signal driver to fire.
             leds.setAction(ActionState.SHOOTING);
         } else if (!turretOnTarget && !shooterReady) {
             // Both aiming and spooling - prioritize aiming
@@ -371,12 +371,12 @@ public class AutoShootCommand extends Command {
      * double-correct, making calibration impossible to reproduce.
      */
     private void aimAtTarget() {
-        // Read ShootingCalculator results -- already updated by RobotContainer
+        // Read ShootingCalculator results (already updated by RobotContainer)
         turretTargetAngle = shootingCalc.getTurretAngle();
         distanceToTarget = shootingCalc.getDistance();
         isMoving = shootingCalc.isMoving();
         
-        // Command turret (no additional offsets — ShootingCalculator handles all of them)
+        // Command turret (no additional offsets; ShootingCalculator handles all of them)
         turret.setTargetAngle(turretTargetAngle);
     }
     

@@ -99,7 +99,7 @@ public final class Constants {
     public static final double BALL_COMPRESSION_METERS = 0.0135; // ~0.53in compression against wheels
     /** Effective ball radius under compression (for surface speed calculations) */
     public static final double BALL_COMPRESSED_RADIUS_METERS = BALL_RADIUS_METERS - (BALL_COMPRESSION_METERS / 2.0);
-    /** Approximate height of the shooter exit above ground (meters) — MEASURE ON YOUR ROBOT */
+    /** Approximate height of the shooter exit above ground (meters). Measure on the actual robot. */
     public static final double SHOOTER_EXIT_HEIGHT_METERS = 0.50;
     
     /** Idle RPM for both motors when not actively spooling. 
@@ -135,11 +135,11 @@ public final class Constants {
     // Calibration procedure:
     //   1. Run FullShooterCalibrationCommand
     //   2. Drive to a position, adjust turret offset + RPMs until shots are accurate
-    //   3. Press RecordPoint — it saves {relX, relY, bearing, turretOffset, topRPM, bottomRPM}
+    //   3. Press RecordPoint, which saves {relX, relY, bearing, turretOffset, topRPM, bottomRPM}
     //   4. Move to a new position/orientation and repeat
     //   5. Press PrintTable to get copy-paste code for this constant
     //
-    // The table works for BOTH hub and trench shots — the relative position
+    // The table works for both hub and trench shots since the relative position
     // encodes distance and angle to whichever target the robot is aiming at.
     // Calibrate at various positions around each target.
     //
@@ -149,7 +149,6 @@ public final class Constants {
     //   Combined = sqrt(dXY² + (dBearing * weight)²)
     //   Points closer in this combined space have more influence.
     //
-    // NOTE: Placeholder values below — RECALIBRATE on the real robot.
     public static final double CALIBRATION_BEARING_WEIGHT = 0.05; // How much 1° of bearing counts vs 1m of distance
     public static final List<double[]> SHOOTING_CALIBRATION = new ArrayList<>() {{
       add(new double[]{2.81, 0.76, 19, 0.00, 1000, 2500}); add(new double[]{0.79, 1.95, 62, 0.00, 500, 2500});
@@ -177,10 +176,7 @@ public final class Constants {
     public static final boolean ROLLER_MOTOR_INVERTED = true;
     public static final double CANCODER_OFFSET_DEG = -100.107;
     public static final double PIVOT_GEAR_RATIO = 45.0;
-    
-    // Pivot PID (WPILib PID -- works in degrees, outputs duty cycle)
-    // P: gets it moving toward target
-    // D: currently 0 -- increase if overshoot/bounce is a problem
+    // Pivot PID (WPILib PID, works in degrees, outputs duty cycle)
     public static final double PIVOT_PID_P = 0.02;
     public static final double PIVOT_PID_I = 0.000;
     public static final double PIVOT_PID_D = 0.00;
@@ -192,7 +188,7 @@ public final class Constants {
     public static final double DEPLOYED_ANGLE_DEG = 130;
     public static final double IDLE_ANGLE_DEG = 20;
     public static final double PIVOT_MAX_OUTPUT = 0.3;
-    // Wide tolerance to stop before chain slop causes bouncing
+    // Wider tolerance to prevent oscillation from mechanical slop
     public static final double PIVOT_TOLERANCE_DEG = 25.0;
     
     // Roller
@@ -211,18 +207,16 @@ public final class Constants {
     /** Forward/backward from robot center (+ = forward) */
     public static final double CAMERA_X_OFFSET = 0.2032;
     /** Left/right from robot center (+ = left) */
-    public static final double CAMERA_Y_OFFSET = -0.1524; // Centered left-right
+    public static final double CAMERA_Y_OFFSET = -0.1524;
     /** Height from ground to camera lens */
     public static final double CAMERA_Z_OFFSET = 0.23495 ;
     /** Tilt angle in degrees (+ = tilted up) */
-    public static final double CAMERA_PITCH_DEGREES = 38; // Slight upward pitch
+    public static final double CAMERA_PITCH_DEGREES = 38;
     /** Yaw rotation in degrees (0 = facing forward, 90 = facing left, 180 = facing backward) */
     public static final double CAMERA_YAW_DEGREES = 0.0; // Camera faces FORWARD on robot
     
     // Vision measurement trust (standard deviations for pose estimator)
     // Lower = trust vision more, Higher = trust odometry more
-    // Balanced trust — vision corrects drift but odometry keeps things smooth.
-    // Was 0.1/0.1/0.1 which caused jitter from noisy vision updates.
     public static final double VISION_STD_DEV_X = 0.7;
     public static final double VISION_STD_DEV_Y = 0.7;
     public static final double VISION_STD_DEV_THETA = 10;
@@ -245,20 +239,20 @@ public final class Constants {
     public static final double GEAR_RATIO = 10.00537109375; // Calibrate with CalibrateTurretGearRatioCommand
     public static final boolean MOTOR_INVERTED = true;
     
-    // Bounded 0-360 position system. STARTUP_ANGLE is internal position at power-on.
+    // Bounded 0-360 position system. STARTUP_ANGLE is the internal position at power-on.
     // HOME_ANGLE_DEG is the EXTERNAL angle the turret physically faces at power-on.
     //   It tells the code "at power-on, the turret is pointing at this external angle."
     //   External 0 = robot forward. External 90 = robot left. External -90 = robot right.
     //   Since the turret physically starts facing left, HOME_ANGLE_DEG = 90.
     //
     // MOTOR_INVERTED = true because the motor's physical CW = positive encoder,
-    //   but the math convention needs positive internal angle change to go CCW.
+    //   but the math convention requires positive internal angle change to go CCW.
     //   Phoenix 6 inversion flips BOTH encoder and output together, keeping math consistent.
     //
     // MIN/MAX are in INTERNAL coordinates (0-360).
     //   Internal 90 = forward, Internal 180 = home/left (startup).
-    //   Usable range WRAPS through 0/360: from MIN(75) → 0/360 → through 90,180 → to MAX(224).
-    //   Dead zone: MAX(224) → through 270,315 → MIN(75) (cannot traverse).
+    //   Usable range wraps through 0/360: from MIN(75) -> 0/360 -> through 90,180 -> to MAX(224).
+    //   Dead zone: MAX(224) -> through 270,315 -> MIN(75) (cannot traverse).
     public static final double STARTUP_ANGLE_DEG = 180.0; // Internal angle at power-on (arbitrary reference)
     public static final double HOME_ANGLE_DEG = 90.0;     // External angle at power-on (90 = facing left)
     public static final double MIN_ANGLE_DEG = 75.0;      // CW internal limit
@@ -285,7 +279,7 @@ public final class Constants {
     public static final double ON_TARGET_TOLERANCE_DEG = 0.5;
     
     // --- Rotation offset calibration is now part of unified SHOOTING_CALIBRATION ---
-    // See Constants.Shooter.SHOOTING_CALIBRATION — each point includes turretOffsetDeg.
+    // See Constants.Shooter.SHOOTING_CALIBRATION; each point includes turretOffsetDeg.
     // The bearing weight for interpolation is Constants.Shooter.CALIBRATION_BEARING_WEIGHT.
     
     // Per-tag calibration offsets (initialize all to 0)
@@ -343,7 +337,7 @@ public final class Constants {
     public static final int[] INTAKING_COLOR = {255, 100, 180};
     public static final int[] CLIMBING_COLOR = {255, 0, 255};
     public static final int[] ESTOP_COLOR = {255, 0, 0};
-    public static final int[] BROWNOUT_COLOR = {64, 28, 0};  // Saddle brown
+    public static final int[] BROWNOUT_COLOR = {64, 28, 0};
     
     // Warning colors
     public static final int[] SHIFT_WARNING_5SEC = {255, 255, 255};
@@ -355,6 +349,6 @@ public final class Constants {
     // Victory
     public static final int[] VICTORY_COLOR_1 = {255, 100, 0};
     public static final int[] VICTORY_COLOR_2 = {0, 100, 255};
-    public static final double VICTORY_FLASH_SPEED = 0.9; // Fast strobe (10Hz)
+    public static final double VICTORY_FLASH_SPEED = 0.9;
   }
 }

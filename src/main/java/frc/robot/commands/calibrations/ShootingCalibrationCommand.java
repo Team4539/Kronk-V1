@@ -55,7 +55,7 @@ public class ShootingCalibrationCommand extends Command {
         SmartDashboard.putBoolean("Cal/Shooter/UseManual", true);
         
         // Display instructions
-        SmartDashboard.putString("Cal/Status", "SHOOTING CALIBRATION - Adjust powers and shoot!");
+        SmartDashboard.putString("Cal/Status", "SHOOTING CALIBRATION - Adjust powers and shoot");
         SmartDashboard.putString("Cal/Instructions", 
             "1. Adjust Tuning/Shooter/TopRPM (height) and BottomRPM (distance). " +
             "2. Click Tuning/RecordPoint after a good shot. " +

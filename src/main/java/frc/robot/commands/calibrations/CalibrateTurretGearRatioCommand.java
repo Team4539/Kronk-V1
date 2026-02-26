@@ -7,7 +7,7 @@ import frc.robot.util.Elastic;
 
 /**
  * Determines the correct turret gear ratio by measuring motor rotations per full turret rotation.
- * All controls are on SmartDashboard -- no controller buttons needed.
+ * All controls are on SmartDashboard; no controller buttons are needed.
  * 
  * HOW TO USE:
  * 1. Click "Cal/TurretGearRatio" on SmartDashboard to start

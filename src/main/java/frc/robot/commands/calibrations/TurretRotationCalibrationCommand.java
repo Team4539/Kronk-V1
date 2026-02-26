@@ -9,7 +9,7 @@ import frc.robot.util.Elastic;
 import frc.robot.util.ShootingCalculator;
 
 /**
- * @deprecated Use FullShooterCalibrationCommand instead — calibration is now unified.
+ * @deprecated Use FullShooterCalibrationCommand instead. Calibration is now unified.
  * This command is kept for backwards compatibility but records to the same
  * unified calibration table (x, y, bearing, turretOffset, topRPM, bottomRPM).
  * 
@@ -20,7 +20,7 @@ import frc.robot.util.ShootingCalculator;
  * 
  * HOW TO USE:
  * 1. Run this command from SmartDashboard ("Tuning/Cal: Turret Rotation")
- * 2. Drive to a position — note BOTH the distance AND bearing on the dashboard
+ * 2. Drive to a position and note both the distance and bearing on the dashboard
  * 3. Adjust Tuning/Turret/RotationOffset slider until turret is aimed correctly
  * 4. Click Tuning/RecordPoint to save the unified calibration point
  * 5. Move to a new distance OR turn the robot to a different orientation and repeat
@@ -78,7 +78,7 @@ public class TurretRotationCalibrationCommand extends Command {
             calibration.setCurrentDistance(vision.getDistanceToHub());
         }
 
-        // Status display — now shows bearing (robot orientation relative to target)
+        // Status display: includes bearing (robot orientation relative to target)
         double distance = calibration.getCurrentDistance();
         double bearing = shootingCalc.getRawBearing();
         double rotationOffset = calibration.getTurretRotationOffset();

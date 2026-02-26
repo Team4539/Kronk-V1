@@ -15,8 +15,8 @@ import frc.robot.util.ShootingCalculator;
  * updated every cycle by RobotContainer.updateVisionPose(). This command
  * just applies the calculated turret angle.
  * 
- * This is the DEFAULT turret command -- it runs continuously when no other
- * turret command (like AutoShootCommand) is active.
+ * This is the default turret command. It runs continuously when no other
+ * turret command (such as AutoShootCommand) is active.
  */
 public class AimTurretToPoseCommand extends Command {
     

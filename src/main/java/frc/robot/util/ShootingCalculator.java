@@ -1,10 +1,12 @@
 package frc.robot.util;
 
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
+import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import frc.robot.Constants;
 import frc.robot.GameStateManager;
@@ -98,6 +100,11 @@ public class ShootingCalculator {
      */
     private boolean calibrationMode = false;
 
+    /** Field2d widget for displaying calibration points on SmartDashboard field */
+    private final Field2d calibrationField = new Field2d();
+    private boolean calibrationPointsNeedUpdate = true;
+    private Translation2d lastPublishedTarget = null;
+
     // ========================================================================
     // SINGLETON
     // ========================================================================
@@ -110,6 +117,10 @@ public class ShootingCalculator {
     }
 
     private ShootingCalculator() {
+        SmartDashboard.putData("Shooting/CalibrationPoints", calibrationField);
+        // Publish calibration points immediately using Blue Hub as default target.
+        // They'll auto-update to the correct target once update() starts running.
+        publishCalibrationPoints(Constants.Field.BLUE_HUB_CENTER);
         System.out.println("[ShootingCalculator] Initialized");
     }
 
@@ -216,7 +227,7 @@ public class ShootingCalculator {
             // aim right (negative correction) to compensate.
             leadAngle = Math.toDegrees(Math.atan2(perpVelocity * flightTime, distance));
             
-            // Apply lead angle (subtract — we aim opposite to the drift)
+            // Apply lead angle (subtract: we aim opposite to the drift)
             turretAngle -= leadAngle;
             turretAngle = normalizeAngle(turretAngle);
         } else {
@@ -322,7 +333,7 @@ public class ShootingCalculator {
             double proximity = Math.sqrt(dx * dx + dy * dy + dBearing * dBearing);
 
             if (proximity < 0.001) {
-                // Essentially on top of this calibration point — just return it
+                // Essentially on top of this calibration point; return it directly
                 return new double[]{point[3], point[4], point[5]};
             }
 
@@ -387,7 +398,7 @@ public class ShootingCalculator {
      */
     public void setCalibrationMode(boolean enabled) { 
         calibrationMode = enabled;
-        System.out.println("[ShootingCalculator] Calibration mode " + (enabled ? "ENABLED — baked-in offsets bypassed" : "DISABLED — using Constants offsets"));
+        System.out.println("[ShootingCalculator] Calibration mode " + (enabled ? "ENABLED - baked-in offsets bypassed" : "DISABLED - using Constants offsets"));
     }
 
     // ========================================================================
@@ -411,5 +422,36 @@ public class ShootingCalculator {
         SmartDashboard.putNumber("Shooting/Distance", distance);
         SmartDashboard.putNumber("Shooting/TopRPM", targetTopRPM);
         SmartDashboard.putNumber("Shooting/BottomRPM", targetBottomRPM);
+
+        // Publish calibration points; only recalculate when the target changes.
+        Alliance alliance = DriverStation.getAlliance().orElse(Alliance.Blue);
+        boolean isBlue = (alliance == Alliance.Blue);
+        Translation2d currentTarget = getTargetPosition(isBlue, aimingAtTrench);
+
+        if (calibrationPointsNeedUpdate || lastPublishedTarget == null
+                || !currentTarget.equals(lastPublishedTarget)) {
+            publishCalibrationPoints(currentTarget);
+        }
+    }
+
+    /**
+     * Convert calibration points from target-relative to field-absolute coordinates
+     * and publish them on the Field2d widget so they show on SmartDashboard.
+     */
+    private void publishCalibrationPoints(Translation2d targetPos) {
+        List<double[]> calTable = Constants.Shooter.SHOOTING_CALIBRATION;
+        Pose2d[] fieldPoses = new Pose2d[calTable.size()];
+        for (int i = 0; i < calTable.size(); i++) {
+            double[] pt = calTable.get(i);
+            // pt[0] = relX, pt[1] = relY (turret pos - target pos)
+            // Field absolute = target + relative
+            double fieldX = targetPos.getX() + pt[0];
+            double fieldY = targetPos.getY() + pt[1];
+            // Use bearing as rotation so the arrow shows which way the robot was facing
+            fieldPoses[i] = new Pose2d(fieldX, fieldY, Rotation2d.fromDegrees(pt[2]));
+        }
+        calibrationField.getObject("CalPoints").setPoses(fieldPoses);
+        lastPublishedTarget = targetPos;
+        calibrationPointsNeedUpdate = false;
     }
 }

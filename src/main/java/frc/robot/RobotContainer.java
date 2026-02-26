@@ -308,7 +308,7 @@ public class RobotContainer {
         // Drivetrain: swerve drive with slow-mode on RT
         if (drivetrain != null) {
             drivetrain.setDefaultCommand(drivetrain.applyRequest(() -> {
-                // SAFETY: Don't drive while disabled — send idle/brake request
+                // SAFETY: Do not drive while disabled; send idle/brake request
                 if (DriverStation.isDisabled()) {
                     return brake;
                 }
@@ -381,9 +381,8 @@ public class RobotContainer {
                     new VisionCalibrationCommand(vision));
         }
 
-        // Quick-fire button for calibration: feeds a ball into the shooter
-        // without needing alliance windows or full AutoShoot.
-        // Use while tuning RPM offset sliders to test shots.
+        // Quick-fire dashboard button for calibration: feeds a ball into the shooter
+        // without requiring alliance windows or the full AutoShoot sequence.
         if (turretFeed != null) {
             SmartDashboard.putData("Tuning/Feed Shot",
                     Commands.startEnd(
@@ -434,7 +433,7 @@ public class RobotContainer {
 
         // Fuse vision into drivetrain odometry.
         // Multi-tag: highly trusted (tight std devs for x, y, AND theta).
-        // Single-tag: trust x/y but NOT theta — single-tag rotation from PNP is very unreliable
+        // Single-tag: trust x/y but NOT theta. Single-tag rotation from PNP is very unreliable
         //   and can corrupt the gyro heading, which breaks all aiming.
         if (vision.hasVisionPose()) {
             edu.wpi.first.math.geometry.Pose2d visionPose = vision.getRobotPose();
@@ -460,7 +459,7 @@ public class RobotContainer {
                                             vision.getTargetCount())));
                 }
 
-                // Multi-tag: tight std devs — trust fully
+                // Multi-tag: tight std devs, fully trusted
                 double[] std = vision.getVisionStdDevs();
                 drivetrain.addVisionMeasurement(
                         visionPose,
@@ -480,7 +479,7 @@ public class RobotContainer {
                         
                 // If heading hasn't been seeded yet and we only see single tags,
                 // still notify so PnpDistanceTrigSolve can be used (it will use
-                // the gyro heading which starts at 0 — user must manually seed
+                // the gyro heading which starts at 0. User must manually seed
                 // via Y button / gyro reset when facing a known direction).
                 if (!hasSeededHeadingFromVision) {
                     hasSeededHeadingFromVision = true;
@@ -490,7 +489,7 @@ public class RobotContainer {
                     Elastic.sendNotification(
                             new Elastic.Notification(NotificationLevel.INFO,
                                     "Vision X/Y Initialized",
-                                    String.format("SingleTag ID %d: (%.1f, %.1f) — heading from gyro",
+                                    String.format("SingleTag ID %d: (%.1f, %.1f) - heading from gyro",
                                             vision.getTargetId(),
                                             visionPose.getX(), visionPose.getY())));
                 }

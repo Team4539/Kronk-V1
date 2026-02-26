@@ -158,13 +158,13 @@ public class CalibrationManager {
      * Call this BEFORE adjusting any sliders to avoid stacking offsets on top of old offsets.
      * 
      * Resets (live sliders):
-     *   - Turret angle offset → 0
-     *   - Turret rotation offset → 0
-     *   - Top RPM offset → 0
-     *   - Bottom RPM offset → 0
+     *   - Turret angle offset = 0
+     *   - Turret rotation offset = 0
+     *   - Top RPM offset = 0
+     *   - Bottom RPM offset = 0
      *   - Recorded data (shooting + rotation points)
      * 
-     * Bypasses (baked-in Constants — can't be zeroed, so ShootingCalculator skips them):
+     * Bypasses (baked-in Constants that cannot be zeroed, so ShootingCalculator skips them):
      *   - Constants.Turret.GLOBAL_ANGLE_OFFSET_DEG
      *   - Constants.Shooter.SHOOTING_CALIBRATION (unified pose-based calibration table)
      */
@@ -182,7 +182,7 @@ public class CalibrationManager {
         SmartDashboard.putNumber("Tuning/Shooter/BottomRPMOffset", 0.0);
         
         // Tell ShootingCalculator to bypass ALL baked-in Constants offsets
-        // (GLOBAL_ANGLE_OFFSET_DEG, unified SHOOTING_CALIBRATION) so we're tuning from raw
+        // (GLOBAL_ANGLE_OFFSET_DEG, unified SHOOTING_CALIBRATION) for raw baseline tuning
         ShootingCalculator.getInstance().setCalibrationMode(true);
         
         // Clear any previously recorded points so they don't mix with new session
@@ -193,8 +193,8 @@ public class CalibrationManager {
         // Mark session active
         calibrationSessionActive = true;
         SmartDashboard.putBoolean("Tuning/CalibrationActive", true);
-        SmartDashboard.putString("Tuning/Status", "✓ CALIBRATION STARTED — All offsets zeroed + baked-in bypassed");
-        System.out.println("[CAL] === CALIBRATION SESSION STARTED — All offsets reset, baked-in offsets bypassed ===");
+        SmartDashboard.putString("Tuning/Status", "CALIBRATION STARTED - All offsets zeroed, baked-in offsets bypassed");
+        System.out.println("[CAL] === CALIBRATION SESSION STARTED - All offsets reset, baked-in offsets bypassed ===");
     }
     
     /**
@@ -207,8 +207,8 @@ public class CalibrationManager {
         
         calibrationSessionActive = false;
         SmartDashboard.putBoolean("Tuning/CalibrationActive", false);
-        SmartDashboard.putString("Tuning/Status", "Calibration ended — baked-in offsets re-enabled");
-        System.out.println("[CAL] === CALIBRATION SESSION ENDED — baked-in offsets re-enabled ===");
+        SmartDashboard.putString("Tuning/Status", "Calibration ended - baked-in offsets re-enabled");
+        System.out.println("[CAL] === CALIBRATION SESSION ENDED - Baked-in offsets re-enabled ===");
     }
     
     // ========================================================================

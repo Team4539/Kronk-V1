@@ -58,7 +58,7 @@ public class ShooterSubsystem extends SubsystemBase {
     private boolean hasWarnedHighTemp = false;
     private int tempCheckCounter = 0; // Only check temps every N cycles
     
-    // Reusable array not safe for potential multi-threaded/command usage, switching to local
+    // Local arrays are used per-call instead of a shared field for thread safety.
     // private final double[] interpolatedPowers = new double[2];
 
     /**

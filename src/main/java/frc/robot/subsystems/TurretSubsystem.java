@@ -38,8 +38,8 @@ import frc.robot.Constants;
  *     External -90° (right)        → Internal   0°/360° (near dead zone)
  * 
  * DEAD ZONE:
- *   Usable range: Internal [75, 224] — contains 90 (forward) and 180 (home).
- *   Dead zone: Internal (224, 360) ∪ [0, 75) — turret cannot traverse this arc.
+ *   Usable range: Internal [75, 224], which contains 90 (forward) and 180 (home).
+ *   Dead zone: Internal (224, 360) ∪ [0, 75). The turret cannot traverse this arc.
  *   External usable range: roughly -105° (right) through 0° (forward) to 134° (left/rear).
  * 
  * POSITION TRACKING:
@@ -176,7 +176,7 @@ public class TurretSubsystem extends SubsystemBase {
      * At startup, motor is at 0 rotations and internal angle is STARTUP_ANGLE_DEG.
      * 
      * We compute the shortest-path delta from STARTUP to target, then convert to rotations.
-     * This handles wrapping correctly -- the motor position is unbounded (it can go negative).
+     * This handles wrapping correctly; the motor position is unbounded (it can go negative).
      */
     private double internalAngleToMotorRotations(double targetInternal) {
         // Delta from startup position in degrees
@@ -196,7 +196,7 @@ public class TurretSubsystem extends SubsystemBase {
      * 
      * Usable range: [MIN_ANGLE_DEG (75), MAX_ANGLE_DEG (224)]
      *   This arc contains 90 (forward) and 180 (home/startup).
-     * Dead zone: (224, 360) ∪ [0, 75) — the arc the turret cannot traverse.
+     * Dead zone: (224, 360) ∪ [0, 75), the arc the turret cannot traverse.
      */
     private boolean isInDeadZone(double internalAngle) {
         return internalAngle > Constants.Turret.MAX_ANGLE_DEG

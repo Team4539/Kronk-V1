@@ -54,7 +54,7 @@ public class LEDSubsystem extends SubsystemBase {
     private boolean testMode = false;
     private boolean lastTestMode = false; // Track previous state to detect transitions
     
-    // CANdle boot readiness -- hardware isn't responsive until fully booted
+    // CANdle boot readiness - hardware is not responsive until fully booted
     private boolean candleReady = false;
     @SuppressWarnings("unused")
     private boolean configApplied = false;
@@ -100,10 +100,10 @@ public class LEDSubsystem extends SubsystemBase {
     private boolean hasNotifiedEStop = false;
     private boolean hasNotifiedEndgame = false;
     
-    // CAN frame deduplication — only send when color actually changes
+    // CAN frame deduplication: only send when color actually changes
     private int lastSentR = -1, lastSentG = -1, lastSentB = -1;
     
-    // LED update throttle — animations don't need 50Hz, 10Hz looks the same
+    // LED update throttle: animations do not need 50Hz; 10Hz looks the same
     private int ledUpdateCounter = 0;
     private static final int LED_UPDATE_DIVISOR = 5; // Update every 5th cycle = 10Hz
     
@@ -357,7 +357,7 @@ public class LEDSubsystem extends SubsystemBase {
         int r = (int)(color[0] * masterBrightness);
         int g = (int)(color[1] * masterBrightness);
         int b = (int)(color[2] * masterBrightness);
-        // Skip if color hasn't changed — avoids flooding CAN bus
+        // Skip if color hasn't changed to avoid flooding the CAN bus
         if (r == lastSentR && g == lastSentG && b == lastSentB) {
             return;
         }
@@ -622,10 +622,9 @@ public class LEDSubsystem extends SubsystemBase {
     }
     
     /**
-     * Victory celebration - sparkling fireworks with team colors!
+     * Victory celebration - sparkling fireworks with team colors.
      * Random twinkles of orange, blue, and white pop and fade across the strip
      * like fireworks exploding. Onboard LEDs flash white rapidly.
-     * Way more exciting than spinning blocks!
      */
     private void setVictoryCelebration() {
         double currentTime = Timer.getFPGATimestamp();
@@ -672,7 +671,7 @@ public class LEDSubsystem extends SubsystemBase {
                 ledBuffer[stripStart + i][1] = (int)(sparkColor[1] * intensity * masterBrightness);
                 ledBuffer[stripStart + i][2] = (int)(sparkColor[2] * intensity * masterBrightness);
             }
-            // LEDs not sparkling stay dark -- makes the sparkles pop!
+            // LEDs not sparkling stay dark for contrast
         }
         
         pushBuffer();
@@ -680,15 +679,14 @@ public class LEDSubsystem extends SubsystemBase {
     
     // ===========================================
     // CREATIVE INFORMATIVE PATTERNS
-    // These patterns are designed to be INSTANTLY recognizable
-    // and look GREAT for the audience!
+    // Designed for instant recognizability and visual impact.
     // ===========================================
     
     /**
      * E-STOP PATTERN - Dramatic red shockwaves pulsing from center outward.
      * Two red rings expand from the center simultaneously, with a deep red
      * background and bright white flash at the edges. Onboard LEDs solid red.
-     * Unmistakable "DANGER - STOPPED" but looks incredible.
+     * Unmistakable emergency stop indicator.
      */
     private void setEStopPattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -769,8 +767,8 @@ public class LEDSubsystem extends SubsystemBase {
      * TARGETING PATTERN - "Edges closing in" with pulsing center crosshair.
      * Yellow brackets sweep inward from both ends like a targeting reticle.
      * A pulsing dim yellow glow at the center acts as the crosshair target.
-     * When brackets meet, the whole strip flashes bright -- "LOCKED ON!"
-     * Instantly says: "I'm locking onto something!"
+     * When brackets meet, the whole strip flashes bright to indicate lock-on.
+     * Provides immediate visual feedback that the turret is actively tracking.
      */
     private void setTargetingPattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -851,8 +849,8 @@ public class LEDSubsystem extends SubsystemBase {
      * POWER FILL PATTERN - Dramatic charging progress bar.
      * Orange fills from left to right with a bright white leading edge
      * and an energy shimmer through the filled section.
-     * Onboard LEDs pulse faster as it fills up -- building tension!
-     * Instantly says: "Building power, almost ready!"
+     * Onboard LEDs pulse faster as it fills up, building visual tension.
+     * Communicates that the shooter is spinning up and approaching readiness.
      */
     private void setPowerFillPattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -920,9 +918,9 @@ public class LEDSubsystem extends SubsystemBase {
     /**
      * INTAKE FLOW PATTERN - Dual streams being sucked toward center.
      * Two bright comets with long trails chase from both edges to center.
-     * When they reach center, a bright flash pulses -- "NOM!"
+     * When they reach center, a bright flash pulses to indicate capture.
      * Onboard LEDs breathe in sync.
-     * Instantly says: "Eating a game piece!"
+     * Communicates that a game piece is being collected.
      */
     private void setIntakeFlowPattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -972,7 +970,7 @@ public class LEDSubsystem extends SubsystemBase {
             setLED(stripStart + rightChase, new int[]{255, 200, 220});
         }
         
-        // Center "gulp" glow -- brighter when comets are near center
+        // Center convergence glow: intensity increases as comets approach center
         double nearCenter = 1.0 - (double) Math.abs(chasePos - center) / center;
         nearCenter = nearCenter * nearCenter * nearCenter;  // Cubic for dramatic pop
         int[] centerGlow = {(int)(color[0] * nearCenter), (int)(color[1] * nearCenter), (int)(color[2] * nearCenter)};
@@ -992,7 +990,7 @@ public class LEDSubsystem extends SubsystemBase {
      * Three evenly-spaced comets rise up the strip simultaneously
      * with trails that make it look like ascending energy.
      * Onboard LEDs pulse purple.
-     * Instantly says: "Going UP!"
+     * Communicates that the climb mechanism is actively ascending.
      */
     private void setClimbRisingPattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -1038,8 +1036,7 @@ public class LEDSubsystem extends SubsystemBase {
     
     /**
      * READY SPLIT PATTERN - Half orange, half blue with breathing boundary.
-     * Shows team identity and readiness simultaneously.
-     * Instantly says: "We're Team 4539 and we're READY!"
+     * Displays team identity and readiness simultaneously.
      */
     private void setReadySplitPattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -1074,8 +1071,8 @@ public class LEDSubsystem extends SubsystemBase {
      * ENDGAME URGENCY PATTERN - Accelerating heartbeat with shockwaves.
      * Alliance-colored pulses radiate from center, getting faster over time.
      * Every few seconds a bright white flash grabs attention.
-     * The "heartbeat" speeds up as match time decreases -- real urgency!
-     * Instantly says: "HURRY! Time is almost up!"
+     * The "heartbeat" speeds up as match time decreases to convey urgency.
+     * Communicates that the match is nearing its end.
      */
     private void setEndgameUrgencyPattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -1104,7 +1101,7 @@ public class LEDSubsystem extends SubsystemBase {
                 setLED(stripStart + i, Constants.LEDs.WHITE);
             }
         } else {
-            // Heartbeat speed -- faster as time runs out (1Hz to 4Hz)
+            // Heartbeat speed scales with remaining time (1Hz to 4Hz)
             double heartRate = 1.0 + (1.0 - Math.max(0, Math.min(1.0, matchTime / 30.0))) * 3.0;
             double beatPhase = (currentTime * heartRate) % 1.0;
             
@@ -1141,9 +1138,9 @@ public class LEDSubsystem extends SubsystemBase {
     /**
      * BROWNOUT PATTERN - Dramatic power failure / sputtering.
      * LEDs flicker and sections randomly go dark then struggle back on,
-     * like a dying lightbulb. The brown/amber color screams "low power."
+     * simulating a dying lightbulb. The brown/amber color indicates low power.
      * Onboard LEDs flicker weakly.
-     * Instantly says: "Low power! Battery dying!"
+     * Communicates a low battery / brownout condition.
      */
     private void setBrownoutPattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -1196,12 +1193,12 @@ public class LEDSubsystem extends SubsystemBase {
      * WAITING/DISABLED PATTERN - Clean team color idle animation.
      * 
      * Onboard LEDs (0-7): Gentle alternating orange/blue breathing glow.
-     * Strip LEDs (8-67): Smooth comet tails -- an orange comet and a blue comet
+     * Strip LEDs (8-67): Smooth comet tails with an orange comet and a blue comet
      * chase each other around the strip on a dark background. Each comet is a
      * bright head with a fading trail behind it. The two comets are always on
-     * opposite sides of the strip so they never overlap or mix into ugly colors.
+     * opposite sides of the strip so they never overlap or mix colors.
      * 
-     * Instantly says: "I'm here, waiting for you"
+     * Communicates that the robot is idle and awaiting commands.
      */
     private void setWaitingPattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -1275,9 +1272,9 @@ public class LEDSubsystem extends SubsystemBase {
     /**
      * SHOOT NOW PATTERN - Green shockwave explosions from center.
      * Bright green rings blast outward from center with white-hot leading edges.
-     * Multiple overlapping rings for continuous "FIRE!" feeling.
+     * Multiple overlapping rings for a continuous rapid-fire visual.
      * Onboard LEDs solid bright green.
-     * Instantly says: "FIRE! SHOOT NOW!"
+     * Communicates that the shooter is ready and the driver should fire.
      */
     private void setShootNowPattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -1350,9 +1347,9 @@ public class LEDSubsystem extends SubsystemBase {
      * FIRING PATTERN - Explosive rapid-fire strobe with outward blasts!
      * Much more intense than the "ready to shoot" pattern. Rapid alternation
      * between bright white and green with violent outward shockwaves.
-     * The whole strip pulses like a muzzle flash with each "shot."
+     * The whole strip pulses like a muzzle flash with each shot.
      * Onboard LEDs strobe white/green rapidly.
-     * Instantly says: "BALLS ARE FLYING RIGHT NOW!"
+     * Communicates that game pieces are actively being launched.
      */
     private void setFiringPattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -1431,10 +1428,10 @@ public class LEDSubsystem extends SubsystemBase {
     /**
      * AUTO MODE PATTERN - Dual alliance-colored comets racing opposite directions.
      * Two bright comets circling the strip in opposite directions with white-hot tips.
-     * Energetic and fast -- clearly distinct from teleop's calmer wave.
+     * Energetic and fast, clearly distinct from teleop's calmer wave.
      * White sparkle accents randomly appear and fade for extra energy.
      * Onboard LEDs pulse alliance color at 2Hz.
-     * Instantly says: "Robot is driving itself!"
+     * Communicates that the robot is in autonomous mode.
      */
     private void setAutoModePattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -1512,7 +1509,7 @@ public class LEDSubsystem extends SubsystemBase {
             ledBuffer[idx][2] = Math.max(ledBuffer[idx][2], b);
         }
         
-        // Random sparkle accents -- 3 at any time, seeded by time
+        // Random sparkle accents (3 at any time, seeded by timestamp)
         long sparkSeed = (long)(currentTime * 10);
         for (int s = 0; s < 3; s++) {
             int sparkPos = (int)(((sparkSeed + s * 17) * 31 + s * 7) % stripCount);
@@ -1531,10 +1528,10 @@ public class LEDSubsystem extends SubsystemBase {
     /**
      * TELEOP MODE PATTERN - Smooth flowing gradient wave.
      * Two alliance-color bands flow slowly along the strip with smooth sinusoidal
-     * shaping, creating a lava-lamp style "liquid flow" effect. Much calmer and
-     * smoother than auto's racing comets -- clearly says "human in control."
+     * shaping, creating a lava-lamp style "liquid flow" effect. Calmer and
+     * smoother than auto's racing comets, clearly distinguishing driver control.
      * Onboard LEDs breathe alliance color at a relaxed 4-second cycle.
-     * Instantly says: "Driver has control"
+     * Communicates that the robot is under driver control in teleop.
      */
     private void setTeleopModePattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -1567,7 +1564,7 @@ public class LEDSubsystem extends SubsystemBase {
             ledBuffer[stripStart + i][2] = (int)(allianceColor[2] * brightness * masterBrightness);
         }
         
-        // Subtle white shimmer -- one bright point that slowly moves
+        // Subtle white shimmer: one bright point that slowly moves
         double shimmerPos = ((Math.sin(currentTime * 0.7) + 1) / 2) * stripCount;
         int shimmerIdx = (int) shimmerPos;
         double shimmerBright = (Math.sin(currentTime * 1.3) + 1) / 2 * 0.3;
@@ -1589,12 +1586,12 @@ public class LEDSubsystem extends SubsystemBase {
     /**
      * Updates LED pattern based on current state.
      * Sets currentPatternName for dashboard visibility.
-     * checkEStop() is already called in periodic() -- not duplicated here.
+     * checkEStop() is already called in periodic() and is not duplicated here.
      */
     private void updateLEDPattern() {
         double timeSinceStateStart = Timer.getFPGATimestamp() - stateStartTime;
         
-        // the most important thing, always check for brownout first
+        // Brownout is highest priority - always check first
         if (currentAction == ActionState.BROWNOUT) {
             currentPatternName = "Brownout";
             setBrownoutPattern();
@@ -1623,7 +1620,7 @@ public class LEDSubsystem extends SubsystemBase {
             return;
         }
         
-        // PRIORITY 3: Ready to shoot - driver needs to know they can fire!
+        // PRIORITY 3: Ready to shoot - driver needs to know they can fire
         if (currentAction == ActionState.SHOOTING) {
             currentPatternName = "SHOOT NOW";
             setShootNowPattern();
@@ -1818,14 +1815,14 @@ public class LEDSubsystem extends SubsystemBase {
         if (!candleReady) {
             double timeSinceBoot = Timer.getFPGATimestamp() - bootStartTime;
             if (timeSinceBoot < CANDLE_MIN_BOOT_SECONDS) {
-                // Still in minimum boot window -- don't send anything
+                // Still in minimum boot window; do not send any commands
                 DashboardHelper.putString(Category.DEBUG, "LED/Pattern", "Waiting for CANdle (" 
                     + String.format("%.1f", timeSinceBoot) + "s)");
                 DashboardHelper.putString(Category.DEBUG, "LED/State", currentState.name());
                 DashboardHelper.putString(Category.DEBUG, "LED/Action", currentAction.name());
                 return;
             }
-            // Minimum boot time elapsed -- apply config now
+            // Minimum boot time elapsed; apply configuration
             candle.getConfigurator().apply(candleConfig);
             configApplied = true;
             candleReady = true;
@@ -1917,7 +1914,6 @@ public class LEDSubsystem extends SubsystemBase {
     /**
      * Trigger match end celebration!
      * This sets the LED state to rapid team color strobe mode.
-     * Call this when match ends (win or lose - celebrate your effort!)
      */
     public void triggerMatchEndCelebration() {
         setState(LEDState.MATCH_END);

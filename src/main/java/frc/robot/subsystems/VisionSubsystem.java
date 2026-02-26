@@ -282,7 +282,7 @@ public class VisionSubsystem extends SubsystemBase {
      */
     public void notifyHeadingSeeded() {
         headingSeeded = true;
-        System.out.println("[VisionSubsystem] Heading seeded — switching to PnpDistanceTrigSolve strategy");
+        System.out.println("[VisionSubsystem] Heading seeded - switching to PnpDistanceTrigSolve strategy");
     }
 
     /**
@@ -525,7 +525,7 @@ public class VisionSubsystem extends SubsystemBase {
 
     /**
      * Get standard deviations for vision measurement trust.
-     * We trust vision heavily — it's the primary pose source whenever tags are visible.
+     * We trust vision heavily; it is the primary pose source whenever tags are visible.
      * Gyro/odometry is just the fallback when no tags are in view.
      * Still scales slightly with distance (farther = slightly less precise).
      * @return Array of [x_stddev, y_stddev, theta_stddev]
@@ -596,7 +596,7 @@ public class VisionSubsystem extends SubsystemBase {
         List<PhotonPipelineResult> results = camera.getAllUnreadResults();
 
         if (results.isEmpty()) {
-            // No new frames — keep last known state
+            // No new frames; keep last known state
             // Don't clear hasPose here to avoid flickering when camera FPS < robot loop rate
             return;
         }
@@ -639,7 +639,7 @@ public class VisionSubsystem extends SubsystemBase {
         }
 
         // Use PhotonPoseEstimator to compute robot pose from the result.
-        // Try multi-tag first (coprocessor-side PNP) — always best when available.
+        // Try multi-tag first (coprocessor-side PNP), which is always best when available.
         Optional<EstimatedRobotPose> estimatedPose = poseEstimator.estimateCoprocMultiTagPose(latestResult);
         String poseMethod = "MultiTag";
         isMultiTagEstimate = estimatedPose.isPresent();
@@ -652,7 +652,7 @@ public class VisionSubsystem extends SubsystemBase {
                 estimatedPose = poseEstimator.estimatePnpDistanceTrigSolvePose(latestResult);
                 poseMethod = "PnpDistanceTrig";
             } else {
-                // Heading NOT seeded yet — gyro is still at 0° from boot.
+                // Heading NOT seeded yet; gyro is still at 0 degrees from boot.
                 // PnpDistanceTrigSolve would just echo back 0° for rotation.
                 // Use LowestAmbiguity instead: it derives rotation from PNP geometry,
                 // giving us a real heading we can use to seed the gyro.

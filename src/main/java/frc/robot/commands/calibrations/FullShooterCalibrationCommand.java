@@ -110,7 +110,7 @@ public class FullShooterCalibrationCommand extends Command {
         SmartDashboard.putBoolean("Cal/Shooter/UseManual", true);
         
         // Display instructions
-        SmartDashboard.putString("Cal/Status", "UNIFIED CALIBRATION MODE - Adjust turret offset + RPMs, then record!");
+        SmartDashboard.putString("Cal/Status", "UNIFIED CALIBRATION MODE - Adjust turret offset + RPMs, then record");
         SmartDashboard.putString("Cal/Instructions", 
             "1. Use Cal/Turret/ManualAngle to aim turret. " +
             "2. Use Tuning/Turret/RotationOffset to fine-tune aim. " +

@@ -27,7 +27,7 @@ public class IntakeSubsystem extends SubsystemBase {
     private final TalonFX rollerMotor;
     private final CANcoder pivotCANcoder;
     
-    // Control -- just duty cycle, PID runs in our code in degrees
+    // Control: duty cycle output, PID runs in our code in degrees
     private final DutyCycleOut pivotControl;
     private final DutyCycleOut rollerControl;
     private final PIDController pivotPID;
@@ -225,10 +225,10 @@ public class IntakeSubsystem extends SubsystemBase {
         // 2. PID: current degrees -> target degrees -> duty cycle output
         double pidOutput = pivotPID.calculate(currentPivotAngle, targetPivotAngle);
         
-        // 3. Clamp so it doesn't go full send
+        // 3. Clamp output to safe range
         pidOutput = clamp(pidOutput, -Constants.Intake.PIVOT_MAX_OUTPUT, Constants.Intake.PIVOT_MAX_OUTPUT);
         
-        // 4. If at target, just stop -- don't fight with tiny oscillations
+        // 4. Zero output at setpoint to prevent small oscillations
         if (pivotPID.atSetpoint()) {
             pidOutput = 0.0;
         }
