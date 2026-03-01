@@ -22,6 +22,26 @@ import frc.robot.util.Elastic.NotificationLevel;
 /**
  * LED subsystem using CTRE CANdle for visual feedback.
  * 
+ * PHYSICAL LAYOUT (Y-spliced two-strip configuration):
+ *   The CANdle data line is Y-spliced to two physical strips:
+ *   - Strip A (top/back of robot): 38 LEDs
+ *   - Strip B (belly pan): 58 LEDs (first 38 share IDs with Strip A, then 20 extra)
+ *   - 8 onboard CANdle LEDs are also on the belly pan
+ * 
+ *   Indices 0-7:   Onboard LEDs (belly pan)
+ *   Indices 8-45:  SHARED ZONE — visible on BOTH top and belly (38 LEDs)
+ *   Indices 46-65: BELLY-ONLY ZONE — only on belly strip (20 LEDs)
+ * 
+ * VISUAL DESIGN PHILOSOPHY:
+ *   Every animation is designed for maximum visual impact on WS2812B strips.
+ *   Animations use smooth gradient blending, organic motion, and cinematic
+ *   color transitions. Key techniques:
+ *   - Color lerping for smooth gradients (no hard edges)
+ *   - Quadratic/cubic fade curves for natural-looking trails
+ *   - Layered sine waves for organic "living" motion
+ *   - Additive blending for overlapping effects (fire, plasma, sparkle)
+ *   - Highlight/accent colors on leading edges for visual pop
+ * 
  * Provides status indicators for drivers and pit crew:
  * - Pre-match diagnostics (auto selected, FMS connection)
  * - Alliance colors during the match
@@ -387,6 +407,7 @@ public class LEDSubsystem extends SubsystemBase {
     /**
      * Sets a single LED in the buffer with explicit RGB values.
      */
+    @SuppressWarnings("unused")
     private void setLED(int index, int r, int g, int b) {
         if (index >= 0 && index < ledCount) {
             ledBuffer[index][0] = (int)(r * masterBrightness);
@@ -398,6 +419,7 @@ public class LEDSubsystem extends SubsystemBase {
     /**
      * Sets a range of LEDs to a color.
      */
+    @SuppressWarnings("unused")
     private void setLEDRange(int startIndex, int endIndex, int[] color) {
         for (int i = startIndex; i <= endIndex && i < ledCount; i++) {
             if (i >= 0) {
@@ -451,6 +473,7 @@ public class LEDSubsystem extends SubsystemBase {
     /**
      * Fills the entire buffer with one color.
      */
+    @SuppressWarnings("unused")
     private void fillBuffer(int[] color) {
         for (int i = 0; i < ledCount; i++) {
             setLED(i, color);
@@ -481,6 +504,66 @@ public class LEDSubsystem extends SubsystemBase {
             RGBWColor rgbw = new RGBWColor(r, g, b, 0);
             candle.setControl(new SolidColor(startIdx, i - 1).withColor(rgbw));
         }
+    }
+    
+    // ===========================================
+    // COLOR MATH UTILITIES
+    // Smooth blending, gradients, and procedural noise
+    // for cinematic LED effects.
+    // ===========================================
+    
+    /**
+     * Linearly interpolates between two RGB colors.
+     * @param a First color {R, G, B}
+     * @param b Second color {R, G, B}
+     * @param t Blend factor (0.0 = fully a, 1.0 = fully b)
+     * @return Blended color array {R, G, B}
+     */
+    private int[] lerpColor(int[] a, int[] b, double t) {
+        t = Math.max(0.0, Math.min(1.0, t));
+        return new int[] {
+            (int)(a[0] + (b[0] - a[0]) * t),
+            (int)(a[1] + (b[1] - a[1]) * t),
+            (int)(a[2] + (b[2] - a[2]) * t)
+        };
+    }
+    
+    /**
+     * Scales an RGB color by a brightness factor.
+     * @param color Source color {R, G, B}
+     * @param factor Brightness multiplier (0.0 - 1.0+)
+     * @return Scaled color, clamped to 0-255
+     */
+    private int[] scaleColor(int[] color, double factor) {
+        return new int[] {
+            Math.min(255, Math.max(0, (int)(color[0] * factor))),
+            Math.min(255, Math.max(0, (int)(color[1] * factor))),
+            Math.min(255, Math.max(0, (int)(color[2] * factor)))
+        };
+    }
+    
+    /**
+     * Additively blends a color into the LED buffer at the given index.
+     * Existing color values are maxed (not replaced), creating a glow overlay effect.
+     */
+    private void blendAdditive(int index, int[] color, double intensity) {
+        if (index < 0 || index >= ledCount) return;
+        double br = intensity * masterBrightness;
+        ledBuffer[index][0] = Math.min(255, Math.max(ledBuffer[index][0], (int)(color[0] * br)));
+        ledBuffer[index][1] = Math.min(255, Math.max(ledBuffer[index][1], (int)(color[1] * br)));
+        ledBuffer[index][2] = Math.min(255, Math.max(ledBuffer[index][2], (int)(color[2] * br)));
+    }
+    
+    /**
+     * 1D pseudo-noise function for organic-looking animation.
+     * Returns a smooth value in [0, 1] that varies continuously with input.
+     * Uses layered sine waves to approximate value noise.
+     */
+    private double noise1D(double x) {
+        double v = Math.sin(x * 1.0) * 0.5
+                 + Math.sin(x * 2.3 + 1.7) * 0.25
+                 + Math.sin(x * 5.1 + 3.1) * 0.125;
+        return (v / 0.875 + 1.0) / 2.0;  // Normalize to [0, 1]
     }
     
     // ===========================================
@@ -525,6 +608,7 @@ public class LEDSubsystem extends SubsystemBase {
     /**
      * Fast strobe effect - even more rapid flashing.
      */
+    @SuppressWarnings("unused")
     private void setFastStrobe(int[] color) {
         double currentTime = Timer.getFPGATimestamp();
         // 20Hz strobe
@@ -540,6 +624,7 @@ public class LEDSubsystem extends SubsystemBase {
     /**
      * Alternating two-color strobe.
      */
+    @SuppressWarnings("unused")
     private void setAlternatingStrobe(int[] color1, int[] color2, double speed) {
         double currentTime = Timer.getFPGATimestamp();
         boolean showFirst = ((int)(currentTime / speed) % 2) == 0;
@@ -548,83 +633,115 @@ public class LEDSubsystem extends SubsystemBase {
     }
     
     /**
-     * Chase animation - moving segments of two colors.
-     * True addressable chase effect!
+     * Chase animation - flowing gradient segments of two colors.
+     * Smooth sinusoidal blending between colors instead of hard-edged segments.
+     * Creates a polished, flowing chase effect.
      */
     private void setChase(int[] color1, int[] color2) {
         double currentTime = Timer.getFPGATimestamp();
         
         int stripStart = Constants.LEDs.STRIP_START;
         int stripCount = Constants.LEDs.STRIP_COUNT;
-        int segmentSize = 6;  // Size of each color segment
-        int chasePos = (int)((currentTime / 1) % (segmentSize * 2));
+        double chaseOffset = currentTime * 1.5;
         
         clearBuffer();
-        setOnboardColor(color1);  // Onboard LEDs match the primary color
+        setOnboardColor(color1);
         
         for (int i = 0; i < stripCount; i++) {
-            boolean isColor1 = ((i + chasePos) % (segmentSize * 2)) < segmentSize;
-            setLED(stripStart + i, isColor1 ? color1 : color2);
+            double pos = (double) i / stripCount;
+            // Smooth sinusoidal blend between colors (6 segments worth)
+            double blend = (Math.sin((pos * 6.0 - chaseOffset) * Math.PI) + 1.0) / 2.0;
+            int[] pixelColor = lerpColor(color1, color2, blend);
+            setLED(stripStart + i, scaleColor(pixelColor, masterBrightness));
         }
         
         pushBuffer();
     }
     
     /**
-     * Team color chase pattern - dual comets flowing in opposite directions.
-     * Orange comet goes one way, blue comet goes the other.
-     * Looks polished and shows off team identity.
+     * Team color flow - liquid metal gradient with twin comets.
+     * A smooth continuous gradient of orange→gold→blue→deep blue flows along the
+     * strip like molten metal. Two bright comet highlights (one orange, one blue)
+     * travel in opposite directions, leaving warm/cool trails through the gradient.
+     * More dynamic than the waiting aurora but still team-branded.
      */
     private void setTeamColorFlow() {
         double currentTime = Timer.getFPGATimestamp();
         
         int stripStart = Constants.LEDs.STRIP_START;
         int stripCount = Constants.LEDs.STRIP_COUNT;
-        int trailLength = 15;
+        
+        int[] orange = Constants.LEDs.TEAM_SAFETY_ORANGE;
+        int[] gold = Constants.LEDs.TEAM_GOLD;
+        int[] blue = Constants.LEDs.TEAM_BLUE;
+        int[] deepBlue = Constants.LEDs.TEAM_BLUE_DEEP;
         
         clearBuffer();
         
-        // Onboard: split orange/blue
-        int onboard = Constants.LEDs.ONBOARD_LED_COUNT;
-        for (int i = 0; i < onboard && i < ledCount; i++) {
-            setLED(i, (i < onboard / 2) ? Constants.LEDs.TEAM_SAFETY_ORANGE : Constants.LEDs.TEAM_BLUE);
+        // Onboard: slow color morph orange→blue cycle
+        double onboardPhase = (currentTime % 6.0) / 6.0;
+        double onboardBlend = (Math.sin(onboardPhase * Math.PI * 2.0) + 1.0) / 2.0;
+        int[] onboardColor = lerpColor(orange, blue, onboardBlend);
+        setOnboardColor(onboardColor);
+        
+        // === Base gradient: smoothly flowing orange↔blue ===
+        double flowSpeed = currentTime * 0.2;
+        
+        for (int i = 0; i < stripCount; i++) {
+            double pos = (double) i / stripCount;
+            
+            // Create a 4-stop gradient: orange → gold → blue → deepBlue → orange (wrapping)
+            double gradPos = (pos + flowSpeed) % 1.0;
+            int[] baseColor;
+            if (gradPos < 0.25) {
+                baseColor = lerpColor(orange, gold, gradPos / 0.25);
+            } else if (gradPos < 0.5) {
+                baseColor = lerpColor(gold, blue, (gradPos - 0.25) / 0.25);
+            } else if (gradPos < 0.75) {
+                baseColor = lerpColor(blue, deepBlue, (gradPos - 0.5) / 0.25);
+            } else {
+                baseColor = lerpColor(deepBlue, orange, (gradPos - 0.75) / 0.25);
+            }
+            
+            // Subtle brightness variation for depth
+            double bright = 0.5 + 0.5 * noise1D(pos * 6.0 + currentTime * 0.8);
+            setLED(stripStart + i, scaleColor(baseColor, bright * masterBrightness));
         }
         
-        // Orange comet going forward
-        double phaseA = (currentTime % 5.0) / 5.0;
+        // === Orange highlight comet (forward) ===
+        int trailLength = 14;
+        double phaseA = (currentTime % 4.0) / 4.0;
         int headA = (int)(phaseA * stripCount) % stripCount;
-        int[] orange = Constants.LEDs.TEAM_SAFETY_ORANGE;
         
         for (int t = 0; t < trailLength; t++) {
             int idx = ((headA - t) % stripCount + stripCount) % stripCount;
             double fade = 1.0 - ((double) t / trailLength);
             fade = fade * fade;
-            ledBuffer[stripStart + idx][0] = Math.max(ledBuffer[stripStart + idx][0], (int)(orange[0] * fade * masterBrightness));
-            ledBuffer[stripStart + idx][1] = Math.max(ledBuffer[stripStart + idx][1], (int)(orange[1] * fade * masterBrightness));
-            ledBuffer[stripStart + idx][2] = Math.max(ledBuffer[stripStart + idx][2], (int)(orange[2] * fade * masterBrightness));
+            int[] trailColor = (t == 0) ? Constants.LEDs.WARM_WHITE : scaleColor(orange, fade);
+            blendAdditive(stripStart + idx, trailColor, (t == 0) ? 1.0 : fade);
         }
         
-        // Blue comet going backward (opposite direction)
-        double phaseB = (1.0 - (currentTime % 5.0) / 5.0) % 1.0;
+        // === Blue highlight comet (reverse) ===
+        double phaseB = (1.0 - (currentTime % 4.0) / 4.0) % 1.0;
         int headB = (int)(phaseB * stripCount) % stripCount;
-        int[] blue = Constants.LEDs.TEAM_BLUE;
         
         for (int t = 0; t < trailLength; t++) {
             int idx = ((headB + t) % stripCount + stripCount) % stripCount;
             double fade = 1.0 - ((double) t / trailLength);
             fade = fade * fade;
-            ledBuffer[stripStart + idx][0] = Math.max(ledBuffer[stripStart + idx][0], (int)(blue[0] * fade * masterBrightness));
-            ledBuffer[stripStart + idx][1] = Math.max(ledBuffer[stripStart + idx][1], (int)(blue[1] * fade * masterBrightness));
-            ledBuffer[stripStart + idx][2] = Math.max(ledBuffer[stripStart + idx][2], (int)(blue[2] * fade * masterBrightness));
+            int[] trailColor = (t == 0) ? Constants.LEDs.COOL_WHITE : scaleColor(blue, fade);
+            blendAdditive(stripStart + idx, trailColor, (t == 0) ? 1.0 : fade);
         }
         
         pushBuffer();
     }
     
     /**
-     * Victory celebration - sparkling fireworks with team colors.
-     * Random twinkles of orange, blue, and white pop and fade across the strip
-     * like fireworks exploding. Onboard LEDs flash white rapidly.
+     * Victory celebration - golden firework bursts with shimmer rain.
+     * Periodic "explosions" of bright gold/white expand from random positions,
+     * then cascade down as fading sparkle trails in team colors. Between bursts,
+     * a gentle golden shimmer rain fills the strip. The overall effect is
+     * celebratory and premium-feeling, like confetti and fireworks combined.
      */
     private void setVictoryCelebration() {
         double currentTime = Timer.getFPGATimestamp();
@@ -632,46 +749,72 @@ public class LEDSubsystem extends SubsystemBase {
         int stripStart = Constants.LEDs.STRIP_START;
         int stripCount = Constants.LEDs.STRIP_COUNT;
         
+        int[] gold = Constants.LEDs.VICTORY_GOLD;
         int[] orange = Constants.LEDs.TEAM_SAFETY_ORANGE;
         int[] blue = Constants.LEDs.TEAM_BLUE;
         int[] white = Constants.LEDs.WHITE;
         
         clearBuffer();
         
-        // Onboard LEDs: rapid white/orange/blue cycle
-        int onboardCycle = ((int)(currentTime * 12)) % 3;
-        int[] onboardColor = (onboardCycle == 0) ? white : (onboardCycle == 1) ? orange : blue;
+        // Onboard LEDs: rapid gold/white/blue cycle
+        int onboardCycle = ((int)(currentTime * 8)) % 3;
+        int[] onboardColor = (onboardCycle == 0) ? gold : (onboardCycle == 1) ? white : blue;
         setOnboardColor(onboardColor);
         
-        // Sparkling fireworks on strip
-        // Use time-seeded pseudo-random to create consistent sparkle positions
-        // that change over time
+        // === Base layer: gentle golden shimmer rain ===
         for (int i = 0; i < stripCount; i++) {
-            // Each LED has its own sparkle timing based on position
-            // Use golden ratio offset to prevent visible patterns
-            double ledSeed = (i * 0.618033988749895 + currentTime * 3.0) % 1.0;
-            double sparkleChance = Math.sin(ledSeed * Math.PI * 2.0 + currentTime * 7.0 + i * 2.3);
+            // Each LED twinkles independently using layered sine waves
+            double twinkle = noise1D(i * 0.7 + currentTime * 2.5);
+            twinkle = twinkle * twinkle;  // Sharper peaks = more sparkle-like
             
-            if (sparkleChance > 0.7) {
-                // This LED is sparkling! Pick a color based on position
-                double colorSeed = Math.sin(i * 1.7 + currentTime * 0.5);
-                int[] sparkColor;
-                double intensity = (sparkleChance - 0.7) / 0.3;  // 0 to 1
-                intensity = intensity * intensity;  // More dramatic pop
-                
-                if (colorSeed > 0.3) {
-                    sparkColor = orange;
-                } else if (colorSeed > -0.3) {
-                    sparkColor = white;
-                } else {
-                    sparkColor = blue;
-                }
-                
-                ledBuffer[stripStart + i][0] = (int)(sparkColor[0] * intensity * masterBrightness);
-                ledBuffer[stripStart + i][1] = (int)(sparkColor[1] * intensity * masterBrightness);
-                ledBuffer[stripStart + i][2] = (int)(sparkColor[2] * intensity * masterBrightness);
+            // Cycle through gold/orange/blue based on position
+            double colorCycle = noise1D(i * 0.3 + currentTime * 0.4);
+            int[] baseColor;
+            if (colorCycle > 0.6) {
+                baseColor = gold;
+            } else if (colorCycle > 0.3) {
+                baseColor = orange;
+            } else {
+                baseColor = blue;
             }
-            // LEDs not sparkling stay dark for contrast
+            
+            double brightness = twinkle * 0.4;  // Gentle base layer
+            setLED(stripStart + i, scaleColor(baseColor, brightness * masterBrightness));
+        }
+        
+        // === Burst layer: periodic firework explosions ===
+        // 3 concurrent bursts with staggered timing
+        for (int burst = 0; burst < 3; burst++) {
+            double burstCycle = 1.8;  // Each burst repeats every 1.8 seconds
+            double burstTime = (currentTime + burst * 0.6) % burstCycle;
+            
+            // Burst center: pseudo-random position seeded by burst cycle count
+            long burstSeed = (long)((currentTime + burst * 0.6) / burstCycle);
+            int burstCenter = (int)(((burstSeed * 31 + burst * 17) % stripCount + stripCount) % stripCount);
+            
+            if (burstTime < 0.8) {
+                // Active burst: expanding ring of light
+                double burstProgress = burstTime / 0.8;
+                int burstRadius = (int)(burstProgress * stripCount / 3);
+                double burstBright = 1.0 - burstProgress;  // Fades as it expands
+                burstBright = burstBright * burstBright;
+                
+                // Pick burst color based on seed
+                int[] burstColor = ((burstSeed + burst) % 3 == 0) ? gold 
+                                 : ((burstSeed + burst) % 3 == 1) ? orange : white;
+                
+                for (int r = -burstRadius; r <= burstRadius; r++) {
+                    int idx = ((burstCenter + r) % stripCount + stripCount) % stripCount;
+                    double distFade = 1.0 - (double)Math.abs(r) / (burstRadius + 1);
+                    distFade = distFade * distFade;
+                    double pixelBright = burstBright * distFade;
+                    
+                    // Leading edge is white-hot
+                    int[] pixelColor = (Math.abs(r) >= burstRadius - 1) 
+                                     ? lerpColor(burstColor, white, 0.7) : burstColor;
+                    blendAdditive(stripStart + idx, pixelColor, pixelBright);
+                }
+            }
         }
         
         pushBuffer();
@@ -683,92 +826,74 @@ public class LEDSubsystem extends SubsystemBase {
     // ===========================================
     
     /**
-     * E-STOP PATTERN - Dramatic red shockwaves pulsing from center outward.
-     * Two red rings expand from the center simultaneously, with a deep red
-     * background and bright white flash at the edges. Onboard LEDs solid red.
-     * Unmistakable emergency stop indicator.
+     * E-STOP PATTERN - Aggressive plasma fire with unstable flickering.
+     * The strip looks like it's on fire — hot red/orange plasma roils
+     * across the LEDs with random intensity spikes and dark patches.
+     * A fast strobe overlay makes it impossible to ignore.
+     * Onboard LEDs strobe bright red for maximum alarm visibility.
      */
     private void setEStopPattern() {
         double currentTime = Timer.getFPGATimestamp();
         
         int stripStart = Constants.LEDs.STRIP_START;
         int stripCount = Constants.LEDs.STRIP_COUNT;
-        int center = stripCount / 2;
         
         clearBuffer();
         
-        // Onboard LEDs: fast red strobe for urgency
-        boolean onboardOn = ((int)(currentTime * 8) % 2) == 0;
+        // Onboard LEDs: aggressive red strobe
+        boolean onboardOn = ((int)(currentTime * 10) % 2) == 0;
         setOnboardColor(onboardOn ? Constants.LEDs.ESTOP_COLOR : Constants.LEDs.OFF);
         
-        // Deep red base on entire strip
-        int[] deepRed = {30, 0, 0};
+        // Global strobe overlay: whole strip flashes dark periodically
+        double strobePhase = (currentTime * 4.0) % 1.0;
+        double strobeMod = (strobePhase < 0.15) ? 0.15 : 1.0;  // Brief dark flash
+        
+        // Plasma fire effect: each LED has independent turbulent brightness
         for (int i = 0; i < stripCount; i++) {
-            setLED(stripStart + i, deepRed);
-        }
-        
-        // Two shockwave rings expanding from center (1-second cycle)
-        double ringPhase = (currentTime * 1.5) % 1.0;  // 1.5 rings per second
-        int ringPos = (int)(ringPhase * center);
-        
-        // Second ring offset by half a cycle
-        double ring2Phase = (currentTime * 1.5 + 0.5) % 1.0;
-        int ring2Pos = (int)(ring2Phase * center);
-        
-        // Draw ring 1 (bright red with white leading edge)
-        for (int i = 0; i < 6; i++) {
-            int pos = ringPos - i;
-            if (pos >= 0 && pos < center) {
-                int brightness = 255 - (i * 40);
-                int[] trailColor;
-                if (i == 0) {
-                    trailColor = new int[]{255, 80, 40};  // Hot orange-red leading edge
-                } else {
-                    trailColor = new int[]{brightness, 0, 0};
-                }
-                setLED(stripStart + center - pos, trailColor);
-                setLED(stripStart + center + pos, trailColor);
+            // Multiple layered noise sources for turbulent fire
+            double fire1 = Math.sin(currentTime * 8.0 + i * 0.8) * 0.5 + 0.5;
+            double fire2 = Math.sin(currentTime * 13.0 + i * 1.3 + 2.0) * 0.5 + 0.5;
+            double fire3 = Math.sin(currentTime * 21.0 + i * 0.4 + 5.0) * 0.5 + 0.5;
+            
+            // Combine for chaotic fire brightness
+            double fireBright = fire1 * 0.4 + fire2 * 0.35 + fire3 * 0.25;
+            fireBright = fireBright * fireBright;  // Square for more contrast
+            
+            // Occasional bright flare-ups (unstable power feel)
+            double flare = Math.sin(currentTime * 31.0 + i * 3.7);
+            if (flare > 0.92) {
+                fireBright = 1.0;  // Full bright spike!
             }
-        }
-        
-        // Draw ring 2 
-        for (int i = 0; i < 6; i++) {
-            int pos = ring2Pos - i;
-            if (pos >= 0 && pos < center) {
-                int brightness = 255 - (i * 40);
-                int[] trailColor;
-                if (i == 0) {
-                    trailColor = new int[]{255, 80, 40};
-                } else {
-                    trailColor = new int[]{brightness, 0, 0};
-                }
-                // Only set if brighter than existing
-                int leftIdx = stripStart + center - pos;
-                int rightIdx = stripStart + center + pos;
-                if (leftIdx >= stripStart && ledBuffer[leftIdx][0] < brightness) {
-                    setLED(leftIdx, trailColor);
-                }
-                if (rightIdx < stripStart + stripCount && ledBuffer[rightIdx][0] < brightness) {
-                    setLED(rightIdx, trailColor);
-                }
+            
+            fireBright = Math.max(0.08, fireBright) * strobeMod;
+            
+            // Color: blend between deep red, hot orange-red, and white-hot
+            int[] color;
+            if (fireBright > 0.8) {
+                // White-hot core
+                color = lerpColor(Constants.LEDs.ESTOP_CORE, Constants.LEDs.WARM_WHITE, 
+                                  (fireBright - 0.8) / 0.2);
+            } else if (fireBright > 0.4) {
+                // Orange-red flame
+                color = lerpColor(Constants.LEDs.ESTOP_COLOR, Constants.LEDs.ESTOP_CORE, 
+                                  (fireBright - 0.4) / 0.4);
+            } else {
+                // Deep red embers
+                color = scaleColor(Constants.LEDs.ESTOP_COLOR, fireBright / 0.4 * 0.6 + 0.1);
             }
+            
+            setLED(stripStart + i, scaleColor(color, masterBrightness));
         }
-        
-        // Bright pulsing center
-        double centerPulse = (Math.sin(currentTime * Math.PI * 6) + 1) / 2;
-        int[] centerColor = {255, (int)(40 * centerPulse), (int)(20 * centerPulse)};
-        setLED(stripStart + center - 1, centerColor);
-        setLED(stripStart + center, centerColor);
         
         pushBuffer();
     }
     
     /**
-     * TARGETING PATTERN - "Edges closing in" with pulsing center crosshair.
-     * Yellow brackets sweep inward from both ends like a targeting reticle.
-     * A pulsing dim yellow glow at the center acts as the crosshair target.
-     * When brackets meet, the whole strip flashes bright to indicate lock-on.
-     * Provides immediate visual feedback that the turret is actively tracking.
+     * TARGETING PATTERN - Radar sweep with tightening lock-on glow.
+     * A bright amber beam sweeps back and forth across the strip, leaving a
+     * fading phosphor trail like a radar display. As it sweeps repeatedly,
+     * a warm glow builds at the center indicating "locking on". When the
+     * brackets meet, the strip flashes bright to show LOCKED.
      */
     private void setTargetingPattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -776,7 +901,7 @@ public class LEDSubsystem extends SubsystemBase {
         int stripStart = Constants.LEDs.STRIP_START;
         int stripCount = Constants.LEDs.STRIP_COUNT;
         
-        // Update targeting animation at 20Hz
+        // Update sweep position at 20Hz
         if (currentTime - lastTargetingUpdate > 0.05) {
             lastTargetingUpdate = currentTime;
             
@@ -797,118 +922,164 @@ public class LEDSubsystem extends SubsystemBase {
         
         clearBuffer();
         
-        // Onboard LEDs: pulsing yellow
+        // Onboard LEDs: pulsing amber
         setOnboardBreathing(Constants.LEDs.AIMING_COLOR);
+        
+        int[] amber = Constants.LEDs.AIMING_COLOR;
+        int[] highlight = Constants.LEDs.AIMING_HIGHLIGHT;
         
         // When brackets meet in center, flash bright to show "LOCKED"
         if (targetingPosition >= center - 2) {
+            // Bright lock flash — all amber with white-hot center
             for (int i = 0; i < stripCount; i++) {
-                setLED(stripStart + i, Constants.LEDs.AIMING_COLOR);
+                double distFromCenter = Math.abs(i - center) / (double) center;
+                int[] lockColor = lerpColor(highlight, amber, distFromCenter);
+                setLED(stripStart + i, scaleColor(lockColor, masterBrightness));
             }
         } else {
-            // Pulsing crosshair glow at center (always visible as a target)
-            double centerPulse = (Math.sin(currentTime * Math.PI * 4) + 1) / 2;
-            int[] centerGlow = {(int)(100 * centerPulse), (int)(100 * centerPulse), 0};
-            for (int c = -2; c <= 2; c++) {
+            // === Dim base glow (radar screen phosphor) ===
+            for (int i = 0; i < stripCount; i++) {
+                setLED(stripStart + i, scaleColor(amber, 0.04 * masterBrightness));
+            }
+            
+            // === Center crosshair glow — builds intensity as brackets close in ===
+            double lockProgress = (double) targetingPosition / center;  // 0→1 as brackets close
+            double centerGlow = lockProgress * lockProgress * 0.6;  // Quadratic build
+            double centerPulse = (Math.sin(currentTime * Math.PI * 5) + 1) / 2;
+            centerGlow *= (0.7 + 0.3 * centerPulse);
+            
+            for (int c = -3; c <= 3; c++) {
                 int idx = center + c;
                 if (idx >= 0 && idx < stripCount) {
-                    double falloff = 1.0 - Math.abs(c) * 0.3;
-                    int[] glow = {(int)(centerGlow[0] * falloff), (int)(centerGlow[1] * falloff), 0};
-                    setLED(stripStart + idx, glow);
+                    double falloff = 1.0 - Math.abs(c) / 4.0;
+                    blendAdditive(stripStart + idx, amber, centerGlow * falloff);
                 }
             }
             
-            // Left bracket with bright head and fading trail
-            for (int i = 0; i <= targetingPosition && i < stripCount; i++) {
-                int distFromHead = targetingPosition - i;
-                double fade = Math.max(0.15, 1.0 - distFromHead * 0.08);
-                int[] bracketColor = {
-                    (int)(Constants.LEDs.AIMING_COLOR[0] * fade),
-                    (int)(Constants.LEDs.AIMING_COLOR[1] * fade),
-                    0
-                };
-                setLED(stripStart + i, bracketColor);
+            // === Left sweep beam: bright head + phosphor trail ===
+            int sweepWidth = 3;
+            int trailLen = Math.max(4, targetingPosition / 2);
+            
+            for (int t = 0; t < trailLen + sweepWidth; t++) {
+                int pos = targetingPosition - t;
+                if (pos >= 0 && pos < stripCount) {
+                    double fade;
+                    if (t < sweepWidth) {
+                        // Bright sweep head
+                        fade = 1.0;
+                        blendAdditive(stripStart + pos, highlight, fade * masterBrightness);
+                    } else {
+                        // Phosphor trail: slow exponential decay
+                        fade = Math.pow(0.82, t - sweepWidth);
+                        blendAdditive(stripStart + pos, amber, fade * 0.7 * masterBrightness);
+                    }
+                }
             }
             
-            // Right bracket with bright head and fading trail
-            for (int i = stripCount - 1; i >= stripCount - 1 - targetingPosition && i >= 0; i--) {
-                int distFromHead = i - (stripCount - 1 - targetingPosition);
-                double fade = Math.max(0.15, 1.0 - distFromHead * 0.08);
-                int[] bracketColor = {
-                    (int)(Constants.LEDs.AIMING_COLOR[0] * fade),
-                    (int)(Constants.LEDs.AIMING_COLOR[1] * fade),
-                    0
-                };
-                setLED(stripStart + i, bracketColor);
+            // === Right sweep beam (mirror) ===
+            int rightPos = stripCount - 1 - targetingPosition;
+            for (int t = 0; t < trailLen + sweepWidth; t++) {
+                int pos = rightPos + t;
+                if (pos >= 0 && pos < stripCount) {
+                    double fade;
+                    if (t < sweepWidth) {
+                        fade = 1.0;
+                        blendAdditive(stripStart + pos, highlight, fade * masterBrightness);
+                    } else {
+                        fade = Math.pow(0.82, t - sweepWidth);
+                        blendAdditive(stripStart + pos, amber, fade * 0.7 * masterBrightness);
+                    }
+                }
             }
         }
         pushBuffer();
     }
     
     /**
-     * POWER FILL PATTERN - Dramatic charging progress bar.
-     * Orange fills from left to right with a bright white leading edge
-     * and an energy shimmer through the filled section.
-     * Onboard LEDs pulse faster as it fills up, building visual tension.
-     * Communicates that the shooter is spinning up and approaching readiness.
+     * POWER FILL PATTERN - Plasma energy charging from edges to center.
+     * Energy streams flow inward from both strip edges, building intensity
+     * as they converge. The filled portion shimmers with electric crackling
+     * effects. A bright white-hot leading edge shows the charge front.
+     * Onboard LEDs pulse faster as charge builds, creating visual tension.
      */
     private void setPowerFillPattern() {
         double currentTime = Timer.getFPGATimestamp();
         
         int stripStart = Constants.LEDs.STRIP_START;
         int stripCount = Constants.LEDs.STRIP_COUNT;
+        int center = stripCount / 2;
         
         // Increment fill tracking at 10Hz
         if (currentTime - lastFillUpdate > 0.1) {
             lastFillUpdate = currentTime;
             fillLevel++;
-            if (fillLevel > stripCount) {
+            if (fillLevel > center) {
                 fillLevel = 0;
             }
         }
         
         clearBuffer();
         
+        int[] chargeColor = Constants.LEDs.SPOOLING_COLOR;
+        int[] highlight = Constants.LEDs.SPOOLING_HIGHLIGHT;
+        
         // Onboard LEDs: pulse speed increases with fill level
-        double fillRatio = (double) fillLevel / stripCount;
-        double pulseSpeed = 2.0 + fillRatio * 8.0;  // 2Hz to 10Hz as it charges
+        double fillRatio = (double) fillLevel / center;
+        double pulseSpeed = 2.0 + fillRatio * 8.0;
         double onboardPulse = (Math.sin(currentTime * Math.PI * pulseSpeed) + 1) / 2;
-        int[] onboardColor = {
-            (int)(Constants.LEDs.SPOOLING_COLOR[0] * (0.3 + 0.7 * onboardPulse) * masterBrightness),
-            (int)(Constants.LEDs.SPOOLING_COLOR[1] * (0.3 + 0.7 * onboardPulse) * masterBrightness),
-            (int)(Constants.LEDs.SPOOLING_COLOR[2] * (0.3 + 0.7 * onboardPulse) * masterBrightness)
-        };
+        double onboardBright = (0.2 + 0.8 * onboardPulse) * masterBrightness;
         int onboard = Constants.LEDs.ONBOARD_LED_COUNT;
         for (int i = 0; i < onboard && i < ledCount; i++) {
-            ledBuffer[i][0] = onboardColor[0];
-            ledBuffer[i][1] = onboardColor[1];
-            ledBuffer[i][2] = onboardColor[2];
+            ledBuffer[i][0] = (int)(chargeColor[0] * onboardBright);
+            ledBuffer[i][1] = (int)(chargeColor[1] * onboardBright);
+            ledBuffer[i][2] = (int)(chargeColor[2] * onboardBright);
         }
         
-        // Unfilled portion (very dim orange)
-        int[] dimOrange = {20, 8, 0};
-        for (int i = fillLevel + 1; i < stripCount; i++) {
-            setLED(stripStart + i, dimOrange);
+        // === Charging from both edges toward center ===
+        for (int i = 0; i < stripCount; i++) {
+            int distFromNearestEdge = Math.min(i, stripCount - 1 - i);
+            
+            // "Filled" = within fillLevel distance from either edge
+            boolean isFilled = distFromNearestEdge < fillLevel;
+            
+            if (isFilled) {
+                // Filled portion: shimmering energy with electric crackle
+                double shimmer = 0.6 + 0.4 * noise1D(i * 0.5 + currentTime * 8.0);
+                
+                // Random electric crackle: brief bright flashes
+                double crackle = Math.sin(currentTime * 25.0 + i * 3.7);
+                if (crackle > 0.93) {
+                    shimmer = 1.0;
+                }
+                
+                // Intensity builds toward center (inner filled areas are brighter)
+                double depthFade = 0.5 + 0.5 * ((double)distFromNearestEdge / (fillLevel + 1));
+                
+                int[] pixelColor = lerpColor(chargeColor, highlight, shimmer * 0.3);
+                setLED(stripStart + i, scaleColor(pixelColor, shimmer * depthFade * masterBrightness));
+                
+                // Leading edge (at fillLevel distance from edge): white-hot
+                if (distFromNearestEdge >= fillLevel - 2 && distFromNearestEdge <= fillLevel) {
+                    double edgeBright = 1.0 - (double)(fillLevel - distFromNearestEdge) * 0.3;
+                    blendAdditive(stripStart + i, highlight, edgeBright * masterBrightness);
+                }
+            } else {
+                // Unfilled: very dim glow that hints at what's coming
+                double dimGlow = 0.03 + 0.02 * noise1D(i * 0.3 + currentTime * 1.0);
+                setLED(stripStart + i, scaleColor(chargeColor, dimGlow * masterBrightness));
+            }
         }
         
-        // Filled portion with energy shimmer
-        for (int i = 0; i < fillLevel && i < stripCount; i++) {
-            double shimmer = Math.sin(currentTime * 12.0 + i * 0.5) * 0.15 + 0.85;
-            int[] shimmerColor = {
-                (int)(Constants.LEDs.SPOOLING_COLOR[0] * shimmer),
-                (int)(Constants.LEDs.SPOOLING_COLOR[1] * shimmer),
-                (int)(Constants.LEDs.SPOOLING_COLOR[2] * shimmer)
-            };
-            setLED(stripStart + i, shimmerColor);
-        }
-        
-        // Bright white-hot leading edge (3 LEDs)
-        for (int e = 0; e < 3; e++) {
-            int edgeIdx = fillLevel - e;
-            if (edgeIdx >= 0 && edgeIdx < stripCount) {
-                double edgeFade = 1.0 - e * 0.3;
-                int[] edgeColor = {(int)(255 * edgeFade), (int)(200 * edgeFade), (int)(80 * edgeFade)};
-                setLED(stripStart + edgeIdx, edgeColor);
+        // Center convergence: bright pulse when nearly full
+        if (fillRatio > 0.8) {
+            double convergeBright = (fillRatio - 0.8) / 0.2;
+            convergeBright *= (Math.sin(currentTime * Math.PI * 12) + 1) / 2;
+            for (int c = -2; c <= 2; c++) {
+                int idx = center + c;
+                if (idx >= 0 && idx < stripCount) {
+                    blendAdditive(stripStart + idx, Constants.LEDs.WARM_WHITE, 
+                                  convergeBright * (1.0 - Math.abs(c) * 0.3) * masterBrightness);
+                }
             }
         }
         
@@ -916,11 +1087,11 @@ public class LEDSubsystem extends SubsystemBase {
     }
     
     /**
-     * INTAKE FLOW PATTERN - Dual streams being sucked toward center.
-     * Two bright comets with long trails chase from both edges to center.
-     * When they reach center, a bright flash pulses to indicate capture.
-     * Onboard LEDs breathe in sync.
-     * Communicates that a game piece is being collected.
+     * INTAKE FLOW PATTERN - Smooth particle streams converging to center.
+     * Multiple soft pink-magenta particles flow from both edges toward center,
+     * with gentle speed variation that makes them look organic (not mechanical).
+     * When particles reach center they produce a brief bright convergence flash.
+     * The effect looks like energy being sucked inward — perfect for intake.
      */
     private void setIntakeFlowPattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -929,56 +1100,75 @@ public class LEDSubsystem extends SubsystemBase {
         int stripCount = Constants.LEDs.STRIP_COUNT;
         int center = stripCount / 2;
         
-        // Chase position moving inward (0.6 second cycle)
-        double flowPhase = (currentTime % 0.6) / 0.6;
-        int chasePos = (int)(flowPhase * center);
+        int[] color = Constants.LEDs.INTAKING_COLOR;
+        int[] highlight = Constants.LEDs.INTAKING_HIGHLIGHT;
         
         clearBuffer();
-        setOnboardBreathing(Constants.LEDs.INTAKING_COLOR);
+        setOnboardBreathing(color);
         
-        int[] color = Constants.LEDs.INTAKING_COLOR;
-        int trailLength = 8;
+        // Dim base glow so strip isn't dead black
+        for (int i = 0; i < stripCount; i++) {
+            setLED(stripStart + i, scaleColor(color, 0.04 * masterBrightness));
+        }
         
-        // Left comet flowing right (toward center)
-        for (int i = 0; i < trailLength; i++) {
-            int pos = chasePos - i;
-            if (pos >= 0 && pos < center) {
-                double fade = 1.0 - ((double) i / trailLength);
-                fade = fade * fade;
-                int[] trailColor = {(int)(color[0] * fade), (int)(color[1] * fade), (int)(color[2] * fade)};
-                setLED(stripStart + pos, trailColor);
+        // === Multiple particle streams from each side ===
+        int numParticles = 4;  // Per side
+        double cycleDuration = 0.8;  // Seconds per full transit
+        
+        for (int p = 0; p < numParticles; p++) {
+            double offset = (double) p / numParticles;
+            double particlePhase = ((currentTime / cycleDuration) + offset) % 1.0;
+            
+            // Organic speed: particles accelerate as they approach center
+            double eased = particlePhase * particlePhase;  // Ease-in (starts slow, speeds up)
+            
+            int leftPos = (int)(eased * center);
+            int rightPos = stripCount - 1 - leftPos;
+            
+            int trailLen = 6;
+            
+            // Left particle flowing right toward center
+            for (int t = 0; t < trailLen; t++) {
+                int idx = leftPos - t;
+                if (idx >= 0 && idx < center) {
+                    double fade = 1.0 - ((double) t / trailLen);
+                    fade = fade * fade;
+                    int[] trailColor = (t == 0) ? highlight : color;
+                    blendAdditive(stripStart + idx, trailColor, fade * 0.9);
+                }
+            }
+            
+            // Right particle flowing left toward center
+            for (int t = 0; t < trailLen; t++) {
+                int idx = rightPos + t;
+                if (idx >= center && idx < stripCount) {
+                    double fade = 1.0 - ((double) t / trailLen);
+                    fade = fade * fade;
+                    int[] trailColor = (t == 0) ? highlight : color;
+                    blendAdditive(stripStart + idx, trailColor, fade * 0.9);
+                }
             }
         }
-        // White leading edge
-        if (chasePos >= 0 && chasePos < center) {
-            setLED(stripStart + chasePos, new int[]{255, 200, 220});
-        }
         
-        // Right comet flowing left (toward center)
-        int rightChase = stripCount - 1 - chasePos;
-        for (int i = 0; i < trailLength; i++) {
-            int pos = rightChase + i;
-            if (pos >= center && pos < stripCount) {
-                double fade = 1.0 - ((double) i / trailLength);
-                fade = fade * fade;
-                int[] trailColor = {(int)(color[0] * fade), (int)(color[1] * fade), (int)(color[2] * fade)};
-                setLED(stripStart + pos, trailColor);
+        // === Center convergence glow ===
+        // Continuous soft pulse at center from all the converging particles
+        double convergePulse = 0.0;
+        for (int p = 0; p < numParticles; p++) {
+            double offset = (double) p / numParticles;
+            double particlePhase = ((currentTime / cycleDuration) + offset) % 1.0;
+            // Bright flash when particle reaches center (phase near 1.0)
+            if (particlePhase > 0.85) {
+                double flashIntensity = (particlePhase - 0.85) / 0.15;
+                flashIntensity = flashIntensity * flashIntensity;
+                convergePulse = Math.max(convergePulse, flashIntensity);
             }
         }
-        // White leading edge
-        if (rightChase >= center && rightChase < stripCount) {
-            setLED(stripStart + rightChase, new int[]{255, 200, 220});
-        }
         
-        // Center convergence glow: intensity increases as comets approach center
-        double nearCenter = 1.0 - (double) Math.abs(chasePos - center) / center;
-        nearCenter = nearCenter * nearCenter * nearCenter;  // Cubic for dramatic pop
-        int[] centerGlow = {(int)(color[0] * nearCenter), (int)(color[1] * nearCenter), (int)(color[2] * nearCenter)};
-        for (int c = -2; c <= 2; c++) {
+        for (int c = -3; c <= 3; c++) {
             int idx = center + c;
             if (idx >= 0 && idx < stripCount) {
-                double spread = 1.0 - Math.abs(c) * 0.25;
-                setLED(stripStart + idx, new int[]{(int)(centerGlow[0] * spread), (int)(centerGlow[1] * spread), (int)(centerGlow[2] * spread)});
+                double spread = 1.0 - Math.abs(c) / 4.0;
+                blendAdditive(stripStart + idx, highlight, convergePulse * spread * 0.8);
             }
         }
         
@@ -986,11 +1176,11 @@ public class LEDSubsystem extends SubsystemBase {
     }
     
     /**
-     * CLIMB RISING PATTERN - Multiple purple waves rising upward.
-     * Three evenly-spaced comets rise up the strip simultaneously
-     * with trails that make it look like ascending energy.
-     * Onboard LEDs pulse purple.
-     * Communicates that the climb mechanism is actively ascending.
+     * CLIMB RISING PATTERN - Purple fire columns rising upward.
+     * A fire-like effect where violet flames lick upward along the strip.
+     * Multiple flame "tongues" at different heights with organic flickering
+     * and lavender-white tips. The base is deep purple, tips are bright lavender.
+     * Conveys upward motion and effort — perfect for climbing.
      */
     private void setClimbRisingPattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -998,36 +1188,51 @@ public class LEDSubsystem extends SubsystemBase {
         int stripStart = Constants.LEDs.STRIP_START;
         int stripCount = Constants.LEDs.STRIP_COUNT;
         
+        int[] base = Constants.LEDs.CLIMBING_COLOR;
+        int[] tip = Constants.LEDs.CLIMBING_HIGHLIGHT;
+        
         clearBuffer();
-        setOnboardBreathing(Constants.LEDs.CLIMBING_COLOR);
+        setOnboardBreathing(base);
         
-        int[] color = Constants.LEDs.CLIMBING_COLOR;
-        int trailLength = 10;
+        // === Fire simulation: each LED's brightness based on "flame height" ===
+        for (int i = 0; i < stripCount; i++) {
+            double pos = (double) i / stripCount;
+            
+            // Multiple flame tongues at different speeds (rising upward = increasing index)
+            double flame1 = Math.sin((pos * 3.0 - currentTime * 1.5) * Math.PI * 2.0);
+            double flame2 = Math.sin((pos * 5.0 - currentTime * 2.0 + 1.0) * Math.PI * 2.0);
+            double flame3 = Math.sin((pos * 2.0 - currentTime * 1.0 + 3.0) * Math.PI * 2.0);
+            
+            // Combine and shape: positive values = flame visible
+            double flameIntensity = flame1 * 0.4 + flame2 * 0.35 + flame3 * 0.25;
+            flameIntensity = (flameIntensity + 1.0) / 2.0;  // [0, 1]
+            
+            // Gradient: base is always somewhat lit, flames add brightness
+            double baseBright = 0.15 + 0.15 * noise1D(i * 0.4 + currentTime * 3.0);
+            double totalBright = Math.min(1.0, baseBright + flameIntensity * 0.7);
+            
+            // Color: blend from deep purple (dim) to lavender-white (bright flames)
+            int[] pixelColor = lerpColor(base, tip, totalBright);
+            setLED(stripStart + i, scaleColor(pixelColor, totalBright * masterBrightness));
+        }
+        
+        // === Bright rising comets (3 evenly spaced) for extra upward motion ===
         int numComets = 3;
-        
-        // Rising position (loops, 2 second cycle)
         double risePhase = (currentTime % 2.0) / 2.0;
+        int trailLen = 6;
         
         for (int c = 0; c < numComets; c++) {
             double cometPhase = (risePhase + (double) c / numComets) % 1.0;
             int risePos = (int)(cometPhase * stripCount);
             
-            for (int i = 0; i < trailLength; i++) {
-                int pos = risePos - i;
+            for (int t = 0; t < trailLen; t++) {
+                int pos = risePos - t;
                 if (pos >= 0 && pos < stripCount) {
-                    double fade = 1.0 - ((double) i / trailLength);
+                    double fade = 1.0 - ((double) t / trailLen);
                     fade = fade * fade;
-                    int r = Math.max(ledBuffer[stripStart + pos][0], (int)(color[0] * fade * masterBrightness));
-                    int g = Math.max(ledBuffer[stripStart + pos][1], (int)(color[1] * fade * masterBrightness));
-                    int b = Math.max(ledBuffer[stripStart + pos][2], (int)(color[2] * fade * masterBrightness));
-                    ledBuffer[stripStart + pos][0] = r;
-                    ledBuffer[stripStart + pos][1] = g;
-                    ledBuffer[stripStart + pos][2] = b;
+                    int[] cometColor = (t == 0) ? tip : base;
+                    blendAdditive(stripStart + pos, cometColor, fade * 0.7);
                 }
-            }
-            // White tip on each comet
-            if (risePos >= 0 && risePos < stripCount) {
-                setLED(stripStart + risePos, new int[]{220, 150, 255});
             }
         }
         
@@ -1035,8 +1240,10 @@ public class LEDSubsystem extends SubsystemBase {
     }
     
     /**
-     * READY SPLIT PATTERN - Half orange, half blue with breathing boundary.
-     * Displays team identity and readiness simultaneously.
+     * READY SPLIT PATTERN - Team identity display with animated boundary.
+     * Left half glows warm orange, right half glows cool blue, with a bright
+     * white energy line at the boundary that breathes and sparkles. The two
+     * halves have subtle inner shimmer for depth. Green onboard LEDs = READY.
      */
     private void setReadySplitPattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -1045,34 +1252,52 @@ public class LEDSubsystem extends SubsystemBase {
         int stripCount = Constants.LEDs.STRIP_COUNT;
         int center = stripCount / 2;
         
-        // Breathing effect on the boundary
-        double breathPhase = (currentTime % 2.0) / 2.0;
-        double breathBrightness = (Math.sin(breathPhase * Math.PI * 2) + 1) / 2;
-        
         clearBuffer();
-        setOnboardColor(Constants.LEDs.GREEN);  // Onboard LEDs green = READY
+        setOnboardColor(Constants.LEDs.GREEN);  // Green = READY
         
-        // Left half - team orange
-        setLEDRange(stripStart, stripStart + center - 1, Constants.LEDs.TEAM_SAFETY_ORANGE);
+        int[] orange = Constants.LEDs.TEAM_SAFETY_ORANGE;
+        int[] blue = Constants.LEDs.TEAM_BLUE;
         
-        // Right half - team blue
-        setLEDRange(stripStart + center, stripStart + stripCount - 1, Constants.LEDs.TEAM_BLUE);
+        for (int i = 0; i < stripCount; i++) {
+            int[] baseColor = (i < center) ? orange : blue;
+            
+            // Subtle inner shimmer for depth
+            double shimmer = 0.7 + 0.3 * noise1D(i * 0.5 + currentTime * 1.5);
+            setLED(stripStart + i, scaleColor(baseColor, shimmer * masterBrightness));
+        }
         
-        // Breathing white boundary at center
-        int whiteBrightness = (int)(255 * breathBrightness);
-        int[] breathingWhite = {whiteBrightness, whiteBrightness, whiteBrightness};
-        setLED(stripStart + center - 1, breathingWhite);
-        setLED(stripStart + center, breathingWhite);
+        // Animated boundary: breathing white energy line with sparkle
+        double breathPhase = (currentTime % 2.0) / 2.0;
+        double breathBright = 0.5 + 0.5 * ((Math.sin(breathPhase * Math.PI * 2) + 1) / 2);
+        
+        // Boundary glow: 5 LEDs wide, fading from center
+        for (int b = -2; b <= 2; b++) {
+            int idx = center + b;
+            if (idx >= 0 && idx < stripCount) {
+                double falloff = 1.0 - Math.abs(b) / 3.0;
+                double bright = breathBright * falloff;
+                blendAdditive(stripStart + idx, Constants.LEDs.WARM_WHITE, bright * masterBrightness);
+            }
+        }
+        
+        // Occasional sparkle on the boundary line
+        double sparkle = Math.sin(currentTime * 13.0);
+        if (sparkle > 0.85) {
+            int sparkIdx = center + (int)(Math.sin(currentTime * 7.0) * 2);
+            if (sparkIdx >= 0 && sparkIdx < stripCount) {
+                blendAdditive(stripStart + sparkIdx, Constants.LEDs.WHITE, masterBrightness);
+            }
+        }
         
         pushBuffer();
     }
     
     /**
-     * ENDGAME URGENCY PATTERN - Accelerating heartbeat with shockwaves.
-     * Alliance-colored pulses radiate from center, getting faster over time.
-     * Every few seconds a bright white flash grabs attention.
-     * The "heartbeat" speeds up as match time decreases to convey urgency.
-     * Communicates that the match is nearing its end.
+     * ENDGAME URGENCY PATTERN - Accelerating heartbeat with panic strobe.
+     * Alliance-colored pulse that starts as a slow heartbeat (lub-dub) and
+     * accelerates as match time decreases. Periodic white burst flashes
+     * interrupt the heartbeat for extra urgency. The effect builds panic
+     * progressively — drivers can feel the time pressure.
      */
     private void setEndgameUrgencyPattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -1080,67 +1305,76 @@ public class LEDSubsystem extends SubsystemBase {
         
         int stripStart = Constants.LEDs.STRIP_START;
         int stripCount = Constants.LEDs.STRIP_COUNT;
-        int center = stripCount / 2;
         
-        // Every 3 seconds, do a quick white flash
+        // Every 3 seconds, do a quick white flash burst
         if (currentTime - lastEndgameFlash > 3.0) {
             lastEndgameFlash = currentTime;
-            endgameFlashCount = 2;
+            endgameFlashCount = 3;
         }
         
         clearBuffer();
         
-        // Onboard: rapid alliance color strobe
-        boolean onboardOn = ((int)(currentTime * 6) % 2) == 0;
+        // Onboard: fast alliance strobe
+        boolean onboardOn = ((int)(currentTime * 8) % 2) == 0;
         setOnboardColor(onboardOn ? allianceColor : Constants.LEDs.WHITE);
         
         if (endgameFlashCount > 0) {
             endgameFlashCount--;
-            // White flash burst
+            // White burst flash across entire strip
+            double flashBright = 0.7 + 0.3 * ((endgameFlashCount % 2 == 0) ? 1.0 : 0.0);
             for (int i = 0; i < stripCount; i++) {
-                setLED(stripStart + i, Constants.LEDs.WHITE);
+                setLED(stripStart + i, scaleColor(Constants.LEDs.WHITE, flashBright * masterBrightness));
             }
         } else {
-            // Heartbeat speed scales with remaining time (1Hz to 4Hz)
-            double heartRate = 1.0 + (1.0 - Math.max(0, Math.min(1.0, matchTime / 30.0))) * 3.0;
+            // Heartbeat speed scales with remaining time (1.2Hz to 5Hz)
+            double urgency = 1.0 - Math.max(0, Math.min(1.0, matchTime / 30.0));
+            double heartRate = 1.2 + urgency * 3.8;
             double beatPhase = (currentTime * heartRate) % 1.0;
             
-            // Heartbeat has two quick pulses (lub-dub)
+            // Double-beat heartbeat (lub-dub)
             double beatIntensity;
-            if (beatPhase < 0.1) {
-                beatIntensity = beatPhase / 0.1;  // First beat rise
-            } else if (beatPhase < 0.2) {
-                beatIntensity = 1.0 - (beatPhase - 0.1) / 0.1;  // First beat fall
-            } else if (beatPhase < 0.3) {
-                beatIntensity = (beatPhase - 0.2) / 0.1 * 0.7;  // Second beat rise (smaller)
-            } else if (beatPhase < 0.4) {
-                beatIntensity = 0.7 * (1.0 - (beatPhase - 0.3) / 0.1);  // Second beat fall
+            if (beatPhase < 0.08) {
+                beatIntensity = beatPhase / 0.08;
+            } else if (beatPhase < 0.16) {
+                beatIntensity = 1.0 - (beatPhase - 0.08) / 0.08;
+            } else if (beatPhase < 0.24) {
+                beatIntensity = (beatPhase - 0.16) / 0.08 * 0.6;
+            } else if (beatPhase < 0.32) {
+                beatIntensity = 0.6 * (1.0 - (beatPhase - 0.24) / 0.08);
             } else {
-                beatIntensity = 0;  // Rest between beats
+                beatIntensity = 0;
             }
             
-            // Apply heartbeat as brightness to alliance color across strip
-            // with a radial falloff from center
+            // Apply heartbeat with center-bright radial gradient
             for (int i = 0; i < stripCount; i++) {
-                double distFromCenter = Math.abs(i - center) / (double) center;
-                double radialFade = 1.0 - distFromCenter * 0.5;  // Center brighter than edges
-                double finalIntensity = beatIntensity * radialFade;
-                finalIntensity = Math.max(0.05, finalIntensity);  // Never fully dark
+                double distFromCenter = Math.abs(i - stripCount / 2) / (double)(stripCount / 2);
+                double radial = 1.0 - distFromCenter * 0.4;
+                double brightness = Math.max(0.04, beatIntensity * radial);
                 
-                ledBuffer[stripStart + i][0] = (int)(allianceColor[0] * finalIntensity * masterBrightness);
-                ledBuffer[stripStart + i][1] = (int)(allianceColor[1] * finalIntensity * masterBrightness);
-                ledBuffer[stripStart + i][2] = (int)(allianceColor[2] * finalIntensity * masterBrightness);
+                // As urgency builds, add a frantic flicker overlay
+                if (urgency > 0.6) {
+                    double flicker = noise1D(i * 0.8 + currentTime * 15.0);
+                    brightness += (urgency - 0.6) / 0.4 * flicker * 0.3;
+                }
+                
+                brightness = Math.min(1.0, brightness);
+                
+                // Blend toward white at high intensities for drama
+                int[] color = (beatIntensity > 0.7) 
+                    ? lerpColor(allianceColor, Constants.LEDs.WHITE, (beatIntensity - 0.7) / 0.3 * 0.4)
+                    : allianceColor;
+                setLED(stripStart + i, scaleColor(color, brightness * masterBrightness));
             }
         }
         pushBuffer();
     }
     
     /**
-     * BROWNOUT PATTERN - Dramatic power failure / sputtering.
-     * LEDs flicker and sections randomly go dark then struggle back on,
-     * simulating a dying lightbulb. The brown/amber color indicates low power.
-     * Onboard LEDs flicker weakly.
-     * Communicates a low battery / brownout condition.
+     * BROWNOUT PATTERN - Cinematic dying power with amber sparks.
+     * Sections of the strip dim out in slow waves, as if power is failing.
+     * Occasional bright amber "sparks" fight to stay alive, creating a
+     * dramatic sputtering effect. The overall brightness slowly oscillates
+     * to simulate unstable voltage. Feels like the robot is losing power.
      */
     private void setBrownoutPattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -1148,57 +1382,67 @@ public class LEDSubsystem extends SubsystemBase {
         int stripStart = Constants.LEDs.STRIP_START;
         int stripCount = Constants.LEDs.STRIP_COUNT;
         
+        int[] brown = Constants.LEDs.BROWNOUT_COLOR;
+        int[] spark = Constants.LEDs.BROWNOUT_SPARK;
+        
         clearBuffer();
         
         // Onboard LEDs: dim flickering brown
-        double onboardFlicker = Math.sin(currentTime * 15) * 0.3 + 0.4;
-        onboardFlicker = Math.max(0.1, onboardFlicker);
-        int[] brown = Constants.LEDs.BROWNOUT_COLOR;
-        int onboard = Constants.LEDs.ONBOARD_LED_COUNT;
-        for (int i = 0; i < onboard && i < ledCount; i++) {
-            ledBuffer[i][0] = (int)(brown[0] * onboardFlicker * masterBrightness);
-            ledBuffer[i][1] = (int)(brown[1] * onboardFlicker * masterBrightness);
-            ledBuffer[i][2] = (int)(brown[2] * onboardFlicker * masterBrightness);
+        double onboardFlicker = noise1D(currentTime * 6.0) * 0.5 + 0.1;
+        for (int i = 0; i < Constants.LEDs.ONBOARD_LED_COUNT && i < ledCount; i++) {
+            setLED(i, scaleColor(brown, onboardFlicker * masterBrightness));
         }
         
-        // Strip: sections randomly go dark and sputter back
+        // Global voltage instability: slow oscillation of base brightness
+        double voltageWave = 0.3 + 0.4 * ((Math.sin(currentTime * 0.8) + 1) / 2);
+        
         for (int i = 0; i < stripCount; i++) {
-            // Each LED has its own "power stability" using layered sine waves
-            double stability = Math.sin(currentTime * 13.7 + i * 2.1) 
-                             * Math.sin(currentTime * 7.3 + i * 0.9)
-                             * Math.sin(currentTime * 3.1 + i * 4.7);
+            double pos = (double) i / stripCount;
             
-            // Normalize from [-1,1] to [0,1] with a bias toward dim
-            double brightness = (stability + 1.0) / 2.0;
-            brightness = brightness * brightness;  // Square to make dark sections more common
+            // Blackout zone: sections go dark based on overlapping waves
+            double blackout1 = Math.sin((pos * 3.0 - currentTime * 0.4) * Math.PI * 2.0);
+            double blackout2 = Math.sin((pos * 5.0 + currentTime * 0.7) * Math.PI * 2.0);
+            double blackout = (blackout1 + blackout2) / 2.0;
             
-            // Occasionally a LED "sparks" bright (power surge)
-            double sparkChance = Math.sin(currentTime * 31.0 + i * 5.3);
-            if (sparkChance > 0.95) {
-                brightness = 1.0;  // Full bright spark!
+            // Map to brightness: negative = dark, positive = lit
+            double sectionBright;
+            if (blackout < -0.2) {
+                sectionBright = 0.02;  // Nearly dead
+            } else if (blackout < 0.2) {
+                // Sputtering zone: flickering between dim and medium
+                double sputter = noise1D(i * 0.7 + currentTime * 8.0);
+                sectionBright = 0.05 + sputter * 0.3;
+            } else {
+                sectionBright = 0.3 + blackout * 0.4;
             }
             
-            // Minimum dim glow so it's not completely black
-            brightness = Math.max(0.05, brightness);
+            sectionBright *= voltageWave;
             
-            ledBuffer[stripStart + i][0] = (int)(brown[0] * brightness * masterBrightness);
-            ledBuffer[stripStart + i][1] = (int)(brown[1] * brightness * masterBrightness);
-            ledBuffer[stripStart + i][2] = (int)(brown[2] * brightness * masterBrightness);
+            // Occasional bright amber spark
+            double sparkChance = Math.sin(currentTime * 23.0 + i * 4.1);
+            if (sparkChance > 0.94) {
+                // Bright spark!
+                double sparkBright = (sparkChance - 0.94) / 0.06;
+                setLED(stripStart + i, scaleColor(spark, sparkBright * masterBrightness));
+            } else {
+                setLED(stripStart + i, scaleColor(brown, sectionBright * masterBrightness));
+            }
         }
         
         pushBuffer();
     }
     
     /**
-     * WAITING/DISABLED PATTERN - Clean team color idle animation.
+     * WAITING/DISABLED PATTERN - Smooth aurora flow with team colors.
      * 
-     * Onboard LEDs (0-7): Gentle alternating orange/blue breathing glow.
-     * Strip LEDs (8-67): Smooth comet tails with an orange comet and a blue comet
-     * chase each other around the strip on a dark background. Each comet is a
-     * bright head with a fading trail behind it. The two comets are always on
-     * opposite sides of the strip so they never overlap or mix colors.
+     * A mesmerizing "breathing aurora" of orange and blue that flows organically
+     * across the strip. Multiple layered sine waves create a liquid, living
+     * gradient that slowly drifts and morphs. Each LED smoothly blends between
+     * team orange and team blue based on its position and time, with a gentle
+     * overall brightness wave that gives the effect a breathing quality.
      * 
-     * Communicates that the robot is idle and awaiting commands.
+     * Onboard LEDs (0-7): Soft alternating orange/blue breathing glow.
+     * Strip LEDs (8-65): Smooth flowing aurora gradient across entire strip.
      */
     private void setWaitingPattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -1212,69 +1456,63 @@ public class LEDSubsystem extends SubsystemBase {
         clearBuffer();
         
         // === ONBOARD LEDs (0-7): Gentle breathing team color split ===
-        // Left 4 = orange, right 4 = blue, with synchronized breathing
-        double breathPhase = (currentTime % 4.0) / 4.0;  // 4-second cycle
-        double breathBrightness = 0.4 + 0.6 * ((Math.sin(breathPhase * Math.PI * 2.0) + 1.0) / 2.0);
+        double breathPhase = (currentTime % 4.0) / 4.0;
+        double breathBrightness = 0.3 + 0.7 * ((Math.sin(breathPhase * Math.PI * 2.0) + 1.0) / 2.0);
         
         for (int i = 0; i < onboard && i < ledCount; i++) {
             int[] color = (i < onboard / 2) ? orange : blue;
-            int r = (int)(color[0] * breathBrightness * masterBrightness);
-            int g = (int)(color[1] * breathBrightness * masterBrightness);
-            int b = (int)(color[2] * breathBrightness * masterBrightness);
-            ledBuffer[i][0] = r;
-            ledBuffer[i][1] = g;
-            ledBuffer[i][2] = b;
+            ledBuffer[i][0] = (int)(color[0] * breathBrightness * masterBrightness);
+            ledBuffer[i][1] = (int)(color[1] * breathBrightness * masterBrightness);
+            ledBuffer[i][2] = (int)(color[2] * breathBrightness * masterBrightness);
         }
         
-        // === STRIP LEDs (8-67): Dual comet tails chasing each other ===
-        // Two comets on opposite sides of the strip, moving at a calm pace.
-        // 8-second full loop = smooth and relaxed.
-        double cometPhase = (currentTime % 8.0) / 8.0;
-        int cometHeadA = (int)(cometPhase * stripCount) % stripCount;          // Orange comet
-        int cometHeadB = (cometHeadA + stripCount / 2) % stripCount;           // Blue comet (opposite side)
+        // === STRIP LEDs: Flowing aurora gradient ===
+        // Multiple sine waves at different frequencies create organic motion.
+        // Each LED blends between orange and blue based on a composite wave.
+        double drift1 = currentTime * 0.15;   // Very slow primary drift
+        double drift2 = currentTime * 0.08;   // Even slower counter-drift
+        double drift3 = currentTime * 0.25;   // Subtle faster ripple
         
-        int trailLength = 26;  // How many LEDs the tail stretches
+        // Global breathing envelope (slow brightness wave across entire strip)
+        double globalBreath = 0.6 + 0.4 * ((Math.sin(currentTime * 0.5) + 1.0) / 2.0);
         
-        // Draw orange comet (head + fading trail)
-        for (int t = 0; t < trailLength; t++) {
-            int stripIdx = ((cometHeadA - t) % stripCount + stripCount) % stripCount;
-            int ledIdx = stripStart + stripIdx;
+        for (int i = 0; i < stripCount; i++) {
+            double pos = (double) i / stripCount;
             
-            // Brightness falls off quadratically for a nice tail shape
-            double tailFactor = 1.0 - ((double) t / trailLength);
-            tailFactor = tailFactor * tailFactor;  // Quadratic falloff
+            // Layered sine waves for organic color blending
+            double wave1 = Math.sin((pos * 2.5 - drift1) * Math.PI * 2.0);
+            double wave2 = Math.sin((pos * 1.5 + drift2) * Math.PI * 2.0);
+            double wave3 = Math.sin((pos * 4.0 - drift3) * Math.PI * 2.0) * 0.3;
             
-            if (ledIdx < ledCount) {
-                ledBuffer[ledIdx][0] = (int)(orange[0] * tailFactor * masterBrightness);
-                ledBuffer[ledIdx][1] = (int)(orange[1] * tailFactor * masterBrightness);
-                ledBuffer[ledIdx][2] = (int)(orange[2] * tailFactor * masterBrightness);
-            }
-        }
-        
-        // Draw blue comet (head + fading trail)
-        for (int t = 0; t < trailLength; t++) {
-            int stripIdx = ((cometHeadB - t) % stripCount + stripCount) % stripCount;
-            int ledIdx = stripStart + stripIdx;
+            // Combine into a smooth blend factor [0, 1] where 0=orange, 1=blue
+            double blend = (wave1 * 0.5 + wave2 * 0.35 + wave3 * 0.15 + 1.0) / 2.0;
+            blend = Math.max(0.0, Math.min(1.0, blend));
             
-            double tailFactor = 1.0 - ((double) t / trailLength);
-            tailFactor = tailFactor * tailFactor;
+            // Smooth the blend curve for more pleasing transitions
+            blend = blend * blend * (3.0 - 2.0 * blend);  // Smoothstep
             
-            if (ledIdx < ledCount) {
-                ledBuffer[ledIdx][0] = (int)(blue[0] * tailFactor * masterBrightness);
-                ledBuffer[ledIdx][1] = (int)(blue[1] * tailFactor * masterBrightness);
-                ledBuffer[ledIdx][2] = (int)(blue[2] * tailFactor * masterBrightness);
-            }
+            // Lerp between orange and blue
+            int[] color = lerpColor(orange, blue, blend);
+            
+            // Per-LED brightness variation for depth
+            double localBright = noise1D(pos * 8.0 + currentTime * 0.6);
+            localBright = 0.4 + 0.6 * localBright;  // Range: 0.4 - 1.0
+            
+            double finalBright = globalBreath * localBright * masterBrightness;
+            ledBuffer[stripStart + i][0] = (int)(color[0] * finalBright);
+            ledBuffer[stripStart + i][1] = (int)(color[1] * finalBright);
+            ledBuffer[stripStart + i][2] = (int)(color[2] * finalBright);
         }
         
         pushBuffer();
     }
     
     /**
-     * SHOOT NOW PATTERN - Green shockwave explosions from center.
-     * Bright green rings blast outward from center with white-hot leading edges.
-     * Multiple overlapping rings for a continuous rapid-fire visual.
-     * Onboard LEDs solid bright green.
-     * Communicates that the shooter is ready and the driver should fire.
+     * SHOOT NOW PATTERN - Pulsing green energy radiating from center.
+     * The strip pulses with vivid green energy that radiates outward from center
+     * in smooth waves. A bright mint-white core pulses rapidly at center, with
+     * green waves flowing outward and fading. The effect screams "FIRE NOW" —
+     * energized and ready. Multiple overlapping rings create a continuous flow.
      */
     private void setShootNowPattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -1283,73 +1521,60 @@ public class LEDSubsystem extends SubsystemBase {
         int stripCount = Constants.LEDs.STRIP_COUNT;
         int center = stripCount / 2;
         
-        clearBuffer();
-        setOnboardColor(Constants.LEDs.SHOOTING_COLOR);
-        
         int[] color = Constants.LEDs.SHOOTING_COLOR;
+        int[] highlight = Constants.LEDs.SHOOTING_HIGHLIGHT;
         
-        // Dim green base so strip is never fully dark
+        clearBuffer();
+        setOnboardColor(color);
+        
+        // Dim green base
         for (int i = 0; i < stripCount; i++) {
-            ledBuffer[stripStart + i][0] = (int)(8 * masterBrightness);
-            ledBuffer[stripStart + i][1] = (int)(30 * masterBrightness);
-            ledBuffer[stripStart + i][2] = (int)(8 * masterBrightness);
+            setLED(stripStart + i, scaleColor(color, 0.06 * masterBrightness));
         }
         
-        // Three overlapping rings with different speeds for continuous look
+        // === Outward-radiating rings ===
         int numRings = 3;
         for (int ring = 0; ring < numRings; ring++) {
-            double ringPhase = (currentTime * 3.0 + ring * 0.33) % 1.0;
+            double ringPhase = (currentTime * 2.5 + ring * (1.0 / numRings)) % 1.0;
             int ringPos = (int)(ringPhase * center);
-            int trailLength = 6;
+            int trailLen = 8;
             
-            for (int t = 0; t < trailLength; t++) {
+            for (int t = 0; t < trailLen; t++) {
                 int pos = ringPos - t;
                 if (pos >= 0 && pos < center) {
-                    double fade = 1.0 - ((double) t / trailLength);
+                    double fade = 1.0 - ((double) t / trailLen);
                     fade = fade * fade;
                     
-                    int[] trailColor;
-                    if (t == 0) {
-                        // White-hot leading edge
-                        trailColor = new int[]{(int)(200 * fade), (int)(255 * fade), (int)(200 * fade)};
-                    } else {
-                        trailColor = new int[]{(int)(color[0] * fade), (int)(color[1] * fade), (int)(color[2] * fade)};
-                    }
+                    // Leading edge is bright mint-white
+                    int[] ringColor = (t < 2) ? lerpColor(color, highlight, 0.6 - t * 0.3) : color;
                     
                     // Left of center
-                    int leftIdx = stripStart + center - pos;
-                    if (leftIdx >= stripStart) {
-                        ledBuffer[leftIdx][0] = Math.max(ledBuffer[leftIdx][0], (int)(trailColor[0] * masterBrightness));
-                        ledBuffer[leftIdx][1] = Math.max(ledBuffer[leftIdx][1], (int)(trailColor[1] * masterBrightness));
-                        ledBuffer[leftIdx][2] = Math.max(ledBuffer[leftIdx][2], (int)(trailColor[2] * masterBrightness));
-                    }
+                    blendAdditive(stripStart + center - pos, ringColor, fade * 0.9);
                     // Right of center
-                    int rightIdx = stripStart + center + pos;
-                    if (rightIdx < stripStart + stripCount) {
-                        ledBuffer[rightIdx][0] = Math.max(ledBuffer[rightIdx][0], (int)(trailColor[0] * masterBrightness));
-                        ledBuffer[rightIdx][1] = Math.max(ledBuffer[rightIdx][1], (int)(trailColor[1] * masterBrightness));
-                        ledBuffer[rightIdx][2] = Math.max(ledBuffer[rightIdx][2], (int)(trailColor[2] * masterBrightness));
-                    }
+                    blendAdditive(stripStart + center + pos, ringColor, fade * 0.9);
                 }
             }
         }
         
-        // Bright pulsing center
-        double centerPulse = (Math.sin(currentTime * Math.PI * 8) + 1) / 2 * 0.3 + 0.7;
-        int[] brightCenter = {(int)(100 * centerPulse), (int)(255 * centerPulse), (int)(100 * centerPulse)};
-        setLED(stripStart + center - 1, brightCenter);
-        setLED(stripStart + center, brightCenter);
+        // === Bright pulsing center core ===
+        double corePulse = (Math.sin(currentTime * Math.PI * 6) + 1) / 2 * 0.4 + 0.6;
+        for (int c = -2; c <= 2; c++) {
+            int idx = center + c;
+            if (idx >= 0 && idx < stripCount) {
+                double falloff = 1.0 - Math.abs(c) / 3.0;
+                blendAdditive(stripStart + idx, highlight, corePulse * falloff * masterBrightness);
+            }
+        }
         
         pushBuffer();
     }
     
     /**
-     * FIRING PATTERN - Explosive rapid-fire strobe with outward blasts!
-     * Much more intense than the "ready to shoot" pattern. Rapid alternation
-     * between bright white and green with violent outward shockwaves.
-     * The whole strip pulses like a muzzle flash with each shot.
-     * Onboard LEDs strobe white/green rapidly.
-     * Communicates that game pieces are actively being launched.
+     * FIRING PATTERN - Explosive energy blast with golden lightning.
+     * Rapid muzzle flash strobes alternate with golden lightning bolts that
+     * propagate outward from center. Between flashes, fast green-to-gold
+     * shockwaves cascade across the strip. Maximum visual intensity — the
+     * robot is actively scoring and everyone should see it.
      */
     private void setFiringPattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -1358,66 +1583,58 @@ public class LEDSubsystem extends SubsystemBase {
         int stripCount = Constants.LEDs.STRIP_COUNT;
         int center = stripCount / 2;
         
+        int[] green = Constants.LEDs.SHOOTING_COLOR;
+        int[] gold = Constants.LEDs.TEAM_GOLD;
+        
         clearBuffer();
         
-        // Onboard LEDs: rapid white/green strobe (muzzle flash effect)
+        // Onboard LEDs: rapid white/green strobe (muzzle flash)
         boolean onboardFlash = ((int)(currentTime * 20) % 2) == 0;
-        setOnboardColor(onboardFlash ? Constants.LEDs.WHITE : Constants.LEDs.SHOOTING_COLOR);
+        setOnboardColor(onboardFlash ? Constants.LEDs.WHITE : green);
         
-        // "Muzzle flash" pulse - the whole strip flashes white briefly every 0.15s
-        double flashPhase = (currentTime % 0.15) / 0.15;
-        boolean inFlash = flashPhase < 0.3;  // First 30% of cycle is the white flash
+        // Muzzle flash cycle: 0.12s per flash
+        double flashPhase = (currentTime % 0.12) / 0.12;
+        boolean inFlash = flashPhase < 0.25;
         
         if (inFlash) {
-            // FLASH - bright white burst across entire strip
-            double flashIntensity = 1.0 - (flashPhase / 0.3);  // Fade out quickly
+            // FLASH — bright white burst fading to green
+            double flashIntensity = 1.0 - (flashPhase / 0.25);
             flashIntensity = flashIntensity * flashIntensity;
+            
             for (int i = 0; i < stripCount; i++) {
-                int brightness = (int)(255 * flashIntensity * masterBrightness);
-                ledBuffer[stripStart + i][0] = brightness;
-                ledBuffer[stripStart + i][1] = brightness;
-                ledBuffer[stripStart + i][2] = brightness;
+                int[] flashColor = lerpColor(green, Constants.LEDs.WHITE, flashIntensity * 0.7);
+                setLED(stripStart + i, scaleColor(flashColor, flashIntensity * masterBrightness));
             }
         } else {
-            // Between flashes - fast outward shockwaves from center
-            // Multiple overlapping rings moving FAST (6x speed of ready pattern)
-            int numRings = 4;
-            for (int ring = 0; ring < numRings; ring++) {
-                double ringPhase = (currentTime * 6.0 + ring * 0.25) % 1.0;
-                int ringPos = (int)(ringPhase * center);
-                int trailLength = 4;
+            // Between flashes: fast golden lightning bolts outward from center
+            int numBolts = 4;
+            for (int bolt = 0; bolt < numBolts; bolt++) {
+                double boltPhase = (currentTime * 8.0 + bolt * 0.25) % 1.0;
+                int boltPos = (int)(boltPhase * center);
+                int trailLen = 5;
                 
-                for (int t = 0; t < trailLength; t++) {
-                    int pos = ringPos - t;
+                for (int t = 0; t < trailLen; t++) {
+                    int pos = boltPos - t;
                     if (pos >= 0 && pos < center) {
-                        double fade = 1.0 - ((double) t / trailLength);
+                        double fade = 1.0 - ((double) t / trailLen);
                         fade = fade * fade;
                         
-                        int r, g, b;
-                        if (t == 0) {
-                            // White-hot leading edge
-                            r = (int)(255 * fade * masterBrightness);
-                            g = (int)(255 * fade * masterBrightness);
-                            b = (int)(200 * fade * masterBrightness);
-                        } else {
-                            r = (int)(Constants.LEDs.SHOOTING_COLOR[0] * fade * masterBrightness);
-                            g = (int)(Constants.LEDs.SHOOTING_COLOR[1] * fade * masterBrightness);
-                            b = (int)(Constants.LEDs.SHOOTING_COLOR[2] * fade * masterBrightness);
-                        }
+                        // Gold-to-green gradient along trail
+                        int[] boltColor = (t < 2) ? gold : green;
                         
-                        int leftIdx = stripStart + center - pos;
-                        if (leftIdx >= stripStart) {
-                            ledBuffer[leftIdx][0] = Math.max(ledBuffer[leftIdx][0], r);
-                            ledBuffer[leftIdx][1] = Math.max(ledBuffer[leftIdx][1], g);
-                            ledBuffer[leftIdx][2] = Math.max(ledBuffer[leftIdx][2], b);
-                        }
-                        int rightIdx = stripStart + center + pos;
-                        if (rightIdx < stripStart + stripCount) {
-                            ledBuffer[rightIdx][0] = Math.max(ledBuffer[rightIdx][0], r);
-                            ledBuffer[rightIdx][1] = Math.max(ledBuffer[rightIdx][1], g);
-                            ledBuffer[rightIdx][2] = Math.max(ledBuffer[rightIdx][2], b);
-                        }
+                        blendAdditive(stripStart + center - pos, boltColor, fade * 0.9);
+                        blendAdditive(stripStart + center + pos, boltColor, fade * 0.9);
                     }
+                }
+            }
+            
+            // Bright center core (always visible between flashes)
+            double corePulse = (Math.sin(currentTime * Math.PI * 12) + 1) / 2 * 0.3 + 0.7;
+            for (int c = -1; c <= 1; c++) {
+                int idx = center + c;
+                if (idx >= 0 && idx < stripCount) {
+                    blendAdditive(stripStart + idx, Constants.LEDs.WARM_WHITE, 
+                                  corePulse * (1.0 - Math.abs(c) * 0.3) * masterBrightness);
                 }
             }
         }
@@ -1426,12 +1643,11 @@ public class LEDSubsystem extends SubsystemBase {
     }
     
     /**
-     * AUTO MODE PATTERN - Dual alliance-colored comets racing opposite directions.
-     * Two bright comets circling the strip in opposite directions with white-hot tips.
-     * Energetic and fast, clearly distinct from teleop's calmer wave.
-     * White sparkle accents randomly appear and fade for extra energy.
-     * Onboard LEDs pulse alliance color at 2Hz.
-     * Communicates that the robot is in autonomous mode.
+     * AUTO MODE PATTERN - Fast scanning beam with sparkle accents.
+     * A bright alliance-colored beam sweeps rapidly back and forth across the
+     * strip like a scanner, with a white-hot leading edge and long phosphor
+     * trail. Subtle sparkle accents appear randomly for visual interest.
+     * The fast, precise motion conveys "autonomous — robot is in control."
      */
     private void setAutoModePattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -1440,98 +1656,72 @@ public class LEDSubsystem extends SubsystemBase {
         int stripCount = Constants.LEDs.STRIP_COUNT;
         
         clearBuffer();
-        // Onboard: fast alliance pulse to look "robotic"
+        
+        // Onboard: fast alliance pulse
         double onboardPulse = (Math.sin(currentTime * Math.PI * 4) + 1) / 2 * 0.6 + 0.4;
-        for (int i = 0; i < Constants.LEDs.ONBOARD_LED_COUNT; i++) {
-            ledBuffer[i][0] = (int)(allianceColor[0] * onboardPulse * masterBrightness);
-            ledBuffer[i][1] = (int)(allianceColor[1] * onboardPulse * masterBrightness);
-            ledBuffer[i][2] = (int)(allianceColor[2] * onboardPulse * masterBrightness);
-        }
+        setOnboardColor(scaleColor(allianceColor, onboardPulse * masterBrightness));
         
-        // Very dim base so the strip isn't dead black
+        // Dim alliance base
         for (int i = 0; i < stripCount; i++) {
-            ledBuffer[stripStart + i][0] = (int)(allianceColor[0] * 0.04 * masterBrightness);
-            ledBuffer[stripStart + i][1] = (int)(allianceColor[1] * 0.04 * masterBrightness);
-            ledBuffer[stripStart + i][2] = (int)(allianceColor[2] * 0.04 * masterBrightness);
+            setLED(stripStart + i, scaleColor(allianceColor, 0.04 * masterBrightness));
         }
         
-        // Comet 1: forward direction, 3-second loop
-        double speed1 = currentTime * 20.0;
-        int cometPos1 = ((int) speed1 % stripCount + stripCount) % stripCount;
-        int trailLen = 8;
+        // === Scanning beam: bounces back and forth ===
+        // Triangle wave for smooth back-and-forth (1.2 second cycle)
+        double scanPhase = (currentTime % 1.2) / 1.2;
+        double scanPos;
+        if (scanPhase < 0.5) {
+            scanPos = scanPhase * 2.0;  // 0→1 (forward sweep)
+        } else {
+            scanPos = 2.0 - scanPhase * 2.0;  // 1→0 (reverse sweep)
+        }
+        int beamHead = (int)(scanPos * (stripCount - 1));
+        
+        int trailLen = 12;
+        int direction = (scanPhase < 0.5) ? -1 : 1;  // Trail goes opposite to movement
         
         for (int t = 0; t < trailLen; t++) {
-            int pos = (cometPos1 - t + stripCount) % stripCount;
-            double fade = 1.0 - ((double) t / trailLen);
-            fade = fade * fade; // quadratic falloff
-            
-            int r, g, b;
-            if (t == 0) {
-                // White-hot tip
-                r = (int)(Math.min(allianceColor[0] + 180, 255) * masterBrightness);
-                g = (int)(Math.min(allianceColor[1] + 180, 255) * masterBrightness);
-                b = (int)(Math.min(allianceColor[2] + 180, 255) * masterBrightness);
-            } else {
-                r = (int)(allianceColor[0] * fade * masterBrightness);
-                g = (int)(allianceColor[1] * fade * masterBrightness);
-                b = (int)(allianceColor[2] * fade * masterBrightness);
+            int idx = beamHead + t * direction;
+            if (idx >= 0 && idx < stripCount) {
+                double fade = 1.0 - ((double) t / trailLen);
+                fade = fade * fade;
+                
+                if (t == 0) {
+                    // White-hot leading edge
+                    int[] tipColor = lerpColor(allianceColor, Constants.LEDs.WHITE, 0.7);
+                    blendAdditive(stripStart + idx, tipColor, masterBrightness);
+                } else if (t < 3) {
+                    // Bright alliance near the head
+                    int[] nearColor = lerpColor(allianceColor, Constants.LEDs.WARM_WHITE, 0.3 * fade);
+                    blendAdditive(stripStart + idx, nearColor, fade * masterBrightness);
+                } else {
+                    // Fading phosphor trail
+                    blendAdditive(stripStart + idx, allianceColor, fade * 0.8 * masterBrightness);
+                }
             }
-            
-            int idx = stripStart + pos;
-            ledBuffer[idx][0] = Math.max(ledBuffer[idx][0], r);
-            ledBuffer[idx][1] = Math.max(ledBuffer[idx][1], g);
-            ledBuffer[idx][2] = Math.max(ledBuffer[idx][2], b);
         }
         
-        // Comet 2: reverse direction, offset by half the strip
-        double speed2 = currentTime * 20.0;
-        int cometPos2 = ((int)(stripCount / 2 - speed2) % stripCount + stripCount) % stripCount;
-        
-        for (int t = 0; t < trailLen; t++) {
-            int pos = (cometPos2 + t + stripCount) % stripCount;
-            double fade = 1.0 - ((double) t / trailLen);
-            fade = fade * fade;
-            
-            int r, g, b;
-            if (t == 0) {
-                r = (int)(Math.min(allianceColor[0] + 180, 255) * masterBrightness);
-                g = (int)(Math.min(allianceColor[1] + 180, 255) * masterBrightness);
-                b = (int)(Math.min(allianceColor[2] + 180, 255) * masterBrightness);
-            } else {
-                r = (int)(allianceColor[0] * fade * masterBrightness);
-                g = (int)(allianceColor[1] * fade * masterBrightness);
-                b = (int)(allianceColor[2] * fade * masterBrightness);
-            }
-            
-            int idx = stripStart + pos;
-            ledBuffer[idx][0] = Math.max(ledBuffer[idx][0], r);
-            ledBuffer[idx][1] = Math.max(ledBuffer[idx][1], g);
-            ledBuffer[idx][2] = Math.max(ledBuffer[idx][2], b);
-        }
-        
-        // Random sparkle accents (3 at any time, seeded by timestamp)
-        long sparkSeed = (long)(currentTime * 10);
+        // === Subtle sparkle accents (3 at any time) ===
         for (int s = 0; s < 3; s++) {
-            int sparkPos = (int)(((sparkSeed + s * 17) * 31 + s * 7) % stripCount);
-            if (sparkPos < 0) sparkPos += stripCount;
-            double sparkBright = (Math.sin(currentTime * 15 + s * 2.1) + 1) / 2;
-            sparkBright = sparkBright * sparkBright * 0.5; // subtle
-            int idx = stripStart + sparkPos;
-            ledBuffer[idx][0] = Math.max(ledBuffer[idx][0], (int)(255 * sparkBright * masterBrightness));
-            ledBuffer[idx][1] = Math.max(ledBuffer[idx][1], (int)(255 * sparkBright * masterBrightness));
-            ledBuffer[idx][2] = Math.max(ledBuffer[idx][2], (int)(255 * sparkBright * masterBrightness));
+            double sparkle = Math.sin(currentTime * 11.0 + s * 3.7);
+            if (sparkle > 0.7) {
+                double sparkBright = (sparkle - 0.7) / 0.3;
+                sparkBright = sparkBright * sparkBright * 0.4;
+                int sparkIdx = (int)(((long)(currentTime * 7 + s * 19) * 31) % stripCount);
+                if (sparkIdx < 0) sparkIdx += stripCount;
+                blendAdditive(stripStart + sparkIdx, Constants.LEDs.WHITE, sparkBright * masterBrightness);
+            }
         }
         
         pushBuffer();
     }
     
     /**
-     * TELEOP MODE PATTERN - Smooth flowing gradient wave.
-     * Two alliance-color bands flow slowly along the strip with smooth sinusoidal
-     * shaping, creating a lava-lamp style "liquid flow" effect. Calmer and
-     * smoother than auto's racing comets, clearly distinguishing driver control.
-     * Onboard LEDs breathe alliance color at a relaxed 4-second cycle.
-     * Communicates that the robot is under driver control in teleop.
+     * TELEOP MODE PATTERN - Flowing gradient wave with organic shimmer.
+     * A smooth lava-lamp style flow of alliance color in varying intensity,
+     * with two sine waves at different speeds creating organic "liquid"
+     * movement. A subtle white shimmer point drifts slowly across for
+     * visual polish. Calm but clearly active — "human is driving."
      */
     private void setTeleopModePattern() {
         double currentTime = Timer.getFPGATimestamp();
@@ -1542,41 +1732,38 @@ public class LEDSubsystem extends SubsystemBase {
         clearBuffer();
         setOnboardBreathing(allianceColor);
         
-        // Two flowing sine waves at different speeds create organic-looking movement
-        double speed1 = currentTime * 0.4;  // slow drift
-        double speed2 = currentTime * 0.25; // even slower counter-drift
+        // Two flowing sine waves for organic liquid movement
+        double drift1 = currentTime * 0.35;
+        double drift2 = currentTime * 0.2;
         
         for (int i = 0; i < stripCount; i++) {
             double pos = (double) i / stripCount;
             
-            // Two sine waves with different wavelengths and speeds
-            double wave1 = (Math.sin((pos * 3.0 - speed1) * Math.PI * 2) + 1) / 2;
-            double wave2 = (Math.sin((pos * 2.0 + speed2) * Math.PI * 2) + 1) / 2;
+            // Layered sine waves with different wavelengths
+            double wave1 = (Math.sin((pos * 3.0 - drift1) * Math.PI * 2) + 1) / 2;
+            double wave2 = (Math.sin((pos * 2.0 + drift2) * Math.PI * 2) + 1) / 2;
             
-            // Combine with smooth max-like blending
-            double combined = Math.max(wave1 * wave1, wave2 * wave2);
+            // Smooth blending with warm bias
+            double combined = wave1 * wave1 * 0.6 + wave2 * wave2 * 0.4;
+            double brightness = combined * 0.85 + 0.15;  // 15% - 100%
             
-            // Map to brightness range 15% - 100% for smooth look
-            double brightness = combined * 0.85 + 0.15;
-            
-            ledBuffer[stripStart + i][0] = (int)(allianceColor[0] * brightness * masterBrightness);
-            ledBuffer[stripStart + i][1] = (int)(allianceColor[1] * brightness * masterBrightness);
-            ledBuffer[stripStart + i][2] = (int)(allianceColor[2] * brightness * masterBrightness);
+            // Subtle color variation: slightly warmer at peaks
+            int[] pixelColor = lerpColor(allianceColor, 
+                Constants.LEDs.WARM_WHITE, combined * 0.08);
+            setLED(stripStart + i, scaleColor(pixelColor, brightness * masterBrightness));
         }
         
-        // Subtle white shimmer: one bright point that slowly moves
-        double shimmerPos = ((Math.sin(currentTime * 0.7) + 1) / 2) * stripCount;
+        // Drifting white shimmer point
+        double shimmerPos = ((Math.sin(currentTime * 0.5) + 1) / 2) * stripCount;
         int shimmerIdx = (int) shimmerPos;
-        double shimmerBright = (Math.sin(currentTime * 1.3) + 1) / 2 * 0.3;
+        double shimmerBright = (Math.sin(currentTime * 1.1) + 1) / 2 * 0.25;
         
-        for (int s = -1; s <= 1; s++) {
+        for (int s = -2; s <= 2; s++) {
             int idx = shimmerIdx + s;
             if (idx >= 0 && idx < stripCount) {
-                double sFade = 1.0 - Math.abs(s) * 0.4;
-                int pixel = stripStart + idx;
-                ledBuffer[pixel][0] = Math.min(255, ledBuffer[pixel][0] + (int)(255 * shimmerBright * sFade * masterBrightness));
-                ledBuffer[pixel][1] = Math.min(255, ledBuffer[pixel][1] + (int)(255 * shimmerBright * sFade * masterBrightness));
-                ledBuffer[pixel][2] = Math.min(255, ledBuffer[pixel][2] + (int)(255 * shimmerBright * sFade * masterBrightness));
+                double sFade = 1.0 - Math.abs(s) / 3.0;
+                blendAdditive(stripStart + idx, Constants.LEDs.WARM_WHITE, 
+                              shimmerBright * sFade * masterBrightness);
             }
         }
         

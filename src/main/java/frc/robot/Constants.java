@@ -296,57 +296,99 @@ public final class Constants {
   
   public static final class LEDs {
     public static final int CANDLE_ID = CANIds.CANDLE;
-    public static final int LED_COUNT = 65;
-    public static final int ONBOARD_LED_COUNT = 8;   // CANdle's built-in LEDs (indices 0-7)
-    public static final int STRIP_START = 8;          // External strip starts at index 8
-    public static final int STRIP_COUNT = LED_COUNT - ONBOARD_LED_COUNT;  // 60 strip LEDs
-    public static final double BOOT_ANIMATION_DURATION = 2.0;
+    
+    // === PHYSICAL LAYOUT ===
+    // The CANdle's data line is Y-spliced to TWO physical strips:
+    //   - Strip A (top/back of robot): 38 LEDs
+    //   - Strip B (belly pan):         ~58 LEDs (same data line, continues after Strip A's length)
+    //
+    // Because they share the same data signal:
+    //   Indices 0-7:   CANdle onboard LEDs (visible on belly pan)
+    //   Indices 8-45:  "SHARED ZONE" — these 38 LEDs light up on BOTH strips simultaneously
+    //                  (Strip A top/back shows all 38, Strip B belly shows first 38)
+    //   Indices 46-65: "BELLY ONLY ZONE" — these ~20 LEDs only exist on Strip B (belly pan)
+    //                  Strip A has no LEDs at these addresses.
+    //
+    // For animations: the shared zone (8-45) is the main show — it's visible from
+    // both top and bottom. The belly-only zone (46-65) is bonus visibility underneath.
+    
+    public static final int ONBOARD_LED_COUNT = 8;    // CANdle built-in LEDs (indices 0-7), belly pan
+    public static final int SHARED_STRIP_COUNT = 38;  // Mirrored on BOTH top strip and belly strip
+    public static final int BELLY_ONLY_COUNT = 20;    // Only on belly strip (after shared zone)
+    
+    // Computed layout indices
+    public static final int STRIP_START = ONBOARD_LED_COUNT;                          // 8
+    public static final int SHARED_END = STRIP_START + SHARED_STRIP_COUNT - 1;        // 45
+    public static final int BELLY_START = SHARED_END + 1;                             // 46
+    public static final int BELLY_END = BELLY_START + BELLY_ONLY_COUNT - 1;           // 65
+    
+    public static final int LED_COUNT = ONBOARD_LED_COUNT + SHARED_STRIP_COUNT + BELLY_ONLY_COUNT; // 66
+    public static final int STRIP_COUNT = SHARED_STRIP_COUNT + BELLY_ONLY_COUNT;      // 58 total strip LEDs
+    
+    public static final double BOOT_ANIMATION_DURATION = 2.5;
     public static final double CHASE_SPEED = 0.15;
     public static final double BRIGHTNESS = 0.8;
     
     // Colors are RGB format {Red, Green, Blue}
     // Strip type is GRB (set in LEDSubsystem CANdle config)
     
-    // Team colors
+    // ── Team Identity ──
     public static final int[] TEAM_SAFETY_ORANGE = {255, 100, 0};
     public static final int[] TEAM_BLUE = {0, 100, 255};
+    public static final int[] TEAM_ORANGE_WARM = {255, 60, 0};   // Deeper ember orange
+    public static final int[] TEAM_BLUE_DEEP = {0, 50, 200};     // Deeper blue accent
+    public static final int[] TEAM_GOLD = {255, 180, 30};        // Gold accent for highlights
     
-    // Alliance
+    // ── Alliance ──
     public static final int[] BLUE_ALLIANCE = {0, 0, 255};
     public static final int[] RED_ALLIANCE = {255, 0, 0};
+    public static final int[] BLUE_ALLIANCE_DIM = {0, 0, 60};
+    public static final int[] RED_ALLIANCE_DIM = {60, 0, 0};
     
-    // Basic colors
+    // ── Core Palette ──
     public static final int[] GREEN = {0, 255, 0};
     public static final int[] ORANGE = {255, 165, 0};
     public static final int[] PURPLE = {128, 0, 128};
     public static final int[] YELLOW = {255, 255, 0};
     public static final int[] WHITE = {255, 255, 255};
+    public static final int[] WARM_WHITE = {255, 220, 180};      // Soft warm glow
+    public static final int[] COOL_WHITE = {200, 220, 255};      // Ice-cool accent
     public static final int[] OFF = {0, 0, 0};
     public static final int[] CYAN = {0, 255, 255};
     public static final int[] MAGENTA = {255, 0, 255};
     public static final int[] PINK = {255, 105, 180};
+    public static final int[] HOT_PINK = {255, 20, 100};         // Vivid intake accent
+    public static final int[] ELECTRIC_BLUE = {30, 144, 255};    // Bright electric accent
     
-    // Status colors
-    public static final int[] NO_AUTO_COLOR = {255, 165, 0};
-    public static final int[] FMS_DISCONNECTED_COLOR = {255, 255, 0};
+    // ── Status ──
+    public static final int[] NO_AUTO_COLOR = {255, 120, 0};
+    public static final int[] FMS_DISCONNECTED_COLOR = {255, 200, 0};
     
-    // Action colors
-    public static final int[] SHOOTING_COLOR = {0, 255, 0};
-    public static final int[] AIMING_COLOR = {255, 255, 0};
-    public static final int[] SPOOLING_COLOR = {255, 100, 0};
-    public static final int[] INTAKING_COLOR = {255, 100, 180};
-    public static final int[] CLIMBING_COLOR = {255, 0, 255};
+    // ── Action ──
+    public static final int[] SHOOTING_COLOR = {0, 255, 60};     // Vivid green with cyan tint
+    public static final int[] SHOOTING_HIGHLIGHT = {180, 255, 200}; // Bright mint for leading edges
+    public static final int[] AIMING_COLOR = {255, 200, 0};      // Amber-gold targeting
+    public static final int[] AIMING_HIGHLIGHT = {255, 255, 180}; // Bright yellow-white lock flash
+    public static final int[] SPOOLING_COLOR = {255, 80, 0};     // Deep charging orange
+    public static final int[] SPOOLING_HIGHLIGHT = {255, 200, 100}; // Hot white-orange leading edge
+    public static final int[] INTAKING_COLOR = {255, 40, 120};   // Vivid magenta-pink
+    public static final int[] INTAKING_HIGHLIGHT = {255, 180, 220}; // Soft pink-white tip
+    public static final int[] CLIMBING_COLOR = {180, 0, 255};    // Rich violet
+    public static final int[] CLIMBING_HIGHLIGHT = {220, 140, 255}; // Lavender tip
     public static final int[] ESTOP_COLOR = {255, 0, 0};
-    public static final int[] BROWNOUT_COLOR = {64, 28, 0};
+    public static final int[] ESTOP_CORE = {255, 40, 0};         // Orange-red hot core
+    public static final int[] BROWNOUT_COLOR = {80, 35, 0};      // Warmer brown
+    public static final int[] BROWNOUT_SPARK = {255, 160, 40};   // Bright amber spark
     
-    // Warning colors
+    // ── Warnings ──
     public static final int[] SHIFT_WARNING_5SEC = {255, 255, 255};
     public static final int[] SHIFT_WARNING_3SEC = {255, 255, 0};
     public static final int[] ENDGAME_WARNING_10SEC = {255, 100, 0};
     public static final int[] ENDGAME_WARNING_5SEC = {255, 0, 255};
     public static final int[] ENDGAME_WARNING_3SEC = {255, 0, 255};
     
-    // Victory
+    // ── Victory ──
+    public static final int[] VICTORY_GOLD = {255, 200, 50};     // Bright gold burst
     public static final int[] VICTORY_COLOR_1 = {255, 100, 0};
     public static final int[] VICTORY_COLOR_2 = {0, 100, 255};
     public static final double VICTORY_FLASH_SPEED = 0.9;
