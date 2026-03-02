@@ -1,9 +1,7 @@
 package frc.robot;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import edu.wpi.first.math.geometry.Translation2d;
 
@@ -23,10 +21,8 @@ public final class Constants {
 
   /** CAN IDs - Swerve IDs are in TunerConstants */
   public static final class CANIds {
-    public static final int TURRET_MOTOR = 13;
-    public static final int SHOOTER_TOP_MOTOR = 20;
-    public static final int SHOOTER_BOTTOM_MOTOR = 21;
-    public static final int TURRET_FEED_MOTOR = 23;
+    public static final int SHOOTER_MOTOR = 20;
+    public static final int TRIGGER_MOTOR = 23;
     public static final int INTAKE_PIVOT_MOTOR = 25;
     public static final int INTAKE_ROLLER_MOTOR = 26;
     public static final int INTAKE_CANCODER = 28;
@@ -36,10 +32,9 @@ public final class Constants {
   /** Toggle subsystems for testing */
   public static final class SubsystemEnabled {
     public static final boolean DRIVETRAIN = true;
-    public static final boolean TURRET = true;
     public static final boolean SHOOTER = true;
     public static final boolean VISION = true;
-    public static final boolean TURRET_FEED = true;
+    public static final boolean TRIGGER = true;
     public static final boolean INTAKE = true;
     public static final boolean LEDS = true;
   }
@@ -78,90 +73,54 @@ public final class Constants {
     public static final boolean AUTO_SHUTTLE_ENABLED = true;
   }
 
-  // Shooter constants
+  // Shooter constants (single motor fixed shooter)
   public static final class Shooter {
-    public static final int TOP_MOTOR_ID = CANIds.SHOOTER_TOP_MOTOR;
-    public static final int BOTTOM_MOTOR_ID = CANIds.SHOOTER_BOTTOM_MOTOR;
-    public static final boolean TOP_MOTOR_INVERTED = false;
-    public static final boolean BOTTOM_MOTOR_INVERTED = true;
+    public static final int MOTOR_ID = CANIds.SHOOTER_MOTOR;
+    public static final boolean MOTOR_INVERTED = false;
     public static final double WHEEL_RADIUS_METERS = 0.0508;
     public static final double MAX_POWER = 1.0;
     public static final double MIN_POWER = 0.0;
     public static final double SPIN_UP_TIME_SECONDS = 0.5;
-    public static final double TOP_MOTOR_POWER_OFFSET = 0.0;
-    public static final double BOTTOM_MOTOR_POWER_OFFSET = 0.0;
+    public static final double MOTOR_POWER_OFFSET = 0.0;
     
     // --- Ball properties (2026 game piece) ---
-    // Used for flight time estimation and future physics-based calculations
-    public static final double BALL_DIAMETER_METERS = 0.1500;    // 5.91in = 15.0cm
+    public static final double BALL_DIAMETER_METERS = 0.1500;
     public static final double BALL_RADIUS_METERS = BALL_DIAMETER_METERS / 2.0;
-    public static final double BALL_MASS_KG = 0.215;             // ~0.215-0.227kg (0.448-0.500lb)
-    public static final double BALL_COMPRESSION_METERS = 0.0135; // ~0.53in compression against wheels
-    /** Effective ball radius under compression (for surface speed calculations) */
+    public static final double BALL_MASS_KG = 0.215;
+    public static final double BALL_COMPRESSION_METERS = 0.0135;
     public static final double BALL_COMPRESSED_RADIUS_METERS = BALL_RADIUS_METERS - (BALL_COMPRESSION_METERS / 2.0);
-    /** Approximate height of the shooter exit above ground (meters). Measure on the actual robot. */
     public static final double SHOOTER_EXIT_HEIGHT_METERS = 0.50;
     
-    /** Idle RPM for both motors when not actively spooling. 
-     *  Keeps flywheels warm so spin-up is faster. Tunable via SmartDashboard "Shooter/IdleRPM". 
-     *  Set to 0 to fully stop when idle. */
+    /** Idle RPM when not actively spooling. Keeps flywheel warm for faster spin-up. */
     public static final double DEFAULT_IDLE_RPM = 500.0;
     
     /** Free speed of the motor in rotations per second (Kraken X60 ~100 rps) */
     public static final double MOTOR_FREE_SPEED_RPS = 100.0;
     
-    // --- Unified Shooting Calibration ---
+    // --- Shooting Calibration ---
     //
-    // All-in-one calibration table: each point stores the robot's position RELATIVE
-    // TO THE TARGET and the tuned shooting parameters at that position.
-    //
-    // Using target-relative coordinates makes this table alliance-independent:
-    // the same (relX, relY) vector applies whether you're Blue or Red, because
-    // ShootingCalculator computes (turretPos - targetPos) after resolving the
-    // correct alliance-specific target position.
-    //
-    // Each entry: {relX, relY, bearingDeg, turretOffsetDeg, topRPM, bottomRPM}
-    //   - relX:           Turret X relative to target (meters, turretX - targetX)
-    //   - relY:           Turret Y relative to target (meters, turretY - targetY)
-    //   - bearingDeg:     Robot-relative angle to target (degrees, -180 to +180, 0=facing target)
-    //   - turretOffsetDeg: Turret angle correction at this pose (degrees)
-    //   - topRPM:         Top motor RPM at this pose
-    //   - bottomRPM:      Bottom motor RPM at this pose
+    // Distance-based calibration table for the fixed shooter.
+    // Each entry: {relX, relY, bearingDeg, shooterRPM}
+    //   - relX:       Robot X relative to target (meters, robotX - targetX)
+    //   - relY:       Robot Y relative to target (meters, robotY - targetY)
+    //   - bearingDeg: Robot-relative angle to target (degrees, -180 to +180)
+    //   - shooterRPM: Shooter motor RPM at this pose
     //
     // At runtime, ShootingCalculator computes the robot's current (relX, relY, bearing)
-    // and uses inverse-distance-weighted interpolation across all points to produce
-    // the turret offset, topRPM, and bottomRPM in a single lookup.
+    // and uses inverse-distance-weighted interpolation to produce the RPM.
     //
-    // Calibration procedure:
-    //   1. Run FullShooterCalibrationCommand
-    //   2. Drive to a position, adjust turret offset + RPMs until shots are accurate
-    //   3. Press RecordPoint, which saves {relX, relY, bearing, turretOffset, topRPM, bottomRPM}
-    //   4. Move to a new position/orientation and repeat
-    //   5. Press PrintTable to get copy-paste code for this constant
-    //
-    // The table works for both hub and trench shots since the relative position
-    // encodes distance and angle to whichever target the robot is aiming at.
-    // Calibrate at various positions around each target.
-    //
-    // INTERPOLATION WEIGHTS (in ShootingCalculator):
-    //   Distance in (relX, relY) space = Euclidean meters
-    //   Bearing difference = scaled by CALIBRATION_BEARING_WEIGHT
-    //   Combined = sqrt(dXY² + (dBearing * weight)²)
-    //   Points closer in this combined space have more influence.
-    //
-    public static final double CALIBRATION_BEARING_WEIGHT = 0.05; // How much 1° of bearing counts vs 1m of distance
+    public static final double CALIBRATION_BEARING_WEIGHT = 0.05;
     public static final List<double[]> SHOOTING_CALIBRATION = new ArrayList<>() {{
-      add(new double[]{2.81, 0.76, 19, 0.00, 1000, 2500}); add(new double[]{0.79, 1.95, 62, 0.00, 500, 2500});
-      add(new double[]{3.41, 0.46, 4, 0.00, 1300, 2500}); add(new double[]{2.29, 1.76, 81, 0.00, 1300, 2500});
-      add(new double[]{4.61, -0.27, 7, 0.00, 2050, 3050}); add(new double[]{5.32, 1.41, 38, 0.00, 2300, 3050});
-      add(new double[]{3.22, -0.18, 13, 0.00, 1300, 2500}); add(new double[]{1.99, 0.61, 30, 0.00, 500, 2500});
-      add(new double[]{2.48, 1.32, 35, 0.00, 1200, 2600}); add(new double[]{3.76, 1.13, 4, 0.00, 1750, 2500});
-
+      add(new double[]{2.81, 0.76, 19, 2500}); add(new double[]{0.79, 1.95, 62, 2500});
+      add(new double[]{3.41, 0.46, 4, 2500}); add(new double[]{2.29, 1.76, 81, 2500});
+      add(new double[]{4.61, -0.27, 7, 3050}); add(new double[]{5.32, 1.41, 38, 3050});
+      add(new double[]{3.22, -0.18, 13, 2500}); add(new double[]{1.99, 0.61, 30, 2500});
+      add(new double[]{2.48, 1.32, 35, 2600}); add(new double[]{3.76, 1.13, 4, 2500});
     }};
   }
 
-  public static final class TurretFeed {
-    public static final int MOTOR_ID = CANIds.TURRET_FEED_MOTOR;
+  public static final class Trigger {
+    public static final int MOTOR_ID = CANIds.TRIGGER_MOTOR;
     public static final boolean MOTOR_INVERTED = false;
     public static final double IDLE_SPEED = 0.15;
     public static final double SHOOT_SPEED = -1.0; // Negative = reverse direction to feed balls into shooter
@@ -232,59 +191,6 @@ public final class Constants {
     public static final double MAX_DRIVE_SPEED_MPS = 4.5;
     public static final double MAX_ANGULAR_SPEED_RAD = Math.PI * 2;
     public static final double SLOW_MODE_MULTIPLIER = 0.3;
-  }
-  
-  public static final class Turret {
-    public static final int MOTOR_ID = CANIds.TURRET_MOTOR;
-    public static final double GEAR_RATIO = 10.00537109375; // Calibrate with CalibrateTurretGearRatioCommand
-    public static final boolean MOTOR_INVERTED = true;
-    
-    // Bounded 0-360 position system. STARTUP_ANGLE is the internal position at power-on.
-    // HOME_ANGLE_DEG is the EXTERNAL angle the turret physically faces at power-on.
-    //   It tells the code "at power-on, the turret is pointing at this external angle."
-    //   External 0 = robot forward. External 90 = robot left. External -90 = robot right.
-    //   Since the turret physically starts facing left, HOME_ANGLE_DEG = 90.
-    //
-    // MOTOR_INVERTED = true because the motor's physical CW = positive encoder,
-    //   but the math convention requires positive internal angle change to go CCW.
-    //   Phoenix 6 inversion flips BOTH encoder and output together, keeping math consistent.
-    //
-    // MIN/MAX are in INTERNAL coordinates (0-360).
-    //   Internal 90 = forward, Internal 180 = home/left (startup).
-    //   Usable range wraps through 0/360: from MIN(75) -> 0/360 -> through 90,180 -> to MAX(224).
-    //   Dead zone: MAX(224) -> through 270,315 -> MIN(75) (cannot traverse).
-    public static final double STARTUP_ANGLE_DEG = 180.0; // Internal angle at power-on (arbitrary reference)
-    public static final double HOME_ANGLE_DEG = 90.0;     // External angle at power-on (90 = facing left)
-    public static final double MIN_ANGLE_DEG = 75.0;      // CW internal limit
-    public static final double MAX_ANGLE_DEG = 224.0;     // CCW internal limit
-
-    public static final double LIMIT_SAFETY_MARGIN_DEG = 10.0;
-    
-    // PID
-    public static final double PID_P = 0.3;
-    public static final double PID_I = 0.05;
-    public static final double PID_D = 0.015;
-    
-    // Motion
-    public static final double GLOBAL_ANGLE_OFFSET_DEG = 0.0;
-    public static final double MAX_ANGULAR_SPEED_DEG_PER_SEC = 90.0;
-    public static final double MAX_OUTPUT = 0.3;
-    
-    // Position on robot (6.25" from back, 6.25" from left edge)
-    public static final double TURRET_FROM_BACK_INCHES = 6.25;
-    public static final double TURRET_FROM_LEFT_INCHES = 6.25;
-    public static final double TURRET_X_OFFSET = (TURRET_FROM_BACK_INCHES - (Robot.LENGTH_INCHES / 2.0)) * 0.0254;
-    public static final double TURRET_Y_OFFSET = ((Robot.WIDTH_INCHES / 2.0) - TURRET_FROM_LEFT_INCHES) * 0.0254;
-    
-    public static final double ON_TARGET_TOLERANCE_DEG = 0.5;
-    
-    // --- Rotation offset calibration is now part of unified SHOOTING_CALIBRATION ---
-    // See Constants.Shooter.SHOOTING_CALIBRATION; each point includes turretOffsetDeg.
-    // The bearing weight for interpolation is Constants.Shooter.CALIBRATION_BEARING_WEIGHT.
-    
-    // Per-tag calibration offsets (initialize all to 0)
-    public static final Map<Integer, Double> TAG_ANGLE_OFFSETS = new HashMap<>() {{ for (int i = 1; i <= 32; i++) put(i, 0.0); }};
-    public static final Map<Integer, Double> TAG_DISTANCE_OFFSETS = new HashMap<>() {{ for (int i = 1; i <= 32; i++) put(i, 0.0); }};
   }
   
   public static final class Tags {

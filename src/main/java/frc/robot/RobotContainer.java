@@ -14,24 +14,19 @@ import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import frc.robot.commands.AutoShootCommand;
-import frc.robot.commands.calibrations.CalibrateTurretGearRatioCommand;
 import frc.robot.commands.calibrations.DistanceOffsetCalibrationCommand;
 import frc.robot.commands.calibrations.FullShooterCalibrationCommand;
 import frc.robot.commands.calibrations.VisionCalibrationCommand;
 import frc.robot.commands.calibrations.ShootingCalibrationCommand;
-import frc.robot.commands.calibrations.TurretPIDCalibrationCommand;
-import frc.robot.commands.calibrations.TurretRotationCalibrationCommand;
 import frc.robot.commands.intake.DeployIntakeCommand;
 import frc.robot.commands.intake.RetractIntakeCommand;
-import frc.robot.commands.turret.AimTurretToPoseCommand;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.IntakeSubsystem;
 import frc.robot.subsystems.LEDSubsystem;
 import frc.robot.subsystems.VisionSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
-import frc.robot.subsystems.TurretFeedSubsystem;
-import frc.robot.subsystems.TurretSubsystem;
+import frc.robot.subsystems.TriggerSubsystem;
 import frc.robot.util.Elastic;
 import frc.robot.util.Elastic.NotificationLevel;
 import frc.robot.util.ShootingCalculator;
@@ -49,10 +44,9 @@ public class RobotContainer {
 
     // Subsystems (null when disabled in Constants.SubsystemEnabled)
     private final CommandSwerveDrivetrain drivetrain;
-    private final TurretSubsystem turret;
     private final ShooterSubsystem shooter;
     private final VisionSubsystem vision;
-    private final TurretFeedSubsystem turretFeed;
+    private final TriggerSubsystem trigger;
     private final IntakeSubsystem intake;
     private final LEDSubsystem leds;
 
@@ -88,10 +82,9 @@ public class RobotContainer {
     public RobotContainer() {
         // 1. Init subsystems
         drivetrain = Constants.SubsystemEnabled.DRIVETRAIN  ? TunerConstants.createDrivetrain() : null;
-        turret     = Constants.SubsystemEnabled.TURRET      ? new TurretSubsystem()             : null;
         shooter    = Constants.SubsystemEnabled.SHOOTER     ? new ShooterSubsystem()             : null;
         vision     = Constants.SubsystemEnabled.VISION      ? new VisionSubsystem()              : null;
-        turretFeed = Constants.SubsystemEnabled.TURRET_FEED ? new TurretFeedSubsystem()          : null;
+        trigger    = Constants.SubsystemEnabled.TRIGGER     ? new TriggerSubsystem()             : null;
         intake     = Constants.SubsystemEnabled.INTAKE      ? new IntakeSubsystem()              : null;
         leds       = Constants.SubsystemEnabled.LEDS        ? new LEDSubsystem()                 : null;
 
@@ -113,8 +106,8 @@ public class RobotContainer {
 
     private void logSubsystemStatus() {
         System.out.println("[Subsystems] Drive=" + (drivetrain != null)
-                + " Turret=" + (turret != null) + " Shooter=" + (shooter != null)
-                + " Vision=" + (vision != null) + " Feed=" + (turretFeed != null)
+                + " Shooter=" + (shooter != null)
+                + " Vision=" + (vision != null) + " Trigger=" + (trigger != null)
                 + " Intake=" + (intake != null) + " LEDs=" + (leds != null));
     }
 
@@ -123,35 +116,23 @@ public class RobotContainer {
     // =========================================================================
 
     private void registerNamedCommands() {
-        if (turret != null && shooter != null && vision != null) {
+        if (shooter != null && vision != null) {
             NamedCommands.registerCommand("autoShoot",
-                    new AutoShootCommand(turret, shooter, vision, leds, turretFeed, drivetrain)
+                    new AutoShootCommand(shooter, vision, leds, trigger, drivetrain)
                             .withTimeout(3.0));
             NamedCommands.registerCommand("quickShoot",
-                    new AutoShootCommand(turret, shooter, vision, leds, turretFeed, drivetrain)
+                    new AutoShootCommand(shooter, vision, leds, trigger, drivetrain)
                             .withTimeout(1.5));
-        }
-        if (turret != null && vision != null) {
-            NamedCommands.registerCommand("aimAtPose",
-                    new AimTurretToPoseCommand(turret, vision).withTimeout(2.0));
+            NamedCommands.registerCommand("TrainingShot",
+                    new AutoShootCommand(shooter, vision, leds, trigger, drivetrain)
+                            .withTimeout(2.5));
         }
         if (shooter != null) {
             NamedCommands.registerCommand("spinUpShooter",
                     Commands.run(() -> shooter.setTargetRPM(
-                            shootingCalc.getTargetTopRPM(),
-                            shootingCalc.getTargetBottomRPM()), shooter));
+                            shootingCalc.getTargetRPM()), shooter));
             NamedCommands.registerCommand("stopShooter",
                     Commands.runOnce(() -> shooter.stop(), shooter));
-        }
-        if (turret != null) {
-            NamedCommands.registerCommand("centerTurret",
-                    Commands.runOnce(() -> turret.setTargetAngle(0), turret));
-        }
-        // TrainingShot: shoot with no alliance window check, used by Training Run auto
-        if (turret != null && shooter != null && vision != null) {
-            NamedCommands.registerCommand("TrainingShot",
-                    new AutoShootCommand(turret, shooter, vision, leds, turretFeed, drivetrain)
-                            .withTimeout(2.5));
         }
         NamedCommands.registerCommand("enableShuttleMode",
                 Commands.runOnce(() -> gameState.setShuttleMode(true)));
@@ -192,9 +173,9 @@ public class RobotContainer {
         }));
 
         // A: Auto-shoot
-        if (turret != null && shooter != null && vision != null) {
+        if (shooter != null && vision != null) {
             driver.a().whileTrue(
-                    new AutoShootCommand(turret, shooter, vision, leds, turretFeed, drivetrain));
+                    new AutoShootCommand(shooter, vision, leds, trigger, drivetrain));
         }
 
         // B: Force shoot toggle
@@ -222,16 +203,16 @@ public class RobotContainer {
 
     private void configureOperatorBindings() {
         // RT: Auto-shoot
-        if (turret != null && shooter != null && vision != null) {
+        if (shooter != null && vision != null) {
             operator.rightTrigger(0.5).whileTrue(
-                    new AutoShootCommand(turret, shooter, vision, leds, turretFeed, drivetrain));
+                    new AutoShootCommand(shooter, vision, leds, trigger, drivetrain));
         }
 
         // LT: Pre-spool shooter
         if (shooter != null) {
             operator.leftTrigger(0.5).whileTrue(
                     Commands.run(() -> {
-                        shooter.setTargetRPM(shootingCalc.getTargetTopRPM(), shootingCalc.getTargetBottomRPM());
+                        shooter.setTargetRPM(shootingCalc.getTargetRPM());
                         if (leds != null) leds.setAction(LEDSubsystem.ActionState.SPOOLING);
                     }, shooter).finallyDo(() -> {
                         shooter.stop();
@@ -261,22 +242,12 @@ public class RobotContainer {
                     .alongWith(ledClear()));
         }
 
-        // B: Aim turret only
-        if (turret != null && vision != null) {
-            operator.b().whileTrue(new AimTurretToPoseCommand(turret, vision));
-        }
-
         // X: E-stop motors
         operator.x().onTrue(Commands.runOnce(() -> {
             if (shooter != null) shooter.stop();
-            if (turretFeed != null) turretFeed.stop();
+            if (trigger != null) trigger.stop();
             notify("E-STOP");
         }));
-
-        // Y: Center turret
-        if (turret != null) {
-            operator.y().onTrue(Commands.runOnce(() -> turret.setTargetAngle(0), turret));
-        }
 
         // Start: Reset game state
         operator.start().onTrue(Commands.runOnce(() -> {
@@ -291,12 +262,12 @@ public class RobotContainer {
         }));
 
         // POV Down: Feed shot (for calibration - feeds ball into shooter while held)
-        if (turretFeed != null) {
+        if (trigger != null) {
             operator.povDown().whileTrue(
                     Commands.startEnd(
-                            () -> turretFeed.setShoot(),
-                            () -> turretFeed.stop(),
-                            turretFeed));
+                            () -> trigger.setShoot(),
+                            () -> trigger.stop(),
+                            trigger));
         }
     }
 
@@ -326,11 +297,6 @@ public class RobotContainer {
             }));
         }
 
-        // Turret: auto-aim at current target
-        if (turret != null && vision != null) {
-            turret.setDefaultCommand(new AimTurretToPoseCommand(turret, vision));
-        }
-
         // Shooter: idle at low RPM to keep flywheels warm.
         // Tunable via SmartDashboard "Shooter/IdleRPM". Set to 0 to fully stop.
         // Full spool-up only happens when operator holds LT or during AutoShoot.
@@ -340,7 +306,7 @@ public class RobotContainer {
                 double idleRPM = SmartDashboard.getNumber("Shooter/IdleRPM",
                         Constants.Shooter.DEFAULT_IDLE_RPM);
                 if (idleRPM > 0.1) {
-                    shooter.setTargetRPM(idleRPM, idleRPM);
+                    shooter.setTargetRPM(idleRPM);
                 } else {
                     shooter.stop();
                 }
@@ -356,25 +322,13 @@ public class RobotContainer {
         SmartDashboard.putData("Auto Chooser", autoChooser);
 
         // Calibration commands for pit use
-        if (turret != null && shooter != null && vision != null) {
-            SmartDashboard.putData("Tuning/Cal: Full Shooter",
-                    new FullShooterCalibrationCommand(turret, shooter, vision));
-        }
         if (shooter != null && vision != null) {
+            SmartDashboard.putData("Tuning/Cal: Full Shooter",
+                    new FullShooterCalibrationCommand(shooter, vision));
             SmartDashboard.putData("Tuning/Cal: Shooting",
                     new ShootingCalibrationCommand(shooter, vision));
             SmartDashboard.putData("Tuning/Cal: Distance Offset",
                     new DistanceOffsetCalibrationCommand(shooter, vision));
-        }
-        if (turret != null) {
-            SmartDashboard.putData("Tuning/Cal: Turret Gear Ratio",
-                    new CalibrateTurretGearRatioCommand(turret));
-            SmartDashboard.putData("Tuning/Cal: Turret PID",
-                    new TurretPIDCalibrationCommand(turret));
-        }
-        if (turret != null && vision != null) {
-            SmartDashboard.putData("Tuning/Cal: Turret Rotation",
-                    new TurretRotationCalibrationCommand(turret, vision));
         }
         if (vision != null) {
             SmartDashboard.putData("Tuning/Cal: Vision",
@@ -383,12 +337,12 @@ public class RobotContainer {
 
         // Quick-fire dashboard button for calibration: feeds a ball into the shooter
         // without requiring alliance windows or the full AutoShoot sequence.
-        if (turretFeed != null) {
+        if (trigger != null) {
             SmartDashboard.putData("Tuning/Feed Shot",
                     Commands.startEnd(
-                            () -> turretFeed.setShoot(),
-                            () -> turretFeed.stop(),
-                            turretFeed
+                            () -> trigger.setShoot(),
+                            () -> trigger.stop(),
+                            trigger
                     ).withName("Feed Shot"));
         }
     }
@@ -406,10 +360,7 @@ public class RobotContainer {
                     drivetrain.getState().Pose,
                     drivetrain.getState().Speeds,
                     gameState.getTargetMode(),
-                    calibration.getTurretAngleOffset(),
-                    calibration.getTopRPMOffset(),
-                    calibration.getBottomRPMOffset(),
-                    calibration.getTurretRotationOffset());
+                    calibration.getRPMOffset());
             calibration.setCurrentDistance(shootingCalc.getDistance());
             calibration.setCurrentBearing(shootingCalc.getRawBearing());
             calibration.setCurrentX(shootingCalc.getRelativeX());
@@ -422,8 +373,6 @@ public class RobotContainer {
         vision.setDrivetrainPose(drivetrain.getState().Pose);
 
         // Feed gyro heading to vision pose estimator for better single-tag estimates.
-        // PhotonVision uses this as a reference pose for the fallback strategy when
-        // only 1 tag is visible. Multi-tag PNP doesn't need it but it doesn't hurt.
         double yawDegrees = drivetrain.getState().Pose.getRotation().getDegrees();
         double yawRate = Math.toDegrees(drivetrain.getState().Speeds.omegaRadiansPerSecond);
         vision.setRobotOrientation(yawDegrees, yawRate, 0, 0, 0, 0);
@@ -432,55 +381,40 @@ public class RobotContainer {
         gameState.update(isInShuttleZone());
 
         // Fuse vision into drivetrain odometry.
-        // Multi-tag: highly trusted (tight std devs for x, y, AND theta).
-        // Single-tag: trust x/y but NOT theta. Single-tag rotation from PNP is very unreliable
-        //   and can corrupt the gyro heading, which breaks all aiming.
         if (vision.hasVisionPose()) {
             edu.wpi.first.math.geometry.Pose2d visionPose = vision.getRobotPose();
             
             if (vision.isMultiTag()) {
-                // Multi-tag: trust everything including rotation.
-                // On first multi-tag detection, seed the heading so PnpDistanceTrigSolve
-                // can use the (now correct) gyro heading for future single-tag estimates.
                 if (!hasSeededHeadingFromVision) {
                     drivetrain.resetPose(visionPose);
                     hasSeededHeadingFromVision = true;
                     vision.notifyHeadingSeeded();
                     System.out.println("[RobotContainer] Vision pose initialized (MultiTag): "
-                            + String.format("(%.2f, %.2f) @ %.1f°",
+                            + String.format("(%.2f, %.2f) @ %.1f\u00b0",
                                     visionPose.getX(), visionPose.getY(),
                                     visionPose.getRotation().getDegrees()));
                     Elastic.sendNotification(
                             new Elastic.Notification(NotificationLevel.INFO,
                                     "Vision Pose Initialized",
-                                    String.format("MultiTag: (%.1f, %.1f) @ %.1f° from %d tags",
+                                    String.format("MultiTag: (%.1f, %.1f) @ %.1f\u00b0 from %d tags",
                                             visionPose.getX(), visionPose.getY(),
                                             visionPose.getRotation().getDegrees(),
                                             vision.getTargetCount())));
                 }
 
-                // Multi-tag: tight std devs, fully trusted
                 double[] std = vision.getVisionStdDevs();
                 drivetrain.addVisionMeasurement(
                         visionPose,
                         vision.getPoseTimestamp(),
                         VecBuilder.fill(std[0], std[1], std[2]));
             } else {
-                // Single-tag: trust X/Y position but NOT rotation.
-                // Single-tag PNP rotation is unreliable and will fight the gyro,
-                // causing the pose to oscillate and aiming to break.
-                // Use very loose theta std dev so gyro stays dominant for heading.
                 double[] std = vision.getVisionStdDevs();
-                double looseTheta = 999.0; // Effectively ignore vision rotation
+                double looseTheta = 999.0;
                 drivetrain.addVisionMeasurement(
                         visionPose,
                         vision.getPoseTimestamp(),
                         VecBuilder.fill(std[0], std[1], looseTheta));
                         
-                // If heading hasn't been seeded yet and we only see single tags,
-                // still notify so PnpDistanceTrigSolve can be used (it will use
-                // the gyro heading which starts at 0. User must manually seed
-                // via Y button / gyro reset when facing a known direction).
                 if (!hasSeededHeadingFromVision) {
                     hasSeededHeadingFromVision = true;
                     vision.notifyHeadingSeeded();
@@ -517,7 +451,7 @@ public class RobotContainer {
     public void stopAllMotors() {
         if (drivetrain != null) drivetrain.setControl(brake);
         if (shooter != null)    shooter.stop();
-        if (turretFeed != null) turretFeed.stop();
+        if (trigger != null)    trigger.stop();
         if (intake != null) {
             intake.stopRollers();
             intake.retract();
