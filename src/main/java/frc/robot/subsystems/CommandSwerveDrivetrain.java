@@ -82,10 +82,10 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     /** Auto-shuttle boundary line */
     private final FieldObject2d m_shuttleBoundaryObject;
 
-    /** Computed target point (where ShootingCalculator says turret is aiming) */
+    /** Computed target point (where ShootingCalculator says the shooter is aiming) */
     private final FieldObject2d m_piTargetObject;
 
-    /** Computed aim line (from turret to ShootingCalculator's calculated target) */
+    /** Computed aim line (from robot to ShootingCalculator's calculated target) */
     private final FieldObject2d m_piAimLineObject;
 
     // FIELD INITIALIZATION HELPER - Initializes field objects (must be called in constructor)
@@ -377,41 +377,15 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         
         m_aimTargetObject.setPose(new Pose2d(currentTarget, Rotation2d.kZero));
         
-        // Draw aim line from TURRET position to target (accounts for turret offset)
-        Translation2d turretPosition = getTurretFieldPosition(currentPose);
-        drawAimLine(turretPosition, currentTarget);
+        // Draw aim line from robot center to target (fixed shooter, no turret offset)
+        Translation2d robotPosition = currentPose.getTranslation();
+        drawAimLine(robotPosition, currentTarget);
         
-        // Draw ShootingCalculator aim line using actual shooting solution (turret angle + distance)
-        drawCalculatedAimLine(currentPose, turretPosition);
+        // Draw ShootingCalculator aim line using actual shooting solution (robot heading + distance)
+        drawCalculatedAimLine(currentPose, robotPosition);
         
         // Draw shuttle boundary line
         drawShuttleBoundaryLine(alliance);
-    }
-    
-    /**
-     * Gets the turret position in field coordinates.
-     * Accounts for the turret's offset from robot center.
-     * @param robotPose Current robot pose
-     * @return Turret position as Translation2d in field coordinates
-     */
-    private Translation2d getTurretFieldPosition(Pose2d robotPose) {
-        // Turret offset in robot coordinates (from Constants)
-        double turretX = Constants.Turret.TURRET_X_OFFSET;
-        double turretY = Constants.Turret.TURRET_Y_OFFSET;
-        
-        // Rotate turret offset by robot heading to get field-relative offset
-        double robotHeadingRad = robotPose.getRotation().getRadians();
-        double cos = Math.cos(robotHeadingRad);
-        double sin = Math.sin(robotHeadingRad);
-        
-        double fieldOffsetX = turretX * cos - turretY * sin;
-        double fieldOffsetY = turretX * sin + turretY * cos;
-        
-        // Add to robot position
-        return new Translation2d(
-            robotPose.getX() + fieldOffsetX,
-            robotPose.getY() + fieldOffsetY
-        );
     }
     
     /**
@@ -448,17 +422,17 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
     /**
      * Draws the ShootingCalculator's computed aim line on the field.
-     * Uses the calculator's turret angle and distance to show exactly where
-     * the turret will shoot, including lead angle compensation.
+     * Uses the calculator's angle-to-target and distance to show where
+     * the fixed shooter is pointed, based on robot heading.
      * 
      * @param robotPose Current robot pose
-     * @param turretPosition Turret position in field coordinates
+     * @param shooterPosition Shooter position in field coordinates (robot center)
      */
-    private void drawCalculatedAimLine(Pose2d robotPose, Translation2d turretPosition) {
+    private void drawCalculatedAimLine(Pose2d robotPose, Translation2d shooterPosition) {
         ShootingCalculator calc = ShootingCalculator.getInstance();
         
-        double turretAngle = calc.getTurretAngle();  // degrees, robot-relative
-        double distance = calc.getDistance();          // meters to target
+        double angleToTarget = calc.getAngleToTarget();  // degrees, robot-relative
+        double distance = calc.getDistance();              // meters to target
         
         // If distance is zero or very small, nothing to draw
         if (distance < 0.1) {
@@ -467,28 +441,28 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             return;
         }
         
-        // Convert turret angle (robot-relative) to field angle
+        // Convert robot-relative angle to field angle
         double robotHeadingDeg = robotPose.getRotation().getDegrees();
-        double fieldAngleDeg = robotHeadingDeg + turretAngle;
+        double fieldAngleDeg = robotHeadingDeg + angleToTarget;
         double fieldAngleRad = Math.toRadians(fieldAngleDeg);
         
         // Calculate the computed target point
-        double targetX = turretPosition.getX() + distance * Math.cos(fieldAngleRad);
-        double targetY = turretPosition.getY() + distance * Math.sin(fieldAngleRad);
+        double targetX = shooterPosition.getX() + distance * Math.cos(fieldAngleRad);
+        double targetY = shooterPosition.getY() + distance * Math.sin(fieldAngleRad);
         Translation2d computedTarget = new Translation2d(targetX, targetY);
         
         // Set target marker
         m_piTargetObject.setPose(new Pose2d(computedTarget, Rotation2d.fromDegrees(fieldAngleDeg)));
         
-        // Draw line from turret to target point
+        // Draw line from shooter to target point
         int numPoints = 10;
         Pose2d[] linePoints = new Pose2d[numPoints];
         Rotation2d lineRotation = Rotation2d.fromDegrees(fieldAngleDeg);
         
         for (int i = 0; i < numPoints; i++) {
             double t = (double) i / (numPoints - 1);
-            double x = turretPosition.getX() + t * (targetX - turretPosition.getX());
-            double y = turretPosition.getY() + t * (targetY - turretPosition.getY());
+            double x = shooterPosition.getX() + t * (targetX - shooterPosition.getX());
+            double y = shooterPosition.getY() + t * (targetY - shooterPosition.getY());
             linePoints[i] = new Pose2d(x, y, lineRotation);
         }
         
@@ -497,11 +471,10 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         // Publish aim data to dashboard for debugging
         DashboardHelper.putNumber(Category.DEBUG, "Aim/FieldAngleDeg", fieldAngleDeg);
         DashboardHelper.putNumber(Category.DEBUG, "Aim/Distance", distance);
-        DashboardHelper.putNumber(Category.DEBUG, "Aim/TurretAngle", turretAngle);
+        DashboardHelper.putNumber(Category.DEBUG, "Aim/AngleToTarget", angleToTarget);
         DashboardHelper.putNumber(Category.DEBUG, "Aim/TargetX", targetX);
         DashboardHelper.putNumber(Category.DEBUG, "Aim/TargetY", targetY);
         DashboardHelper.putBoolean(Category.DEBUG, "Aim/IsMoving", calc.isMoving());
-        DashboardHelper.putNumber(Category.DEBUG, "Aim/LeadAngle", calc.getLeadAngle());
     }
     
     /**

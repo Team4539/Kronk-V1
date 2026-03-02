@@ -29,9 +29,6 @@ import frc.robot.util.DashboardHelper.Category;
 /**
  * Handles vision processing using a PhotonVision camera.
  * Detects AprilTags, estimates robot pose, and calculates distances/angles to targets.
- * 
- * This is a drop-in replacement for the old LimelightSubsystem, maintaining
- * the same public interface so all commands work without modification.
  */
 public class VisionSubsystem extends SubsystemBase {
 
@@ -336,70 +333,55 @@ public class VisionSubsystem extends SubsystemBase {
     }
 
     /**
-     * Get the turret position in field coordinates.
-     * Accounts for the turret's offset from robot center.
-     * @return Turret position as Translation2d in field coordinates
+     * Get the shooter position in field coordinates.
+     * For a fixed shooter, this is simply the robot center position.
+     * @return Shooter position as Translation2d in field coordinates
      */
-    public Translation2d getTurretFieldPosition() {
-        Pose2d robot = getRobotPose();
-
-        double turretX = Constants.Turret.TURRET_X_OFFSET;
-        double turretY = Constants.Turret.TURRET_Y_OFFSET;
-
-        double robotHeadingRad = robot.getRotation().getRadians();
-        double cos = Math.cos(robotHeadingRad);
-        double sin = Math.sin(robotHeadingRad);
-
-        double fieldOffsetX = turretX * cos - turretY * sin;
-        double fieldOffsetY = turretX * sin + turretY * cos;
-
-        return new Translation2d(
-            robot.getX() + fieldOffsetX,
-            robot.getY() + fieldOffsetY
-        );
+    public Translation2d getShooterFieldPosition() {
+        return getRobotPose().getTranslation();
     }
 
     // DISTANCE & ANGLE TO HUB
 
     /**
-     * Get straight-line distance from TURRET to the hub center.
-     * Uses actual turret position, not robot center.
+     * Get straight-line distance from robot center to the hub center.
      * @return Distance in meters
      */
     public double getDistanceToHub() {
         Translation2d hubPosition = getHubPosition();
-        Translation2d turretPosition = getTurretFieldPosition();
-        return turretPosition.getDistance(hubPosition);
+        Translation2d robotPosition = getShooterFieldPosition();
+        return robotPosition.getDistance(hubPosition);
     }
 
     /**
-     * Get the FIELD-RELATIVE angle from TURRET to hub.
+     * Get the FIELD-RELATIVE angle from robot center to hub.
      * 0 degrees = toward positive X axis of field.
      * @return Angle in degrees
      */
     public double getAngleToHub() {
         Translation2d hubPosition = getHubPosition();
-        Translation2d turretPosition = getTurretFieldPosition();
+        Translation2d robotPosition = getShooterFieldPosition();
 
-        double dx = hubPosition.getX() - turretPosition.getX();
-        double dy = hubPosition.getY() - turretPosition.getY();
+        double dx = hubPosition.getX() - robotPosition.getX();
+        double dy = hubPosition.getY() - robotPosition.getY();
 
         return Math.toDegrees(Math.atan2(dy, dx));
     }
 
     /**
-     * Get the TURRET angle needed to point at the hub.
-     * This is ROBOT-RELATIVE (accounts for robot heading).
-     * @return Turret angle in degrees (-180 to +180)
+     * Get the robot-relative angle to the hub.
+     * For a fixed shooter, this tells you how much the robot needs to rotate
+     * to face the hub.
+     * @return Angle in degrees (-180 to +180, 0 = robot facing hub)
      */
-    public double getTurretAngleToHub() {
+    public double getRobotAngleToHub() {
         double fieldAngleToHub = getAngleToHub();
         double robotHeading = getRobotPose().getRotation().getDegrees();
 
-        double turretAngle = fieldAngleToHub - robotHeading;
-        turretAngle = ((turretAngle + 180) % 360 + 360) % 360 - 180;
+        double angle = fieldAngleToHub - robotHeading;
+        angle = ((angle + 180) % 360 + 360) % 360 - 180;
 
-        return turretAngle;
+        return angle;
     }
 
     /**
@@ -484,41 +466,43 @@ public class VisionSubsystem extends SubsystemBase {
     }
 
     /**
-     * Get straight-line distance from TURRET to trench target.
+     * Get straight-line distance from robot center to trench target.
      * @return Distance in meters
      */
     public double getDistanceToTrench() {
         Translation2d trenchPosition = getTrenchPosition();
-        Translation2d turretPosition = getTurretFieldPosition();
-        return turretPosition.getDistance(trenchPosition);
+        Translation2d robotPosition = getShooterFieldPosition();
+        return robotPosition.getDistance(trenchPosition);
     }
 
     /**
-     * Get the FIELD-RELATIVE angle from TURRET to trench.
+     * Get the FIELD-RELATIVE angle from robot center to trench.
      * @return Angle in degrees
      */
     public double getAngleToTrench() {
         Translation2d trenchPosition = getTrenchPosition();
-        Translation2d turretPosition = getTurretFieldPosition();
+        Translation2d robotPosition = getShooterFieldPosition();
 
-        double dx = trenchPosition.getX() - turretPosition.getX();
-        double dy = trenchPosition.getY() - turretPosition.getY();
+        double dx = trenchPosition.getX() - robotPosition.getX();
+        double dy = trenchPosition.getY() - robotPosition.getY();
 
         return Math.toDegrees(Math.atan2(dy, dx));
     }
 
     /**
-     * Get the TURRET angle needed to point at the trench.
-     * @return Turret angle in degrees (-180 to +180, robot-relative)
+     * Get the robot-relative angle to the trench.
+     * For a fixed shooter, this tells you how much the robot needs to rotate
+     * to face the trench.
+     * @return Angle in degrees (-180 to +180, 0 = robot facing trench)
      */
-    public double getTurretAngleToTrench() {
+    public double getRobotAngleToTrench() {
         double fieldAngleToTrench = getAngleToTrench();
         double robotHeading = getRobotPose().getRotation().getDegrees();
 
-        double turretAngle = fieldAngleToTrench - robotHeading;
-        turretAngle = ((turretAngle + 180) % 360 + 360) % 360 - 180;
+        double angle = fieldAngleToTrench - robotHeading;
+        angle = ((angle + 180) % 360 + 360) % 360 - 180;
 
-        return turretAngle;
+        return angle;
     }
 
     // VISION MEASUREMENT TRUST

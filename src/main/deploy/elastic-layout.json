@@ -75,42 +75,28 @@
             }
           },
           {
-            "title": "Angle",
+            "title": "Angle To Target",
             "x": 640.0,
             "y": 0.0,
             "width": 128.0,
             "height": 128.0,
             "type": "Text Display",
             "properties": {
-              "topic": "/SmartDashboard/Turret/Angle",
+              "topic": "/SmartDashboard/Shooting/AngleToTarget",
               "period": 0.06,
               "data_type": "double",
               "show_submit_button": false
             }
           },
           {
-            "title": "BottomRPM",
+            "title": "RPM",
             "x": 256.0,
             "y": 0.0,
-            "width": 128.0,
+            "width": 256.0,
             "height": 128.0,
             "type": "Text Display",
             "properties": {
-              "topic": "/SmartDashboard/Tuning/Shooter/BottomRPM",
-              "period": 0.06,
-              "data_type": "double",
-              "show_submit_button": true
-            }
-          },
-          {
-            "title": "TopRPM",
-            "x": 384.0,
-            "y": 0.0,
-            "width": 128.0,
-            "height": 128.0,
-            "type": "Text Display",
-            "properties": {
-              "topic": "/SmartDashboard/Tuning/Shooter/TopRPM",
+              "topic": "/SmartDashboard/Tuning/Shooter/RPM",
               "period": 0.06,
               "data_type": "double",
               "show_submit_button": true
@@ -192,14 +178,14 @@
             }
           },
           {
-            "title": "AngleOffset",
+            "title": "RPM Offset",
             "x": 640.0,
             "y": 384.0,
             "width": 128.0,
             "height": 128.0,
             "type": "Text Display",
             "properties": {
-              "topic": "/SmartDashboard/Tuning/Turret/AngleOffset",
+              "topic": "/SmartDashboard/Tuning/Shooter/RPMOffset",
               "period": 0.06,
               "data_type": "double",
               "show_submit_button": false
@@ -220,56 +206,28 @@
             }
           },
           {
-            "title": "ActualBottomRPM",
+            "title": "ActualRPM",
             "x": 0.0,
             "y": 256.0,
             "width": 128.0,
             "height": 128.0,
             "type": "Text Display",
             "properties": {
-              "topic": "/SmartDashboard/Match/Shooter/ActualBottomRPM",
+              "topic": "/SmartDashboard/Match/Shooter/ActualRPM",
               "period": 0.06,
               "data_type": "double",
               "show_submit_button": false
             }
           },
           {
-            "title": "ActualTopRPM",
-            "x": 128.0,
-            "y": 256.0,
-            "width": 128.0,
-            "height": 128.0,
-            "type": "Text Display",
-            "properties": {
-              "topic": "/SmartDashboard/Match/Shooter/ActualTopRPM",
-              "period": 0.06,
-              "data_type": "double",
-              "show_submit_button": false
-            }
-          },
-          {
-            "title": "TargetBottomRPM",
+            "title": "TargetRPM",
             "x": 0.0,
             "y": 384.0,
             "width": 128.0,
             "height": 128.0,
             "type": "Text Display",
             "properties": {
-              "topic": "/SmartDashboard/Match/Shooter/TargetBottomRPM",
-              "period": 0.06,
-              "data_type": "double",
-              "show_submit_button": false
-            }
-          },
-          {
-            "title": "TargetTopRPM",
-            "x": 128.0,
-            "y": 384.0,
-            "width": 128.0,
-            "height": 128.0,
-            "type": "Text Display",
-            "properties": {
-              "topic": "/SmartDashboard/Match/Shooter/TargetTopRPM",
+              "topic": "/SmartDashboard/Match/Shooter/TargetRPM",
               "period": 0.06,
               "data_type": "double",
               "show_submit_button": false
@@ -347,14 +305,14 @@
             }
           },
           {
-            "title": "AngleOffset",
+            "title": "RPMOffset",
             "x": 768.0,
             "y": 128.0,
             "width": 128.0,
             "height": 128.0,
             "type": "Text Display",
             "properties": {
-              "topic": "/SmartDashboard/Tuning/Turret/AngleOffset",
+              "topic": "/SmartDashboard/Tuning/Shooter/RPMOffset",
               "period": 0.06,
               "data_type": "double",
               "show_submit_button": true
@@ -436,42 +394,28 @@
             },
             "children": [
               {
-                "title": "ActualBottomRPM",
+                "title": "ActualRPM",
                 "x": 0.0,
                 "y": 0.0,
                 "width": 128.0,
                 "height": 128.0,
                 "type": "Text Display",
                 "properties": {
-                  "topic": "/SmartDashboard/Match/Shooter/ActualBottomRPM",
+                  "topic": "/SmartDashboard/Match/Shooter/ActualRPM",
                   "period": 0.06,
                   "data_type": "double",
                   "show_submit_button": false
                 }
               },
               {
-                "title": "ActualTopRPM",
+                "title": "Error",
                 "x": 0.0,
                 "y": 0.0,
                 "width": 128.0,
                 "height": 128.0,
                 "type": "Text Display",
                 "properties": {
-                  "topic": "/SmartDashboard/Match/Shooter/ActualTopRPM",
-                  "period": 0.06,
-                  "data_type": "double",
-                  "show_submit_button": false
-                }
-              },
-              {
-                "title": "BottomError",
-                "x": 0.0,
-                "y": 0.0,
-                "width": 128.0,
-                "height": 128.0,
-                "type": "Text Display",
-                "properties": {
-                  "topic": "/SmartDashboard/Match/Shooter/BottomError",
+                  "topic": "/SmartDashboard/Match/Shooter/Error",
                   "period": 0.06,
                   "data_type": "double",
                   "show_submit_button": false
@@ -495,42 +439,14 @@
                 }
               },
               {
-                "title": "TargetBottomRPM",
+                "title": "TargetRPM",
                 "x": 0.0,
                 "y": 0.0,
                 "width": 128.0,
                 "height": 128.0,
                 "type": "Text Display",
                 "properties": {
-                  "topic": "/SmartDashboard/Match/Shooter/TargetBottomRPM",
-                  "period": 0.06,
-                  "data_type": "double",
-                  "show_submit_button": false
-                }
-              },
-              {
-                "title": "TargetTopRPM",
-                "x": 0.0,
-                "y": 0.0,
-                "width": 128.0,
-                "height": 128.0,
-                "type": "Text Display",
-                "properties": {
-                  "topic": "/SmartDashboard/Match/Shooter/TargetTopRPM",
-                  "period": 0.06,
-                  "data_type": "double",
-                  "show_submit_button": false
-                }
-              },
-              {
-                "title": "TopError",
-                "x": 0.0,
-                "y": 0.0,
-                "width": 128.0,
-                "height": 128.0,
-                "type": "Text Display",
-                "properties": {
-                  "topic": "/SmartDashboard/Match/Shooter/TopError",
+                  "topic": "/SmartDashboard/Match/Shooter/TargetRPM",
                   "period": 0.06,
                   "data_type": "double",
                   "show_submit_button": false

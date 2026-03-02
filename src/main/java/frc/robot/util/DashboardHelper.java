@@ -9,7 +9,7 @@ import edu.wpi.first.wpilibj2.command.Command;
  *   TUNING/  - Calibration sliders and commands (pit crew / testing)
  *   DEBUG/   - Diagnostic data (only when troubleshooting)
  * 
- * Subsystem telemetry (Turret/, Shooter/, etc.) goes unprefixed
+ * Subsystem telemetry (Shooter/, etc.) goes unprefixed
  * so it stays at the top level and is easy to find.
  */
 public class DashboardHelper {

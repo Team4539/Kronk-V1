@@ -2,7 +2,7 @@
 
 Complete step-by-step guide for calibrating Kronk's subsystems on real hardware.
 
-> **Prerequisites**: Robot fully assembled, battery charged (12.5V+), roboRIO imaged, Limelight configured, all CAN devices flashing green. Connect a laptop with Elastic Dashboard or Shuffleboard.
+> **Prerequisites**: Robot fully assembled, battery charged (12.5V+), roboRIO imaged, PhotonVision configured, all CAN devices flashing green. Connect a laptop with Elastic Dashboard or Shuffleboard.
 
 ---
 
@@ -10,17 +10,13 @@ Complete step-by-step guide for calibrating Kronk's subsystems on real hardware.
 
 1. [Pre-Calibration Checklist](#1-pre-calibration-checklist)
 2. [Swerve Drivetrain](#2-swerve-drivetrain)
-3. [Turret Gear Ratio](#3-turret-gear-ratio)
-4. [Turret PID Tuning](#4-turret-pid-tuning)
-5. [Turret Per-Tag Angle Offsets](#5-turret-per-tag-angle-offsets)
-6. [Intake Pivot](#6-intake-pivot)
-7. [Limelight Vision](#7-limelight-vision)
-8. [Shooter Power Tables](#8-shooter-power-tables)
-9. [Distance Offset Fine-Tuning](#9-distance-offset-fine-tuning)
-10. [Full Shooter + Turret Calibration](#10-full-shooter--turret-calibration)
-11. [Raspberry Pi Coprocessor](#11-raspberry-pi-coprocessor)
-12. [PathPlanner Autonomous](#12-pathplanner-autonomous)
-13. [Match Day Quick-Check](#13-match-day-quick-check)
+3. [Intake Pivot](#3-intake-pivot)
+4. [PhotonVision Camera](#4-photonvision-camera)
+5. [Shooter RPM Tables](#5-shooter-rpm-tables)
+6. [RPM Offset Fine-Tuning](#6-rpm-offset-fine-tuning)
+7. [Full Shooter Calibration](#7-full-shooter-calibration)
+8. [PathPlanner Autonomous](#8-pathplanner-autonomous)
+9. [Match Day Quick-Check](#9-match-day-quick-check)
 
 ---
 
@@ -31,8 +27,8 @@ Before calibrating anything:
 - [ ] Battery is **>12.0V** (check `RobotController.getBatteryVoltage()` on dashboard)
 - [ ] All CAN devices show green LEDs (no flashing orange/red)
 - [ ] Phoenix Tuner X shows all motors + CANcoders + Pigeon2 on the CAN bus
-- [ ] Limelight is powered and accessible at `http://limelight.local:5801`
-- [ ] Robot code deploys successfully: `.\gradlew deploy`
+- [ ] PhotonVision is powered and accessible at `http://photonvision.local:5800`
+- [ ] Robot code deploys successfully: `./gradlew deploy`
 - [ ] Elastic Dashboard or Shuffleboard is connected
 
 ### Enabling/Disabling Subsystems for Testing
@@ -40,12 +36,10 @@ Before calibrating anything:
 In `Constants.java` -> `SubsystemEnabled`, toggle subsystems:
 
 ```java
-public static final boolean DRIVETRAIN = true;   // Swerve drive
-public static final boolean TURRET = false;       // Set true when calibrating turret
-public static final boolean SHOOTER = false;      // Set true when calibrating shooter
-public static final boolean LIMELIGHT = false;    // Set true when calibrating vision
-public static final boolean SPINDEXER = false;
-public static final boolean TURRET_FEED = false;
+public static final boolean DRIVETRAIN = true;
+public static final boolean SHOOTER = true;
+public static final boolean VISION = true;
+public static final boolean TRIGGER = true;
 public static final boolean INTAKE = true;
 public static final boolean LEDS = true;
 ```
@@ -81,88 +75,12 @@ The swerve modules are **generated code** from Phoenix Tuner X. Do NOT edit `gen
    - All 4 wheels spin in the correct direction
    - Robot drives forward when pushing left stick forward
    - Robot rotates counterclockwise when pushing right stick left
-   - Slow mode works (left bumper)
-   - Robot-centric toggle works (right bumper)
+   - Slow mode works (RT)
+   - Field/robot centric toggle works (Back button)
 
 ---
 
-## 3. Turret Gear Ratio
-
-**Why**: The turret gear ratio converts motor rotations to turret degrees. An incorrect ratio means the turret will over- or under-shoot angle commands.
-
-**Setup**:
-1. Enable `TURRET = true` in Constants
-2. Deploy code
-
-**Procedure**:
-1. **Mark the turret's current position** with tape on both the turret and the frame
-2. Run the `CalibrateTurretGearRatio` command from SmartDashboard
-3. **Manually rotate the turret exactly 360 deg** by hand (back to the tape mark)
-4. Cancel the command
-5. Read `Calibration/CalculatedGearRatio` from SmartDashboard
-6. Update `Constants.Turret.GEAR_RATIO` with this value
-
-**Current value**: `10.00537109375`
-
-> **Important**: The turret has a 270 deg range centered at 0 deg (-135 deg to +135 deg). Do NOT rotate past the hardstops during this calibration.
-
----
-
-## 4. Turret PID Tuning
-
-**Why**: PID gains control how smoothly and accurately the turret tracks target angles.
-
-**Setup**:
-1. Enable `TURRET = true`
-2. Deploy code
-
-**Procedure**:
-1. Run the `TurretPIDCalibration` command
-2. On SmartDashboard, adjust:
-   - `Cal/Turret/PID_P` -- Proportional gain (start at `0.2`)
-   - `Cal/Turret/PID_I` -- Integral gain (start at `0.0`)
-   - `Cal/Turret/PID_D` -- Derivative gain (start at `0.01`)
-   - `Cal/Turret/TargetAngle` -- Command angle to test response
-3. **Tuning goals**:
-   - Turret reaches target angle quickly (< 0.5s for 90 deg)
-   - Minimal overshoot (< 2 deg)
-   - No oscillation at rest
-   - Smooth movement, no jerking
-4. Update `Constants.Turret.PID_P/I/D` with final values
-
-**Current values**: P=`0.2`, I=`0.0`, D=`0.01`
-
-### Turret Angle Range
-
-The turret operates from **-135 deg to +135 deg** (270 deg total range):
-- `0 deg` = turret facing forward (centered)
-- `+90 deg` = turret rotated 90 deg counterclockwise (from top view)
-- `-90 deg` = turret rotated 90 deg clockwise
-- Warning at +/-125 deg (10 deg from limits)
-
----
-
-## 5. Turret Per-Tag Angle Offsets
-
-**Why**: Different AprilTags may have slight mounting variations. Per-tag offsets correct for this.
-
-**Setup**:
-1. Enable `TURRET = true`, `LIMELIGHT = true`
-2. Deploy code
-
-**Procedure**:
-1. Run the `FullShooterCalibration` command
-2. Drive to where you can see one AprilTag clearly
-3. Use `Cal/Turret/ManualAngle` to aim the turret at the target
-4. Note the difference between the calculated angle and the angle that actually hits
-5. Record the offset on SmartDashboard: `Offset/Angle_TagXX`
-6. Repeat for each visible tag
-7. Toggle `Cal/RecordOffset` to save the offset
-8. Copy the generated Java code from `Cal/GeneratedCode` to `Constants.Turret.TAG_ANGLE_OFFSETS`
-
----
-
-## 6. Intake Pivot
+## 3. Intake Pivot
 
 **Why**: The intake pivot angle determines deployed and retracted positions.
 
@@ -175,195 +93,145 @@ The turret operates from **-135 deg to +135 deg** (270 deg total range):
 ### CANcoder Offset
 1. Manually position the intake to its **retracted/stowed** position
 2. Read the raw CANcoder value from `Intake/CANcoderDeg` on dashboard
-3. Calculate the offset so that the retracted position reads the `IDLE_ANGLE_DEG` value in Constants
+3. Calculate the offset so that the retracted position reads the `RETRACTED_ANGLE_DEG` value in Constants
 4. Update `Constants.Intake.CANCODER_OFFSET_DEG`
 
 ### Pivot Angles
 1. Check `Constants.Intake` values:
-   - `IDLE_ANGLE_DEG` -- Retracted/stowed position (currently `0.0`)
-   - `DEPLOYED_ANGLE_DEG` -- Fully deployed position (currently `90.0`)
-   - `MIN_PIVOT_ANGLE_DEG` -- Minimum safe angle (currently `-5.0`)
-   - `MAX_PIVOT_ANGLE_DEG` -- Maximum safe angle (currently `105.0`)
-2. Deploy and retract the intake using commands
+   - `RETRACTED_ANGLE_DEG` -- Stowed position (currently `0.0`)
+   - `DEPLOYED_ANGLE_DEG` -- Fully deployed position (currently `130.0`)
+   - `IDLE_ANGLE_DEG` -- Idle/ready position (currently `20.0`)
+   - `MIN_PIVOT_ANGLE_DEG` -- Minimum safe angle (currently `0.0`)
+   - `MAX_PIVOT_ANGLE_DEG` -- Maximum safe angle (currently `130.0`)
+2. Deploy and retract the intake using RB on the controller
 3. Verify the intake reaches proper positions without binding
-4. If the intake doesn't reach far enough or goes too far, adjust the angle constants
+4. Adjust angle constants if needed
 
 ### Pivot PID
-1. Adjust `Constants.Intake.PIVOT_PID_P` (currently `0.008`)
+1. Adjust `Constants.Intake.PIVOT_PID_P` (currently `0.02`)
 2. Goals:
    - Smooth deploy/retract motion
    - No overshoot past physical limits
    - Holds position when retracted
-3. `PIVOT_MAX_OUTPUT` (currently `0.2`) limits maximum motor power -- increase if too slow, decrease if too aggressive
+3. `PIVOT_MAX_OUTPUT` (currently `0.3`) limits maximum motor power
 
 ---
 
-## 7. Limelight Vision
+## 4. PhotonVision Camera
 
 **Why**: Accurate camera mounting parameters are essential for pose estimation.
 
 **Setup**:
-1. Enable `LIMELIGHT = true`, `DRIVETRAIN = true`
+1. Enable `VISION = true`, `DRIVETRAIN = true`
 2. Deploy code
 3. Ensure AprilTags are visible on the field
 
 **Procedure**:
 
 ### Camera Position Calibration
-1. Run the `LimelightCalibration` command
+1. Run the `VisionCalibrationCommand` from SmartDashboard (`Tuning/Cal: Vision`)
 2. Place the robot at a **known position** on the field (measure precisely)
-3. Compare the Limelight-reported pose (`Limelight/HasPose`) with the actual position
-4. Adjust `Cal/Limelight/CameraOffsetX/Y/Z` until the reported pose matches reality
-5. Adjust `Cal/Limelight/CameraPitch` if the vertical angle is off
-6. Copy values to `Constants.Limelight`
+3. Enter known X/Y in `Cal/vision/KnownX` and `Cal/vision/KnownY`
+4. Compare the vision-reported pose with the actual position
+5. Click `ValidatePosition` for an accuracy grade
+6. If error is high, adjust camera mounting values in `Constants.Vision`:
+   - `CAMERA_X_OFFSET` -- Forward/backward from robot center (+ = forward)
+   - `CAMERA_Y_OFFSET` -- Left/right from robot center (+ = left)
+   - `CAMERA_Z_OFFSET` -- Height from ground to camera lens
+   - `CAMERA_PITCH_DEGREES` -- Tilt angle (+ = tilted up)
 
-### Vision Trust Calibration
-The vision standard deviations control how much the pose estimator trusts vision vs odometry:
+### Vision Trust
+The standard deviations control how much the pose estimator trusts vision vs odometry:
 
-- **Lower values** = trust vision more (good when close to tags, bad when far)
+- **Lower values** = trust vision more
 - **Higher values** = trust odometry more
 
-Current values in `Constants.Limelight`:
-- `VISION_STD_DEV_X` / `Y` / `THETA`
+Current values in `Constants.Vision`:
+- `VISION_STD_DEV_X` = `0.7`
+- `VISION_STD_DEV_Y` = `0.7`
+- `VISION_STD_DEV_THETA` = `10`
 
-**Test**: Drive the robot around and watch the "Field" visualization. The robot position should:
-- Update smoothly (no jumping)
-- Stay accurate when seeing tags
-- Not drift when tags are lost (odometry takes over)
+**Test**: Drive around and watch the "Field" visualization. The robot position should update smoothly, stay accurate when seeing tags, and not drift when tags are lost.
 
 ---
 
-## 8. Shooter Power Tables
+## 5. Shooter RPM Tables
 
-**Why**: The shooter needs different motor powers at different distances to hit the hub/trench.
+**Why**: The fixed shooter needs different RPMs at different positions to hit the hub/trench targets.
 
 **Setup**:
-1. Enable `TURRET = true`, `SHOOTER = true`, `LIMELIGHT = true`
+1. Enable `SHOOTER = true`, `VISION = true`, `TRIGGER = true`
 2. Deploy code
 3. Load game pieces into the robot
 
 **Procedure**:
 
-### Hub Shooting Calibration
-1. Run the `ShootingCalibration` command
-2. Position the robot at a known distance from the hub (start at **2m**)
-3. Adjust `Calibration/TopPower` and `Calibration/BottomPower` on SmartDashboard
-   - **Top motor** controls arc/height (more power = higher trajectory)
-   - **Bottom motor** controls distance (more power = farther shot)
-4. Shoot game pieces and adjust until they consistently score
-5. Toggle `Calibration/RecordShot` to log the calibration point
-6. Move to the next distance (**3m, 4m, 5m**, etc.) and repeat
-7. Copy the generated `put(distance, new double[]{top, bottom})` lines to `Constants.Shooter.SHOOTING_CALIBRATION`
+### Starting a Calibration Session
+1. Click `Tuning/StartCalibration` on SmartDashboard -- this zeros all offsets for a clean baseline
+2. Run `Tuning/Cal: Full Shooter` or `Tuning/Cal: Shooting` command
 
-### Trench Shuttling Calibration
-1. Repeat the process but aim at the trench target
-2. Trench shots typically need a **flatter trajectory** (less top motor power)
-3. Copy results to `Constants.Shooter.TRENCH_CALIBRATION`
+### Recording Calibration Points
+1. Position the robot at a known location where you can see AprilTags
+2. Adjust `Tuning/Shooter/RPM` slider until shots consistently score
+3. Use **POV Down** on the controller to feed balls into the shooter
+4. Click `Tuning/RecordPoint` to save the current position and RPM
+5. Move to the next position and repeat
+6. **Record at least 10 points** at various positions and angles for good coverage
 
-### Calibration Tips
-- **Start close** (2m) and work outward
-- Record at least **5 different distances** for smooth interpolation
-- Charge the battery between calibration sessions (power affects shot consistency)
-- The voltage compensation system (on the Pi) accounts for battery droop, but start with a full battery
+### Exporting Calibration Data
+1. Click `Tuning/PrintTable` to export all recorded points to the console
+2. Copy the generated Java code to `Constants.Shooter.SHOOTING_CALIBRATION`
+3. Click `Tuning/EndCalibration` to re-enable baked-in offsets
+
+### Calibration Points Format
+Each point stores `{relX, relY, bearingDeg, shooterRPM}`:
+- `relX` -- Robot X relative to target (meters)
+- `relY` -- Robot Y relative to target (meters)
+- `bearingDeg` -- Robot-relative angle to target (degrees)
+- `shooterRPM` -- Shooter motor RPM at this position
+
+### Tips
+- **Start close** and work outward
+- Cover a variety of angles, not just straight-on shots
+- Charge the battery between sessions (power affects consistency)
+- The `Cal/Status` display shows current position and distance info
 
 ---
 
-## 9. Distance Offset Fine-Tuning
+## 6. RPM Offset Fine-Tuning
 
-**Why**: After building calibration tables, you may find systematic errors (all shots slightly short, etc.).
+**Why**: After building calibration tables, you may find systematic errors (all shots slightly short/long).
 
 **Setup**:
 1. All shooting subsystems enabled
 2. Deploy code
 
 **Procedure**:
-1. Run the `DistanceOffsetCalibration` command
-2. Shoot at multiple distances and observe patterns:
-   - **Shots consistently short** -> Increase `Constants.Shooter.BOTTOM_MOTOR_POWER_OFFSET`
-   - **Shots consistently high** -> Decrease `Constants.Shooter.TOP_MOTOR_POWER_OFFSET`
-   - **Shots consistently long** -> Decrease bottom motor offset
-3. Adjust via SmartDashboard: `Cal/Shooter/TopPowerOffset` and `Cal/Shooter/BottomPowerOffset`
-4. Copy final values to `Constants.Shooter.TOP_MOTOR_POWER_OFFSET` and `BOTTOM_MOTOR_POWER_OFFSET`
+1. Run the `Tuning/Cal: Distance Offset` command
+2. Shoot at multiple positions and observe patterns:
+   - **Shots consistently short** -> Increase `Tuning/Shooter/RPMOffset`
+   - **Shots consistently long** -> Decrease `Tuning/Shooter/RPMOffset`
+3. The RPM offset is added to all calculated RPMs globally
 
 ---
 
-## 10. Full Shooter + Turret Calibration
+## 7. Full Shooter Calibration
 
-**Why**: The `FullShooterCalibration` command combines turret aiming and shooter control for end-to-end testing.
+**Why**: End-to-end testing of the complete shooting system.
 
 **Procedure**:
-1. Run `FullShooterCalibration`
-2. Set `Cal/Turret/UseManual = true` to manually aim
-3. Adjust `Cal/Turret/ManualAngle` to point at target
-4. Adjust `Cal/Shooter/TopPower` and `Cal/Shooter/BottomPower`
-5. Fire and observe results
-6. Use `Cal/Turret/AngleOffset` to fine-tune aim for specific tags
-7. Toggle `Cal/RecordOffset` to save per-tag offsets
-8. The generated Java code appears in `Cal/GeneratedCode` -- copy to Constants
+1. Run `Tuning/Cal: Full Shooter`
+2. The display shows: distance, relative X/Y, bearing, and current RPM
+3. Adjust `Tuning/Shooter/RPM` to tune shots
+4. Use **POV Down** on controller to feed balls
+5. Click `Tuning/RecordPoint` after a good shot
+6. Click `Tuning/PrintTable` when done to get copy-paste code
+
+**Remember**: Since this is a fixed shooter, you must **rotate the entire robot** to aim at the target. The `Cal/Status` display shows the bearing angle to help you orient correctly.
 
 ---
 
-## 11. Raspberry Pi Coprocessor
-
-The Pi runs `pi_shooting.py` which calculates the full shooting solution using a trained ML model.
-
-### Initial Setup
-
-1. **Connect Pi to robot network** (10.45.39.x subnet)
-2. Install dependencies on Pi:
-   ```bash
-   pip3 install -r requirements.txt
-   ```
-3. Test NetworkTables connection:
-   ```bash
-   python3 test_connection.py
-   ```
-4. Verify connection: `Pi/Status/Connected` should show `true` on SmartDashboard
-
-### Training Data Collection
-
-Training data comes from calibration shots. The Pi **automatically creates** a CSV file at `shooting_training_data.csv` when shots are recorded.
-
-1. Shoot from various positions, distances, and while moving
-2. Mark hits/misses via NetworkTables (`Pi/Training/RecordHit`, `Pi/Training/RecordMiss`)
-3. More data = better ML model predictions
-
-### Training the Model
-
-```bash
-# On the Pi:
-python3 train_model.py
-
-# Or trigger remotely via NetworkTables:
-# Set Pi/Training/RequestRetrain = true
-```
-
-The Pi auto-retrains whenever:
-- The CSV file is modified
-- `Pi/Training/RequestRetrain` is set to `true`
-- On startup if training data exists
-
-### Verifying Pi Operation
-
-On SmartDashboard, check:
-- `Pi/Connected` = `true`
-- `Pi/UsingFallback` = `false`
-- `Pi/Status/model_loaded` = `true` (if model has been trained)
-- `Pi/Status/loop_time_ms` < 20ms (healthy update rate)
-
-### If Pi Disconnects
-
-The robot automatically falls back to local calibration tables (`Constants.Shooter.SHOOTING_CALIBRATION`). The fallback:
-- Uses direct angle-to-target calculation (no ML corrections)
-- Interpolates shooter powers from the calibration TreeMap
-- No lead compensation for moving shots
-- Confidence drops to 0.3 (vs 0.9+ with ML model)
-
-See `pi/TROUBLESHOOTING.md` for detailed Pi debugging steps.
-
----
-
-## 12. PathPlanner Autonomous
+## 8. PathPlanner Autonomous
 
 ### Setup
 1. Open PathPlanner app (separate download)
@@ -376,40 +244,37 @@ See `pi/TROUBLESHOOTING.md` for detailed Pi debugging steps.
 3. Use named commands in auto sequences:
    - `autoShoot` -- Full shoot sequence (3s timeout)
    - `quickShoot` -- Fast shoot (1.5s timeout)
-   - `aimAtPose` -- Pre-aim turret (2s timeout)
+   - `TrainingShot` -- Training shot (2.5s timeout)
    - `spinUpShooter` -- Pre-spool shooter
    - `stopShooter` -- Stop shooter motors
-   - `centerTurret` -- Return turret to 0 deg
    - `enableShuttleMode` / `disableShuttleMode` -- Toggle trench mode
+   - `wait0.5` / `wait1.0` / `wait2.0` -- Timing delays
 
 ### Testing
 1. Use PathPlanner's built-in simulation
-2. Test on robot in `simulateJava` mode: `.\gradlew simulateJava`
+2. Test on robot in `simulateJava` mode: `./gradlew simulateJava`
 3. On real robot: Select auto from SmartDashboard chooser, run in auto mode
 4. Watch the "Field" visualization for path tracking accuracy
 
 ---
 
-## 13. Match Day Quick-Check
+## 9. Match Day Quick-Check
 
 Before each match:
 
 ### Pre-Match (in pit)
 - [ ] Battery is **>12.5V**
 - [ ] All CAN devices show green LEDs
-- [ ] Turret moves freely through full range (-135 deg to +135 deg)
 - [ ] Intake deploys and retracts smoothly
 - [ ] Shooter wheels spin freely (no binding)
-- [ ] Limelight powered and showing camera feed
+- [ ] PhotonVision powered and showing camera feed
 
 ### Pre-Match (on field)
 - [ ] Connect laptop and deploy latest code
 - [ ] Dashboard shows correct alliance color
-- [ ] `Pi/Connected` = `true` (if using Pi)
-- [ ] `Limelight/HasTarget` = `true` when pointing at tags
+- [ ] Vision/HasTarget = `true` when pointing at tags
 - [ ] Select autonomous routine from chooser
-- [ ] LEDs show **no auto selected** warning clears after selecting auto
-- [ ] LEDs show **FMS disconnected** warning clears when FMS connects
+- [ ] LEDs show alliance color correctly
 
 ### Post-Match
 - [ ] Check battery voltage (if <11V, swap battery)
@@ -422,22 +287,20 @@ Before each match:
 
 | Constant | Location | Default | Purpose |
 |----------|----------|---------|---------|
-| `GEAR_RATIO` | `Turret` | `10.005` | Motor-to-turret gear ratio |
-| `PID_P/I/D` | `Turret` | `0.2/0.0/0.01` | Turret position PID |
-| `MIN_ANGLE_DEG` | `Turret` | `-135.0` | Turret min angle |
-| `MAX_ANGLE_DEG` | `Turret` | `+135.0` | Turret max angle |
-| `ON_TARGET_TOLERANCE_DEG` | `Turret` | `2.0` | Aim accuracy threshold |
-| `SHOOTING_CALIBRATION` | `Shooter` | TreeMap | Distance -> [top, bottom] |
-| `TRENCH_CALIBRATION` | `Shooter` | TreeMap | Distance -> [top, bottom] |
-| `TOP_MOTOR_POWER_OFFSET` | `Shooter` | `0.0` | Global top power adjustment |
-| `BOTTOM_MOTOR_POWER_OFFSET` | `Shooter` | `0.0` | Global bottom power adjustment |
-| `SPIN_UP_TIME_SECONDS` | `Shooter` | -- | Time to reach full speed |
-| `IDLE_ANGLE_DEG` | `Intake` | `0.0` | Intake retracted angle |
-| `DEPLOYED_ANGLE_DEG` | `Intake` | `90.0` | Intake deployed angle |
-| `CANCODER_OFFSET_DEG` | `Intake` | -- | CANcoder zero offset |
-| `PIVOT_PID_P` | `Intake` | `0.008` | Intake pivot PID |
-| `VISION_STD_DEV_X/Y/THETA` | `Limelight` | -- | Vision trust levels |
+| `SHOOTING_CALIBRATION` | `Shooter` | List<double[]> | Pose-based RPM calibration |
+| `DEFAULT_IDLE_RPM` | `Shooter` | `500.0` | Idle flywheel RPM |
+| `CALIBRATION_BEARING_WEIGHT` | `Shooter` | `0.05` | Bearing weight in interpolation |
+| `RETRACTED_ANGLE_DEG` | `Intake` | `0.0` | Intake retracted angle |
+| `DEPLOYED_ANGLE_DEG` | `Intake` | `130.0` | Intake deployed angle |
+| `CANCODER_OFFSET_DEG` | `Intake` | `-100.107` | CANcoder zero offset |
+| `PIVOT_PID_P` | `Intake` | `0.02` | Intake pivot PID |
+| `CAMERA_X_OFFSET` | `Vision` | `0.2032` | Camera forward offset |
+| `CAMERA_Y_OFFSET` | `Vision` | `-0.1524` | Camera lateral offset |
+| `CAMERA_Z_OFFSET` | `Vision` | `0.23495` | Camera height |
+| `CAMERA_PITCH_DEGREES` | `Vision` | `38` | Camera tilt angle |
+| `VISION_STD_DEV_X/Y` | `Vision` | `0.7` | Vision trust X/Y |
+| `VISION_STD_DEV_THETA` | `Vision` | `10` | Vision trust rotation |
 
 ---
 
-*Last updated: February 2026 -- Team 4539 Kronk*
+*Last updated: March 2026 -- Team 4539 Kronk (Fixed Shooter)*

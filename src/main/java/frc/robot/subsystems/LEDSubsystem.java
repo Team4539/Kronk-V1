@@ -149,13 +149,13 @@ public class LEDSubsystem extends SubsystemBase {
     public enum ActionState {
         IDLE,           // Robot doing nothing special
         FIRING,         // Actively launching balls (feed motors running)
-        SHOOTING,       // Ready to shoot (turret aimed, shooter spun up)
-        AIMING,         // Aiming turret at target
+        SHOOTING,       // Ready to shoot (robot aimed, shooter spun up)
+        AIMING,         // Aiming at target
         SPOOLING,       // Spinning up shooter wheels
         DRIVING,        // Just driving (lowest priority)
         INTAKING,       // Running intake
         CLIMBING,       // Running climber
-        ESTOP ,          // Emergency stop active
+        ESTOP,          // Emergency stop active
         BROWNOUT
     }
     

@@ -186,7 +186,6 @@ public final class Constants {
 
   public static final class Driver {
     public static final int DRIVER_CONTROLLER_PORT = 0;
-    public static final int OPERATOR_CONTROLLER_PORT = 1;
     public static final double STICK_DEADBAND = 0.1;
     public static final double MAX_DRIVE_SPEED_MPS = 4.5;
     public static final double MAX_ANGULAR_SPEED_RAD = Math.PI * 2;

@@ -50,11 +50,9 @@ public class RobotContainer {
     private final IntakeSubsystem intake;
     private final LEDSubsystem leds;
 
-    // Controllers
+    // Controllers - single driver controller
     private final CommandXboxController driver =
             new CommandXboxController(Constants.Driver.DRIVER_CONTROLLER_PORT);
-    private final CommandXboxController operator =
-            new CommandXboxController(Constants.Driver.OPERATOR_CONTROLLER_PORT);
 
     // Swerve requests
     private final SwerveRequest.FieldCentric fieldCentric = new SwerveRequest.FieldCentric()
@@ -148,69 +146,37 @@ public class RobotContainer {
     // =========================================================================
 
     private void configureBindings() {
-        configureDriverBindings();
-        configureOperatorBindings();
+        configureSingleControllerBindings();
     }
 
-    private void configureDriverBindings() {
-        // LT: X-lock brake
-        if (drivetrain != null) {
-            driver.leftTrigger(0.5).whileTrue(drivetrain.applyRequest(() -> brake));
-        }
-
-        // RB: Intake deploy/retract
-        if (intake != null) {
-            driver.rightBumper().onTrue(new DeployIntakeCommand(intake)
-                    .alongWith(ledAction(LEDSubsystem.ActionState.INTAKING)));
-            driver.rightBumper().onFalse(new RetractIntakeCommand(intake)
-                    .alongWith(ledClear()));
-        }
-
-        // LB: Toggle field/robot centric
-        driver.leftBumper().onTrue(Commands.runOnce(() -> {
-            useRobotCentric = !useRobotCentric;
-            notify(useRobotCentric ? "Robot Centric" : "Field Centric");
-        }));
-
-        // A: Auto-shoot
+    /**
+     * All controls on a single Xbox controller:
+     * 
+     * LEFT STICK:  Drive X/Y (translation)
+     * RIGHT STICK: Rotation
+     * RT:          Slow mode (proportional)
+     * LT:          Auto-shoot (hold to shoot)
+     * RB:          Intake deploy (hold) / retract (release)
+     * LB:          Pre-spool shooter (hold)
+     * A:           E-stop all motors
+     * B:           Force shoot toggle
+     * X:           Shuttle mode toggle
+     * Y:           Reset gyro
+     * START:       Reset game state
+     * BACK:        Toggle field/robot centric
+     * POV UP:      Point wheels forward (hold)
+     * POV DOWN:    Feed shot (calibration, hold)
+     */
+    private void configureSingleControllerBindings() {
+        // LT: Auto-shoot (hold)
         if (shooter != null && vision != null) {
-            driver.a().whileTrue(
+            driver.leftTrigger(0.5).whileTrue(
                     new AutoShootCommand(shooter, vision, leds, trigger, drivetrain));
         }
 
-        // B: Force shoot toggle
-        driver.b().onTrue(Commands.runOnce(() -> {
-            boolean on = !gameState.isForceShootEnabled();
-            gameState.setForceShootEnabled(on);
-            notify(on ? "Force Shoot ON" : "Force Shoot OFF");
-        }));
-
-        // Y / Start: Reset gyro
-        if (drivetrain != null) {
-            driver.y().onTrue(Commands.runOnce(() -> {
-                drivetrain.seedFieldCentric();
-                notify("Gyro Reset");
-            }));
-            driver.start().onTrue(Commands.runOnce(() -> drivetrain.seedFieldCentric()));
-        }
-
-        // POV Up: Point wheels forward
-        if (drivetrain != null) {
-            driver.povUp().whileTrue(
-                    drivetrain.applyRequest(() -> pointWheels.withModuleDirection(Rotation2d.kZero)));
-        }
-    }
-
-    private void configureOperatorBindings() {
-        // RT: Auto-shoot
-        if (shooter != null && vision != null) {
-            operator.rightTrigger(0.5).whileTrue(
-                    new AutoShootCommand(shooter, vision, leds, trigger, drivetrain));
-        }
-
-        // LT: Pre-spool shooter
+        // LB: Pre-spool shooter (hold)
         if (shooter != null) {
-            operator.leftTrigger(0.5).whileTrue(
+            driver.leftBumper().whileTrue(
                     Commands.run(() -> {
                         shooter.setTargetRPM(shootingCalc.getTargetRPM());
                         if (leds != null) leds.setAction(LEDSubsystem.ActionState.SPOOLING);
@@ -220,50 +186,64 @@ public class RobotContainer {
                     }));
         }
 
-        // RB: Shuttle mode toggle
-        operator.rightBumper().onTrue(Commands.runOnce(() -> {
-            boolean on = !gameState.isShuttleMode();
-            gameState.setShuttleMode(on);
-            notify(on ? "Shuttle Mode ON" : "Hub Mode");
-        }));
-
-        // LB: Force shoot toggle
-        operator.leftBumper().onTrue(Commands.runOnce(() -> {
-            boolean on = !gameState.isForceShootEnabled();
-            gameState.setForceShootEnabled(on);
-            notify(on ? "Force Shoot ON" : "Force Shoot OFF");
-        }));
-
-        // A: Intake
+        // RB: Intake deploy/retract (hold/release)
         if (intake != null) {
-            operator.a().onTrue(new DeployIntakeCommand(intake)
+            driver.rightBumper().onTrue(new DeployIntakeCommand(intake)
                     .alongWith(ledAction(LEDSubsystem.ActionState.INTAKING)));
-            operator.a().onFalse(new RetractIntakeCommand(intake)
+            driver.rightBumper().onFalse(new RetractIntakeCommand(intake)
                     .alongWith(ledClear()));
         }
 
-        // X: E-stop motors
-        operator.x().onTrue(Commands.runOnce(() -> {
+        // A: E-stop all motors
+        driver.a().onTrue(Commands.runOnce(() -> {
             if (shooter != null) shooter.stop();
             if (trigger != null) trigger.stop();
             notify("E-STOP");
         }));
 
+        // B: Force shoot toggle
+        driver.b().onTrue(Commands.runOnce(() -> {
+            boolean on = !gameState.isForceShootEnabled();
+            gameState.setForceShootEnabled(on);
+            notify(on ? "Force Shoot ON" : "Force Shoot OFF");
+        }));
+
+        // X: Shuttle mode toggle
+        driver.x().onTrue(Commands.runOnce(() -> {
+            boolean on = !gameState.isShuttleMode();
+            gameState.setShuttleMode(on);
+            notify(on ? "Shuttle Mode ON" : "Hub Mode");
+        }));
+
+        // Y: Reset gyro
+        if (drivetrain != null) {
+            driver.y().onTrue(Commands.runOnce(() -> {
+                drivetrain.seedFieldCentric();
+                notify("Gyro Reset");
+            }));
+        }
+
         // Start: Reset game state
-        operator.start().onTrue(Commands.runOnce(() -> {
+        driver.start().onTrue(Commands.runOnce(() -> {
             gameState.reset();
             notify("Game State Reset");
         }));
 
-        // Back: Clear shuttle override
-        operator.back().onTrue(Commands.runOnce(() -> {
-            gameState.clearShuttleModeOverride();
-            notify("Auto-Shuttle Enabled");
+        // Back: Toggle field/robot centric
+        driver.back().onTrue(Commands.runOnce(() -> {
+            useRobotCentric = !useRobotCentric;
+            notify(useRobotCentric ? "Robot Centric" : "Field Centric");
         }));
 
-        // POV Down: Feed shot (for calibration - feeds ball into shooter while held)
+        // POV Up: Point wheels forward
+        if (drivetrain != null) {
+            driver.povUp().whileTrue(
+                    drivetrain.applyRequest(() -> pointWheels.withModuleDirection(Rotation2d.kZero)));
+        }
+
+        // POV Down: Feed shot (calibration - feeds ball into shooter while held)
         if (trigger != null) {
-            operator.povDown().whileTrue(
+            driver.povDown().whileTrue(
                     Commands.startEnd(
                             () -> trigger.setShoot(),
                             () -> trigger.stop(),
@@ -299,7 +279,7 @@ public class RobotContainer {
 
         // Shooter: idle at low RPM to keep flywheels warm.
         // Tunable via SmartDashboard "Shooter/IdleRPM". Set to 0 to fully stop.
-        // Full spool-up only happens when operator holds LT or during AutoShoot.
+        // Full spool-up only happens when driver holds LB or during AutoShoot.
         if (shooter != null) {
             SmartDashboard.putNumber("Shooter/IdleRPM", Constants.Shooter.DEFAULT_IDLE_RPM);
             shooter.setDefaultCommand(Commands.run(() -> {
