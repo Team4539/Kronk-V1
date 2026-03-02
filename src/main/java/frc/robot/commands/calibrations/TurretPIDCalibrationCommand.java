@@ -10,6 +10,7 @@ import frc.robot.util.Elastic;
  * Live PID tuning command for the turret motor.
  * Adjust P, I, D gains via SmartDashboard and see results in real-time.
  */
+@Deprecated
 public class TurretPIDCalibrationCommand extends Command {
     
     private final TurretSubsystem turret;

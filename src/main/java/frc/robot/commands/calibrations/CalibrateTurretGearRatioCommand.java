@@ -16,6 +16,7 @@ import frc.robot.util.Elastic;
  * 4. Click the command button again to stop and get the final ratio
  * 5. Copy CalculatedGearRatio to Constants.Turret.GEAR_RATIO
  */
+@Deprecated
 public class CalibrateTurretGearRatioCommand extends Command {
     
     private final TurretSubsystem turret;
