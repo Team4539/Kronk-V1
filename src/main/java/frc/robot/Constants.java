@@ -93,9 +93,8 @@ public final class Constants {
     
     /** Idle RPM when not actively spooling. Keeps flywheel warm for faster spin-up. */
     public static final double DEFAULT_IDLE_RPM = 500.0;
-  /** Fallback RPM used when vision/pose is unavailable and driver manually ranges shots. */
-  public static final double FALLBACK_RPM = 6000
-  ;
+    /** Fallback RPM used when vision/pose is unavailable and driver manually ranges shots. */
+    public static final double FALLBACK_RPM = 6000.0;
     
     /** Free speed of the motor in rotations per second (Kraken X60 ~100 rps) */
     public static final double MOTOR_FREE_SPEED_RPS = 100.0;
@@ -125,9 +124,10 @@ public final class Constants {
   public static final class Trigger {
     public static final int MOTOR_ID = CANIds.TRIGGER_MOTOR;
     public static final boolean MOTOR_INVERTED = false;
-    public static final double IDLE_SPEED = 0.15;
-    public static final double SHOOT_SPEED = -1.0; // Negative = reverse direction to feed balls into shooter
-    public static final double STOP_SPEED = 0.0;
+    /** Idle RPM — slow feed to stage balls near the shooter */
+    public static final double IDLE_SPEED_RPM = 500.0;
+    /** Shoot RPM — full speed reverse to feed balls into shooter (negative = reverse) */
+    public static final double SHOOT_SPEED_RPM = -3000.0;
   }
 
   public static final class Intake {
@@ -137,11 +137,7 @@ public final class Constants {
     public static final boolean PIVOT_MOTOR_INVERTED = true;
     public static final boolean ROLLER_MOTOR_INVERTED = true;
     public static final double CANCODER_OFFSET_DEG = -100.107;
-    public static final double PIVOT_GEAR_RATIO = 45.0;
-    // Pivot PID (WPILib PID, works in degrees, outputs duty cycle)
-    public static final double PIVOT_PID_P = 0.002;
-    public static final double PIVOT_PID_I = 0.000;
-    public static final double PIVOT_PID_D = 0.00;
+    public static final double PIVOT_GEAR_RATIO = 81.0;
   
     // Pivot limits
     public static final double MIN_PIVOT_ANGLE_DEG = 59.7;
@@ -149,8 +145,7 @@ public final class Constants {
     public static final double RETRACTED_ANGLE_DEG = 59.7;
     public static final double DEPLOYED_ANGLE_DEG = 156;
     public static final double IDLE_ANGLE_DEG =  90.;
-    public static final double PIVOT_MAX_OUTPUT = 0.7;
-    // Wider tolerance to prevent oscillation from mechanical slop
+    // Tolerance for "at target" check (degrees)
     public static final double PIVOT_TOLERANCE_DEG = 2.0;
     
 
@@ -158,9 +153,9 @@ public final class Constants {
     // to keep balls loose and feeding smoothly.
     public static final double JIGGLE_CYCLE_SECONDS = 0.6; // Full retract→idle→retract cycle time
 
-    // Roller
-    public static final double INTAKE_SPEED = 6000;
-    public static final double OUTTAKE_SPEED = -0.6;
+    // Roller (RPM-based, controlled via Motion Magic Velocity)
+    public static final double INTAKE_SPEED_RPM = 6000.0;
+    public static final double OUTTAKE_SPEED_RPM = -3000.0;
     public static final double STOP_SPEED = 0.0;
   }
 

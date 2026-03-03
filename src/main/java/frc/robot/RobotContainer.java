@@ -173,7 +173,7 @@ public class RobotContainer {
         if (shooter != null) {
             driver.leftTrigger(0.5).whileTrue(
                     Commands.run(() -> {
-                        shooter.setTargetRPM(6000);
+                        shooter.setTargetRPM(shootingCalc.getTargetRPM());
                         if (leds != null) leds.setAction(LEDSubsystem.ActionState.SPOOLING);
                     }, shooter).finallyDo(() -> {
                         shooter.stop();

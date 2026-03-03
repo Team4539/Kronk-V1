@@ -2,6 +2,7 @@ package frc.robot.subsystems;
 
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.DutyCycleOut;
+import com.ctre.phoenix6.controls.MotionMagicVelocityVoltage;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
@@ -23,13 +24,16 @@ public class TriggerSubsystem extends SubsystemBase {
     /** Kraken motor that drives the trigger feed */
     private final TalonFX motor;
     
-    /** Duty cycle control request for the motor */
-    private final DutyCycleOut control;
+    /** Duty cycle control for stopped state */
+    private final DutyCycleOut dutyControl;
+    
+    /** Motion Magic Velocity control for smooth speed profiling */
+    private final MotionMagicVelocityVoltage motionMagicVelocity;
 
     // State
     
-    /** Current target speed (duty cycle -1.0 to 1.0) */
-    private double targetSpeed = Constants.Trigger.IDLE_SPEED;
+    /** Current target speed in RPS (rotations per second) */
+    private double targetRPS = 0.0;
     
     /** Whether the trigger is in shooting mode */
     private boolean isShooting = false;
@@ -41,11 +45,12 @@ public class TriggerSubsystem extends SubsystemBase {
     
     /**
      * Creates and configures the trigger subsystem.
-     * Sets up motor with brake mode for precise control.
+     * Uses Motion Magic Velocity for smooth, profiled speed control.
      */
     public TriggerSubsystem() {
         motor = new TalonFX(Constants.Trigger.MOTOR_ID);
-        control = new DutyCycleOut(0);
+        dutyControl = new DutyCycleOut(0);
+        motionMagicVelocity = new MotionMagicVelocityVoltage(0).withSlot(0);
         
         configureMotor();
         
@@ -54,7 +59,7 @@ public class TriggerSubsystem extends SubsystemBase {
     }
     
     /**
-     * Configures the trigger motor with brake mode.
+     * Configures the trigger motor with brake mode and Motion Magic Velocity gains.
      */
     private void configureMotor() {
         TalonFXConfiguration config = new TalonFXConfiguration();
@@ -66,6 +71,17 @@ public class TriggerSubsystem extends SubsystemBase {
         config.MotorOutput.Inverted = Constants.Trigger.MOTOR_INVERTED ? 
             com.ctre.phoenix6.signals.InvertedValue.Clockwise_Positive : 
             com.ctre.phoenix6.signals.InvertedValue.CounterClockwise_Positive;
+        
+        // Slot 0: velocity PID gains for Motion Magic Velocity
+        config.Slot0.kV = 0.12;
+        config.Slot0.kP = 0.15;
+        config.Slot0.kI = 0.0;
+        config.Slot0.kD = 0.0;
+        config.Slot0.kS = 0.05;
+        
+        // Motion Magic: acceleration & jerk limits
+        config.MotionMagic.MotionMagicAcceleration = 200;  // rps/s
+        config.MotionMagic.MotionMagicJerk = 2000;         // rps/s²
             
         motor.getConfigurator().apply(config);
     }
@@ -81,7 +97,7 @@ public class TriggerSubsystem extends SubsystemBase {
      * Set trigger to idle mode (slow speed to stage balls near the shooter).
      */
     public void setIdle() {
-        targetSpeed = Constants.Trigger.IDLE_SPEED;
+        targetRPS = Constants.Trigger.IDLE_SPEED_RPM / 60.0;
         isShooting = false;
     }
     
@@ -89,7 +105,7 @@ public class TriggerSubsystem extends SubsystemBase {
      * Set trigger to shooting mode (full speed to feed balls into shooter).
      */
     public void setShoot() {
-        targetSpeed = Constants.Trigger.SHOOT_SPEED;
+        targetRPS = Constants.Trigger.SHOOT_SPEED_RPM / 60.0;
         isShooting = true;
     }
     
@@ -97,16 +113,16 @@ public class TriggerSubsystem extends SubsystemBase {
      * Stop the trigger completely.
      */
     public void stop() {
-        targetSpeed = Constants.Trigger.STOP_SPEED;
+        targetRPS = 0.0;
         isShooting = false;
     }
     
     /**
      * Set trigger to a custom speed.
-     * @param speed Duty cycle from -1.0 to 1.0
+     * @param rpm Target RPM (negative = reverse)
      */
-    public void setSpeed(double speed) {
-        targetSpeed = Math.max(-1.0, Math.min(1.0, speed));
+    public void setSpeed(double rpm) {
+        targetRPS = rpm / 60.0;
     }
 
     // STATUS METHODS
@@ -120,19 +136,19 @@ public class TriggerSubsystem extends SubsystemBase {
     }
     
     /**
-     * Get the current target speed.
-     * @return Target speed (duty cycle -1.0 to 1.0)
+     * Get the current target speed in RPM.
+     * @return Target speed in RPM
      */
     public double getTargetSpeed() {
-        return targetSpeed;
+        return targetRPS * 60.0;
     }
     
     /**
-     * Get the current motor speed.
-     * @return Actual motor speed (duty cycle -1.0 to 1.0)
+     * Get the current motor speed in RPM.
+     * @return Actual motor speed in RPM
      */
     public double getCurrentSpeed() {
-        return motor.get();
+        return motor.getVelocity().getValueAsDouble() * 60.0;
     }
 
     // PERIODIC
@@ -149,8 +165,12 @@ public class TriggerSubsystem extends SubsystemBase {
             return;
         }
         
-        // Apply target speed to motor
-        motor.setControl(control.withOutput(targetSpeed));
+        // Use Motion Magic Velocity for non-zero targets, duty cycle 0 for stop
+        if (Math.abs(targetRPS) > 0.1) {
+            motor.setControl(motionMagicVelocity.withVelocity(targetRPS));
+        } else {
+            motor.setControl(dutyControl.withOutput(0));
+        }
         
         // Update dashboard telemetry
         updateDashboard();
@@ -169,8 +189,8 @@ public class TriggerSubsystem extends SubsystemBase {
         // Detailed diagnostics every 10 cycles (200ms)
         if (telemetryCounter >= 10) {
             telemetryCounter = 0;
-            DashboardHelper.putNumber(Category.DEBUG, "Trigger/TargetSpeed", targetSpeed);
-            DashboardHelper.putNumber(Category.DEBUG, "Trigger/CurrentSpeed", getCurrentSpeed());
+            DashboardHelper.putNumber(Category.DEBUG, "Trigger/TargetRPM", targetRPS * 60.0);
+            DashboardHelper.putNumber(Category.DEBUG, "Trigger/ActualRPM", getCurrentSpeed());
         }
     }
 }

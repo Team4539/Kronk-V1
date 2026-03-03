@@ -2,7 +2,7 @@ package frc.robot.subsystems;
 
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.DutyCycleOut;
-import com.ctre.phoenix6.controls.VelocityVoltage;
+import com.ctre.phoenix6.controls.MotionMagicVelocityVoltage;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
@@ -18,7 +18,7 @@ public class ShooterSubsystem extends SubsystemBase {
     
     private final TalonFX motor;
     private final DutyCycleOut dutyControl;
-    private final VelocityVoltage velocityControl;
+    private final MotionMagicVelocityVoltage motionMagicVelocity;
     public boolean isHealthy;
     
     private double targetPower = 0.0;
@@ -36,17 +36,27 @@ public class ShooterSubsystem extends SubsystemBase {
     public ShooterSubsystem() {
         motor = new TalonFX(Constants.Shooter.MOTOR_ID);
         dutyControl = new DutyCycleOut(0);
-        velocityControl = new VelocityVoltage(0).withSlot(0);
+        motionMagicVelocity = new MotionMagicVelocityVoltage(0).withSlot(0);
         
         var config = new TalonFXConfiguration();
         config.MotorOutput.NeutralMode = NeutralModeValue.Coast;
         config.MotorOutput.Inverted = Constants.Shooter.MOTOR_INVERTED
             ? com.ctre.phoenix6.signals.InvertedValue.Clockwise_Positive
             : com.ctre.phoenix6.signals.InvertedValue.CounterClockwise_Positive;
+        
+        // Slot 0: velocity PID gains (used by Motion Magic Velocity)
         config.Slot0.kV = 0.12;
         config.Slot0.kP = 0.11;
         config.Slot0.kI = 0.0;
         config.Slot0.kD = 0.0;
+        config.Slot0.kS = 0.05;  // Static friction feedforward (volts)
+        
+        // Motion Magic: acceleration & jerk limits for smooth flywheel spin-up
+        // Acceleration: max RPS/sec the profile will command
+        config.MotionMagic.MotionMagicAcceleration = 400;  // rps/s — reach 6000 RPM (~100 rps) in ~0.25s
+        // Jerk: rps/s² — smooths the start/end of the acceleration ramp
+        config.MotionMagic.MotionMagicJerk = 4000;         // rps/s² — snappy but not jarring
+        
         motor.getConfigurator().apply(config);
     }
 
@@ -118,7 +128,7 @@ public class ShooterSubsystem extends SubsystemBase {
         }
         
         if (useVelocityControl && targetRPS > 0.1) {
-            motor.setControl(velocityControl.withVelocity(targetRPS));
+            motor.setControl(motionMagicVelocity.withVelocity(targetRPS));
         } else {
             motor.setControl(dutyControl.withOutput(targetPower));
         }

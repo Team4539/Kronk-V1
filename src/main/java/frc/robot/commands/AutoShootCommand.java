@@ -3,7 +3,6 @@ package frc.robot.commands;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import frc.robot.GameStateManager;
-import frc.robot.Constants;
 import frc.robot.GameStateManager.TargetMode;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.LEDSubsystem;
@@ -109,10 +108,12 @@ public class AutoShootCommand extends Command {
         allianceActive = gameState.isOurAllianceActive();
         
         if (!vision.hasPoseEstimate()) {
-            // Vision unavailable: don't abort — use a driver-managed fallback RPM so
-            // the driver can manually range and shoot. This does NOT enable force-shoot.
-            SmartDashboard.putString("AutoShoot/Status", "No Pose - Using Fallback RPM");
-            // fall through and set fallback RPM below
+            SmartDashboard.putString("AutoShoot/Status", "No Pose - Cannot Shoot");
+            shooter.stop();
+            stopTrigger();
+            updateLEDState();
+            publishTelemetry();
+            return;
         }
         
         // Handle disabled mode (alliance inactive)
@@ -243,11 +244,7 @@ public class AutoShootCommand extends Command {
     // SHOOTER CONTROL
     
     private void setShooterRPM() {
-        double rpm;
-      
-            // Vision unavailable: use a known fallback RPM so the driver can manage range
-         rpm = Constants.Shooter.FALLBACK_RPM;
-        
+        double rpm = shootingCalc.getTargetRPM();
         shooter.setTargetRPM(rpm);
     }
     
