@@ -19,6 +19,7 @@ import frc.robot.commands.calibrations.FullShooterCalibrationCommand;
 import frc.robot.commands.calibrations.VisionCalibrationCommand;
 import frc.robot.commands.calibrations.ShootingCalibrationCommand;
 import frc.robot.commands.intake.DeployIntakeCommand;
+import frc.robot.commands.intake.IntakeJiggleCommand;
 import frc.robot.commands.intake.RetractIntakeCommand;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
@@ -155,9 +156,9 @@ public class RobotContainer {
      * LEFT STICK:  Drive X/Y (translation)
      * RIGHT STICK: Rotation
      * RT:          Slow mode (proportional)
-     * LT:          Auto-shoot (hold to shoot)
+     * LT:          Pre-spool shooter (hold)
      * RB:          Intake deploy (hold) / retract (release)
-     * LB:          Pre-spool shooter (hold)
+     * LB:          Auto-shoot (hold to shoot)
      * A:           E-stop all motors
      * B:           Force shoot toggle
      * X:           Shuttle mode toggle
@@ -168,22 +169,28 @@ public class RobotContainer {
      * POV DOWN:    Feed shot (calibration, hold)
      */
     private void configureSingleControllerBindings() {
-        // LT: Auto-shoot (hold)
-        if (shooter != null && vision != null) {
-            driver.leftTrigger(0.5).whileTrue(
-                    new AutoShootCommand(shooter, vision, leds, trigger, drivetrain));
-        }
-
-        // LB: Pre-spool shooter (hold)
+        // LT: Pre-spool shooter (hold)
         if (shooter != null) {
-            driver.leftBumper().whileTrue(
+            driver.leftTrigger(0.5).whileTrue(
                     Commands.run(() -> {
-                        shooter.setTargetRPM(shootingCalc.getTargetRPM());
+                        shooter.setTargetRPM(6000);
                         if (leds != null) leds.setAction(LEDSubsystem.ActionState.SPOOLING);
                     }, shooter).finallyDo(() -> {
                         shooter.stop();
                         if (leds != null) leds.clearAction();
                     }));
+        }
+
+        // LB: Auto-shoot (hold) — also jiggles intake to keep balls feeding
+        if (shooter != null && vision != null) {
+            Command shootCmd = new AutoShootCommand(shooter, vision, leds, trigger, drivetrain);
+            if (intake != null) {
+                // Run jiggle alongside shooting; intake is a separate subsystem requirement
+                driver.leftBumper().whileTrue(
+                        shootCmd.alongWith(new IntakeJiggleCommand(intake)));
+            } else {
+                driver.leftBumper().whileTrue(shootCmd);
+            }
         }
 
         // RB: Intake deploy/retract (hold/release)

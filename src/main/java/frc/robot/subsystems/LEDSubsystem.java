@@ -15,6 +15,7 @@ import frc.robot.Constants;
 import frc.robot.GameStateManager;
 import frc.robot.GameStateManager.GamePhase;
 import frc.robot.util.DashboardHelper;
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import frc.robot.util.DashboardHelper.Category;
 import frc.robot.util.Elastic;
 import frc.robot.util.Elastic.NotificationLevel;
@@ -73,6 +74,8 @@ public class LEDSubsystem extends SubsystemBase {
     // Test mode for animations
     private boolean testMode = false;
     private boolean lastTestMode = false; // Track previous state to detect transitions
+    // Test-mode pattern chooser (Select which pattern to preview)
+    private final SendableChooser<String> testPatternChooser = new SendableChooser<>();
     
     // CANdle boot readiness - hardware is not responsive until fully booted
     private boolean candleReady = false;
@@ -192,6 +195,18 @@ public class LEDSubsystem extends SubsystemBase {
     private void initializeSmartDashboard() {
         DashboardHelper.putNumber(Category.DEBUG, "LED/Master_Brightness", masterBrightness);
         DashboardHelper.putBoolean(Category.DEBUG, "LED/Test_Mode", testMode);
+        // Test-mode pattern chooser: allows selecting which pattern to preview
+        testPatternChooser.setDefaultOption("Teleop Flow", "Teleop Flow");
+        testPatternChooser.addOption("Auto Mode", "Auto Mode");
+        testPatternChooser.addOption("Shoot Now", "Shoot Now");
+        testPatternChooser.addOption("Firing", "Firing");
+        testPatternChooser.addOption("Spooling (Power Fill)", "Power Fill");
+        testPatternChooser.addOption("Targeting", "Targeting");
+        testPatternChooser.addOption("Intaking", "Intaking");
+        testPatternChooser.addOption("Climb Rising", "Climb Rising");
+        testPatternChooser.addOption("E-STOP", "E-STOP");
+        testPatternChooser.addOption("Victory Celebration", "Victory Celebration");
+        DashboardHelper.putData(Category.DEBUG, "LED/Test/Pattern", testPatternChooser);
     }
     
     /**
@@ -1524,8 +1539,8 @@ public class LEDSubsystem extends SubsystemBase {
         int[] color = Constants.LEDs.SHOOTING_COLOR;
         int[] highlight = Constants.LEDs.SHOOTING_HIGHLIGHT;
         
-        clearBuffer();
-        setOnboardColor(color);
+    clearBuffer();
+    setOnboardColor(color);
         
         // Dim green base
         for (int i = 0; i < stripCount; i++) {
@@ -1563,6 +1578,18 @@ public class LEDSubsystem extends SubsystemBase {
             if (idx >= 0 && idx < stripCount) {
                 double falloff = 1.0 - Math.abs(c) / 3.0;
                 blendAdditive(stripStart + idx, highlight, corePulse * falloff * masterBrightness);
+            }
+        }
+
+        // === Rapid strobe overlay for unmistakable "READY TO FIRE" signal ===
+        // High-frequency strobe (6-8Hz) using the shooting highlight color to make
+        // the pattern visually distinct from normal teleop breathing.
+        boolean strobeOn = ((int)(currentTime * 8) % 2) == 0;
+        if (strobeOn) {
+            // Brighten onboard LEDs and add a strong highlight across the strip
+            setOnboardColor(Constants.LEDs.SHOOTING_HIGHLIGHT);
+            for (int i = 0; i < stripCount; i++) {
+                blendAdditive(stripStart + i, highlight, 0.9 * masterBrightness);
             }
         }
         
@@ -1894,7 +1921,19 @@ public class LEDSubsystem extends SubsystemBase {
         
         // PRIORITY 6: Alliance shift warnings (only during TELEOP and when idle/driving)
         // These use alliance-aware methods - only warn before OUR shifts
+        // NOTE: If match time is unavailable (local testing, matchTime < 0), show
+        // a short teleop-enable celebration so drivers/coaches get a clear visual
+        // that teleop is enabled even without FMS timing data.
         if (currentState == LEDState.TELEOP) {
+            if (matchTime < 0) {
+                double sinceTeleop = Timer.getFPGATimestamp() - stateStartTime;
+                // Show a short 3s cyan->alliance chase on teleop enable in local testing
+                if (sinceTeleop >= 0 && sinceTeleop <= 3.0) {
+                    currentPatternName = "Teleop Enable (Local)";
+                    setChase(Constants.LEDs.GREEN, allianceColor);
+                    return;
+                }
+            }
             // 5 second warning - "HEAD BACK" - start returning to scoring position
             // White breathing = get ready, our shift is coming!
             if (gameState.isHeadBackWarning()) {
@@ -1906,8 +1945,10 @@ public class LEDSubsystem extends SubsystemBase {
             // 3 second warning - "GREEN LIGHT" - can start shooting!
             // Green strobe = you're cleared to shoot, shift is about to start!
             if (gameState.isGreenLightPreShift()) {
-                currentPatternName = "Green Light Pre-Shift";
-                setStrobe(Constants.LEDs.GREEN);
+                // Use a distinct cyan color for teleop-enable (pre-shift) so it isn't
+                // confused with the shooting "green" indicator.
+                currentPatternName = "Green Light Pre-Shift (Teleop Enable)";
+                setStrobe(Constants.LEDs.CYAN);
                 return;
             }
             
@@ -1917,8 +1958,10 @@ public class LEDSubsystem extends SubsystemBase {
                 double timeRemainingActive = gameState.getTimeRemainingActive();
                 double timeSinceShiftStart = getShiftDuration(phase) - timeRemainingActive;
                 if (timeSinceShiftStart >= 0 && timeSinceShiftStart <= 2.0) {
+                    // Celebrate teleop-enable with a cyan->alliance chase to avoid
+                    // visual confusion with the shooting green pattern.
                     currentPatternName = "Shift Active Celebration";
-                    setChase(Constants.LEDs.GREEN, allianceColor);
+                    setChase(Constants.LEDs.CYAN, allianceColor);
                     return;
                 }
             }
@@ -2034,10 +2077,50 @@ public class LEDSubsystem extends SubsystemBase {
         }
         lastTestMode = testMode;
         
-        // If in test mode, skip normal LED operation
+        // If in test mode, run the selected test pattern instead of normal operation
         if (testMode) {
-            currentPatternName = "Test Mode";
+            String sel = testPatternChooser.getSelected();
+            if (sel == null) sel = "Teleop Flow";
+            currentPatternName = "Test Mode - " + sel;
             DashboardHelper.putString(Category.DEBUG, "LED/Pattern", currentPatternName);
+
+            // Dispatch to the selected pattern for preview
+            switch (sel) {
+                case "Teleop Flow":
+                    setTeleopModePattern();
+                    break;
+                case "Auto Mode":
+                    setAutoModePattern();
+                    break;
+                case "Shoot Now":
+                    setShootNowPattern();
+                    break;
+                case "Firing":
+                    setFiringPattern();
+                    break;
+                case "Power Fill":
+                    setPowerFillPattern();
+                    break;
+                case "Targeting":
+                    setTargetingPattern();
+                    break;
+                case "Intaking":
+                    setIntakeFlowPattern();
+                    break;
+                case "Climb Rising":
+                    setClimbRisingPattern();
+                    break;
+                case "E-STOP":
+                    setEStopPattern();
+                    break;
+                case "Victory Celebration":
+                    setVictoryCelebration();
+                    break;
+                default:
+                    // Unknown selection: fall back to teleop visual
+                    setTeleopModePattern();
+                    break;
+            }
             return;
         }
         

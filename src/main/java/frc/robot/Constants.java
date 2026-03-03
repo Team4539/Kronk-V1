@@ -93,6 +93,9 @@ public final class Constants {
     
     /** Idle RPM when not actively spooling. Keeps flywheel warm for faster spin-up. */
     public static final double DEFAULT_IDLE_RPM = 500.0;
+  /** Fallback RPM used when vision/pose is unavailable and driver manually ranges shots. */
+  public static final double FALLBACK_RPM = 6000
+  ;
     
     /** Free speed of the motor in rotations per second (Kraken X60 ~100 rps) */
     public static final double MOTOR_FREE_SPEED_RPS = 100.0;
@@ -136,22 +139,27 @@ public final class Constants {
     public static final double CANCODER_OFFSET_DEG = -100.107;
     public static final double PIVOT_GEAR_RATIO = 45.0;
     // Pivot PID (WPILib PID, works in degrees, outputs duty cycle)
-    public static final double PIVOT_PID_P = 0.02;
+    public static final double PIVOT_PID_P = 0.002;
     public static final double PIVOT_PID_I = 0.000;
     public static final double PIVOT_PID_D = 0.00;
-    
+  
     // Pivot limits
-    public static final double MIN_PIVOT_ANGLE_DEG = 0.0;
-    public static final double MAX_PIVOT_ANGLE_DEG = 130.0;
-    public static final double RETRACTED_ANGLE_DEG = 0.0;
-    public static final double DEPLOYED_ANGLE_DEG = 130;
-    public static final double IDLE_ANGLE_DEG = 20;
-    public static final double PIVOT_MAX_OUTPUT = 0.3;
+    public static final double MIN_PIVOT_ANGLE_DEG = 59.7;
+    public static final double MAX_PIVOT_ANGLE_DEG = 156.0;
+    public static final double RETRACTED_ANGLE_DEG = 59.7;
+    public static final double DEPLOYED_ANGLE_DEG = 156;
+    public static final double IDLE_ANGLE_DEG =  90.;
+    public static final double PIVOT_MAX_OUTPUT = 0.7;
     // Wider tolerance to prevent oscillation from mechanical slop
-    public static final double PIVOT_TOLERANCE_DEG = 25.0;
+    public static final double PIVOT_TOLERANCE_DEG = 2.0;
     
+
+    // Jiggle: oscillate pivot between retracted and idle while shooting
+    // to keep balls loose and feeding smoothly.
+    public static final double JIGGLE_CYCLE_SECONDS = 0.6; // Full retract→idle→retract cycle time
+
     // Roller
-    public static final double INTAKE_SPEED = 0.6;
+    public static final double INTAKE_SPEED = 6000;
     public static final double OUTTAKE_SPEED = -0.6;
     public static final double STOP_SPEED = 0.0;
   }

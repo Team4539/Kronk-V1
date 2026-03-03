@@ -281,5 +281,9 @@ public class GameStateManager {
         SmartDashboard.putString("Match/Target", currentTargetMode.name());
         SmartDashboard.putBoolean("Match/ForceShoot", forceShootEnabled);
         SmartDashboard.putBoolean("Match/ShuttleMode", shuttleMode);
+        // Additional numeric telemetry for drive coach visibility
+        SmartDashboard.putNumber("Match/Time", DriverStation.getMatchTime());
+        SmartDashboard.putNumber("Match/SecondsUntilOurShift", getSecondsUntilOurNextShift());
+        SmartDashboard.putNumber("Match/TimeRemainingActive", getTimeRemainingActive());
     }
 }
