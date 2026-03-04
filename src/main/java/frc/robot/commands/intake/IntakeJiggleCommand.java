@@ -41,10 +41,10 @@ public class IntakeJiggleCommand extends Command {
         double phase = (elapsed % cycleTime) / cycleTime;
         double blend = (phase < 0.5) ? (phase * 2.0) : (2.0 - phase * 2.0);
 
-        // Lerp between retracted and idle angles
-        double retracted = Constants.Intake.RETRACTED_ANGLE_DEG;
-        double idle = Constants.Intake.IDLE_ANGLE_DEG;
-        double targetAngle = retracted + blend * (idle - retracted);
+        // Gentle oscillation: retracted position ± JIGGLE_AMPLITUDE_DEG
+        double center = Constants.Intake.RETRACTED_ANGLE_DEG;
+        double amplitude = Constants.Intake.JIGGLE_AMPLITUDE_DEG;
+        double targetAngle = center + blend * amplitude;
 
         intake.setPivotAngle(targetAngle);
     }

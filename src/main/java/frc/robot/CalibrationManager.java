@@ -1,6 +1,7 @@
 package frc.robot;
 
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import frc.robot.util.Elastic;
 import frc.robot.util.ShootingCalculator;
 
 import java.util.ArrayList;
@@ -34,9 +35,9 @@ public class CalibrationManager {
     /** Live RPM offset added to calculated motor RPM (positive = more power) */
     private double rpmOffset = 0.0;
     
-    // --- Recorded data (unified: x, y, bearing, shooterRPM) ---
+    // --- Recorded data (distance → RPM pairs) ---
     
-    /** Recorded unified calibration points: {robotX, robotY, bearingDeg, shooterRPM} */
+    /** Recorded calibration points: {distanceMeters, shooterRPM} */
     private final List<double[]> recordedPoints = new ArrayList<>();
     private int recordCount = 0;
     
@@ -46,15 +47,6 @@ public class CalibrationManager {
     // --- Live measurement (set externally from ShootingCalculator) ---
     
     private double currentDistance = 0.0;
-    
-    /** Robot-relative bearing to target (degrees, -180 to +180). Set from ShootingCalculator. */
-    private double currentBearing = 0.0;
-    
-    /** Robot X position relative to target (meters). Alliance-independent. */
-    private double currentX = 0.0;
-    
-    /** Robot Y position relative to target (meters). Alliance-independent. */
-    private double currentY = 0.0;
     
     // ========================================================================
     // INIT
@@ -152,6 +144,7 @@ public class CalibrationManager {
         SmartDashboard.putBoolean("Tuning/CalibrationActive", true);
         SmartDashboard.putString("Tuning/Status", "CALIBRATION STARTED - All offsets zeroed, baked-in offsets bypassed");
         System.out.println("[CAL] === CALIBRATION SESSION STARTED - All offsets reset, baked-in offsets bypassed ===");
+        Elastic.selectTab("Shooting Calibration");
     }
     
     /**
@@ -164,6 +157,7 @@ public class CalibrationManager {
         SmartDashboard.putBoolean("Tuning/CalibrationActive", false);
         SmartDashboard.putString("Tuning/Status", "Calibration ended - baked-in offsets re-enabled");
         System.out.println("[CAL] === CALIBRATION SESSION ENDED - Baked-in offsets re-enabled ===");
+        Elastic.selectTab("Match");
     }
     
     // ========================================================================
@@ -176,18 +170,13 @@ public class CalibrationManager {
             return;
         }
         
-        // Record unified point: {relX, relY, bearingDeg, shooterRPM}
-        double roundedX = Math.round(currentX * 100.0) / 100.0;
-        double roundedY = Math.round(currentY * 100.0) / 100.0;
-        double roundedBearing = Math.round(currentBearing);
+        // Record simple point: {distance, shooterRPM}
+        double roundedDist = Math.round(currentDistance * 100.0) / 100.0;
         
-        recordedPoints.add(new double[]{
-            roundedX, roundedY, roundedBearing, shooterRPM
-        });
+        recordedPoints.add(new double[]{roundedDist, shooterRPM});
         recordCount++;
         
-        String code = String.format("add(new double[]{%.2f, %.2f, %.0f, %.0f});",
-                roundedX, roundedY, roundedBearing, shooterRPM);
+        String code = String.format("add(new double[]{%.2f, %.0f});", roundedDist, shooterRPM);
         SmartDashboard.putNumber("Tuning/RecordCount", recordCount);
         SmartDashboard.putString("Tuning/Status", "Recorded #" + recordCount + ": " + code);
         System.out.println("[CAL] " + code);
@@ -202,10 +191,8 @@ public class CalibrationManager {
         System.out.println("\n=== COPY TO Constants.Shooter.SHOOTING_CALIBRATION ===");
         System.out.println("public static final List<double[]> SHOOTING_CALIBRATION = new ArrayList<>() {{");
         for (double[] point : recordedPoints) {
-            System.out.printf("  add(new double[]{%.2f, %.2f, %.0f, %.0f}); " +
-                            "// relX=%.2f relY=%.2f bearing=%.0f\u00b0 rpm=%.0f%n",
-                    point[0], point[1], point[2], point[3],
-                    point[0], point[1], point[2], point[3]);
+            System.out.printf("  add(new double[]{%.2f, %.0f}); // dist=%.2fm rpm=%.0f%n",
+                    point[0], point[1], point[0], point[1]);
         }
         System.out.println("}};");
         System.out.println("=====================================================\n");
@@ -226,15 +213,6 @@ public class CalibrationManager {
     
     public void setCurrentDistance(double distance) { this.currentDistance = distance; }
     
-    /** Set the current robot-relative bearing to target (from ShootingCalculator.getRawBearing()) */
-    public void setCurrentBearing(double bearing) { this.currentBearing = bearing; }
-    
-    /** Set the robot X position relative to target (from ShootingCalculator.getRelativeX()) */
-    public void setCurrentX(double x) { this.currentX = x; }
-    
-    /** Set the robot Y position relative to target (from ShootingCalculator.getRelativeY()) */
-    public void setCurrentY(double y) { this.currentY = y; }
-    
     // ========================================================================
     // GETTERS (used by commands and subsystems)
     // ========================================================================
@@ -242,8 +220,5 @@ public class CalibrationManager {
     public double getShooterRPM() { return shooterRPM; }
     public double getRPMOffset() { return rpmOffset; }
     public double getCurrentDistance() { return currentDistance; }
-    public double getCurrentBearing() { return currentBearing; }
-    public double getCurrentX() { return currentX; }
-    public double getCurrentY() { return currentY; }
     public int getRecordCount() { return recordCount; }
 }

@@ -1,6 +1,7 @@
 package frc.robot.subsystems;
 
 import com.ctre.phoenix6.configs.CANcoderConfiguration;
+import com.ctre.phoenix6.configs.MotionMagicConfigs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.DutyCycleOut;
 import com.ctre.phoenix6.controls.MotionMagicVoltage;
@@ -39,6 +40,14 @@ public class IntakeSubsystem extends SubsystemBase {
     private final DutyCycleOut rollerDutyControl;
     private final MotionMagicVelocityVoltage rollerMotionMagic;
     
+    // Separate Motion Magic configs for deploy vs retract
+    // We pre-build both profiles and only re-apply when direction truly changes.
+    private final MotionMagicConfigs deployProfile = new MotionMagicConfigs();
+    private final MotionMagicConfigs retractProfile = new MotionMagicConfigs();
+    private boolean lastDirectionWasDeploying = false;
+    private boolean motionProfileDirty = true; // Force first apply
+    private double lastTargetAngle = Double.NaN; // Track target changes
+    
     // State
     private double targetPivotAngle = Constants.Intake.IDLE_ANGLE_DEG;
     private double targetRollerRPS = 0.0;
@@ -62,6 +71,7 @@ public class IntakeSubsystem extends SubsystemBase {
         configureCANcoder();
         configurePivotMotor();
         configureRollerMotor();
+        initMotionProfiles();
         
         // Read starting position from CANcoder
         pivotCANcoder.getAbsolutePosition().waitForUpdate(0.1);
@@ -91,17 +101,26 @@ public class IntakeSubsystem extends SubsystemBase {
         config.Feedback.RotorToSensorRatio = Constants.Intake.PIVOT_GEAR_RATIO;  // 81:1
         config.Feedback.SensorToMechanismRatio = 1.0;  // CANcoder is 1:1 with output
         
-        // Slot 0: position PID gains (used by Motion Magic Position)
-        // Units: output volts per rotation of error
-        config.Slot0.kP = 60.0;   // Proportional — volts per rotation of error
+        // Slot 0: DEPLOY — aggressive PID for fast, forceful deployment (going down)
+        // Chain slop doesn't matter as much deploying because gravity helps.
+        config.Slot0.kP = 80.0;   // High P for snappy deploy
         config.Slot0.kI = 0.0;
-        config.Slot0.kD = 0.5;    // Damping to prevent overshoot
+        config.Slot0.kD = 0.3;    // Light damping — we want speed
         config.Slot0.kS = 0.15;   // Static friction feedforward
         config.Slot0.kG = 0.3;    // Gravity feedforward (pivot fights gravity)
         config.Slot0.kV = 0.0;    // Not needed for position control
         
-        // Motion Magic: smooth profiled motion for the pivot
-        // Units are in mechanism rotations (CANcoder rotations since SensorToMechanism = 1:1)
+        // Slot 1: RETRACT/IDLE — gentler PID to avoid overshooting through chain slop
+        // Lower P reduces overshoot; moderate D damps oscillation without amplifying noise.
+        config.Slot1.kP = 35.0;   // Lower P — approach gently
+        config.Slot1.kI = 0.0;
+        config.Slot1.kD = 0.5;    // Moderate D — enough to damp, not amplify chain noise
+        config.Slot1.kS = 0.15;
+        config.Slot1.kG = 0.3;
+        config.Slot1.kV = 0.0;
+        
+        // Motion Magic: default to the deploy (fast) profile.
+        // We dynamically switch cruise/accel/jerk in periodic() based on direction.
         config.MotionMagic.MotionMagicCruiseVelocity = 0.5;  // rot/s at the output (~180 deg/s)
         config.MotionMagic.MotionMagicAcceleration = 1.0;     // rot/s² — reach cruise in 0.5s
         config.MotionMagic.MotionMagicJerk = 10.0;            // rot/s³ — S-curve smoothing
@@ -134,6 +153,22 @@ public class IntakeSubsystem extends SubsystemBase {
         config.MotionMagic.MotionMagicJerk = 3000;         // rps/s²
         
         rollerMotor.getConfigurator().apply(config);
+    }
+    
+    /**
+     * Pre-build the two Motion Magic profiles so we never allocate in periodic().
+     * We only re-apply a profile to the Talon when the direction actually changes.
+     */
+    private void initMotionProfiles() {
+        // DEPLOY: fast and aggressive — slam it down
+        deployProfile.MotionMagicCruiseVelocity = 0.6;  // rot/s (~216 deg/s)
+        deployProfile.MotionMagicAcceleration = 1.5;     // rot/s²
+        deployProfile.MotionMagicJerk = 15.0;            // rot/s³
+        
+        // RETRACT/IDLE: slow, gentle approach to avoid chain slop overshoot
+        retractProfile.MotionMagicCruiseVelocity = 0.3;  // rot/s (~108 deg/s)
+        retractProfile.MotionMagicAcceleration = 0.5;     // rot/s²
+        retractProfile.MotionMagicJerk = 5.0;             // rot/s³
     }
 
     // Health
@@ -194,6 +229,22 @@ public class IntakeSubsystem extends SubsystemBase {
      */
     public void setRollerSpeed(double rpm) {
         targetRollerRPS = rpm / 60.0;
+    }
+
+    /**
+     * Get the roller motor's current velocity in rotations per second.
+     * Used for stall detection.
+     */
+    public double getRollerVelocityRPS() {
+        return rollerMotor.getVelocity().getValueAsDouble();
+    }
+
+    /**
+     * Get the roller motor's supply current in amps.
+     * High current + low velocity = stall condition.
+     */
+    public double getRollerSupplyCurrent() {
+        return rollerMotor.getSupplyCurrent().getValueAsDouble();
     }
 
     // Combined control
@@ -272,8 +323,29 @@ public class IntakeSubsystem extends SubsystemBase {
         }
         
         // 2. Pivot: Motion Magic Position — target in mechanism rotations (degrees / 360)
+        //    Pick aggressive (Slot 0) for deploying, gentle (Slot 1) for retracting/idle.
+        //    Only re-apply the Motion Magic profile when the target changes direction,
+        //    NOT every cycle — re-applying mid-move resets the profile and causes shaking.
         double targetRotations = targetPivotAngle / 360.0;
-        pivotMotor.setControl(pivotMotionMagic.withPosition(targetRotations));
+        
+        // Determine direction only when the target angle changes significantly.
+        // Small changes (e.g., jiggle oscillation) skip direction re-evaluation to avoid
+        // re-applying Motion Magic configs every cycle, which resets the profile and shakes.
+        boolean targetChanged = Double.isNaN(lastTargetAngle) 
+                || Math.abs(lastTargetAngle - targetPivotAngle) > 2.0;
+        if (targetChanged || motionProfileDirty) {
+            boolean deploying = (targetPivotAngle > currentPivotAngle + 5.0); // 5° hysteresis
+            
+            if (deploying != lastDirectionWasDeploying || motionProfileDirty) {
+                lastDirectionWasDeploying = deploying;
+                pivotMotor.getConfigurator().apply(deploying ? deployProfile : retractProfile);
+            }
+            lastTargetAngle = targetPivotAngle;
+            motionProfileDirty = false;
+        }
+        
+        int slot = lastDirectionWasDeploying ? 0 : 1;
+        pivotMotor.setControl(pivotMotionMagic.withPosition(targetRotations).withSlot(slot));
         
         // 3. Roller: Motion Magic Velocity for non-zero, duty cycle 0 for stop
         if (Math.abs(targetRollerRPS) > 0.1) {

@@ -20,6 +20,7 @@ import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.geometry.Translation3d;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
 import frc.robot.GameStateManager;
@@ -27,520 +28,519 @@ import frc.robot.util.DashboardHelper;
 import frc.robot.util.DashboardHelper.Category;
 
 /**
- * Handles vision processing using a PhotonVision camera.
- * Detects AprilTags, estimates robot pose, and calculates distances/angles to targets.
+ * Handles vision processing using TWO PhotonVision cameras for pose estimation.
+ * 
+ * CAMERA LAYOUT:
+ *   - FRONT camera: mounted up top, pointing forward — sees scoring-side tags
+ *   - REAR camera:  mounted at the back, pointing backward & tilted up — sees tags behind
+ * 
+ * Both cameras contribute AprilTag pose estimates that are fused into the
+ * drivetrain's pose estimator. Each cycle, both cameras are polled independently.
+ * The "best" result (preferring multi-tag, then lowest ambiguity) is used as
+ * the subsystem's canonical pose for aiming calculations, while BOTH cameras'
+ * estimates are fed to the drivetrain for fusion.
  */
 public class VisionSubsystem extends SubsystemBase {
 
-    // PhotonVision components
-    private final PhotonCamera camera;
-    private final PhotonPoseEstimator poseEstimator;
-    private final AprilTagFieldLayout fieldLayout;
-
-    // Camera mounting position relative to robot center
-    // This transform goes from robot center to camera position
-    private final Transform3d robotToCamera;
-
-    // Cached pose data
-
-    /** Current robot pose estimate from vision */
-    private Pose2d robotPose = new Pose2d();
-
-    /** FPGA timestamp when pose was captured */
-    private double poseTimestamp = 0;
-
-    /** Whether we have a valid vision pose */
-    private boolean hasPose = false;
-
-    /** Whether we have any target in view */
-    private boolean hasTargetInView = false;
-
-    /** ID of the best currently tracked AprilTag */
-    private int bestTargetId = -1;
-
-    /** Horizontal offset to best target in degrees */
-    private double horizontalOffset = 0.0;
-
-    /** Target area of best target */
-    private double targetArea = 0.0;
-
-    /** Number of targets currently visible */
-    private int targetCount = 0;
-
-    /** Ambiguity of the best target (lower = more confident) */
-    private double bestTargetAmbiguity = 1.0;
-
-    /** Whether the current pose estimate came from multi-tag (2+ tags) */
-    private boolean isMultiTagEstimate = false;
-
-    /** Fallback pose from drivetrain odometry */
-    private Pose2d drivetrainPose = new Pose2d();
-
-    /** Whether to use drivetrain pose when vision unavailable */
-    private boolean useDrivetrainFallback = true;
-
-    /** Whether the gyro heading has been seeded from a vision measurement.
-     *  Until this is true, we use LowestAmbiguity (PNP-derived rotation) instead of
-     *  PnpDistanceTrigSolve (which just echoes back the gyro heading). */
-    private boolean headingSeeded = false;
-
-    /** Cached GameStateManager to avoid repeated getInstance() calls */
-    private final GameStateManager gameState = GameStateManager.getInstance();
-
-    /** Telemetry counter - only publish debug data every N cycles */
-    private int telemetryCounter = 0;
-
-    // Constructor
+    // =========================================================================
+    // INNER CLASS: CameraModule — encapsulates one camera + its pose estimator
+    // =========================================================================
 
     /**
-     * Creates the PhotonVision subsystem.
-     * Connects to the PhotonVision camera and initializes the pose estimator.
+     * Wraps a single PhotonVision camera and its associated pose estimator.
+     * Handles per-camera result processing, ambiguity filtering, and pose extraction.
      * 
-     * NOTE: Field visualization is handled by CommandSwerveDrivetrain.
-     * This subsystem only publishes vision-specific telemetry.
+     * All camera communication is wrapped in try-catch so that a disconnected
+     * or erroring camera never takes down the other camera or the subsystem.
      */
-    public VisionSubsystem() {
-        // Load the AprilTag field layout for the current game
-        fieldLayout = AprilTagFieldLayout.loadField(AprilTagFields.k2026RebuiltAndymark);
+    private static class CameraModule {
+        final String label;
+        final PhotonCamera camera;
+        final PhotonPoseEstimator poseEstimator;
 
-        // Create the camera connection
-        camera = new PhotonCamera(Constants.Vision.CAMERA_NAME);
+        // Per-frame results
+        Pose2d pose = new Pose2d();
+        double timestamp = 0;
+        boolean hasPose = false;
+        boolean hasTarget = false;
+        int targetCount = 0;
+        int bestTargetId = -1;
+        double bestAmbiguity = 1.0;
+        double horizontalOffset = 0.0;
+        double targetArea = 0.0;
+        boolean isMultiTag = false;
+        String poseMethod = "None";
 
-        // Define camera position on robot (translation + rotation from robot center)
-        robotToCamera = new Transform3d(
-            new Translation3d(
-                Constants.Vision.CAMERA_X_OFFSET,
-                Constants.Vision.CAMERA_Y_OFFSET,
-                Constants.Vision.CAMERA_Z_OFFSET
-            ),
-            new Rotation3d(
-                0.0, // Roll
-                Math.toRadians(Constants.Vision.CAMERA_PITCH_DEGREES), // Pitch
-                Math.toRadians(Constants.Vision.CAMERA_YAW_DEGREES)    // Yaw
-            )
-        );
+        // Error tracking — avoids spamming console on persistent failure
+        int consecutiveErrors = 0;
+        private static final int ERROR_LOG_INTERVAL = 250; // ~5 seconds at 50Hz
 
-        // Create the pose estimator
-        // Uses the 2-argument constructor (non-deprecated) with individual estimation methods
-        poseEstimator = new PhotonPoseEstimator(
-            fieldLayout,
-            robotToCamera
-        );
+        CameraModule(String label, PhotonCamera camera, Transform3d robotToCamera,
+                     AprilTagFieldLayout fieldLayout) {
+            this.label = label;
+            this.camera = camera;
+            this.poseEstimator = new PhotonPoseEstimator(fieldLayout, robotToCamera);
+        }
 
-        // Initialize tunable SmartDashboard values for target positions
-        initializeTunableValues();
+        /** Feed gyro heading to the pose estimator for single-tag strategies. */
+        void addHeadingData(double timestampSec, Rotation2d heading) {
+            try {
+                poseEstimator.addHeadingData(timestampSec, heading);
+            } catch (Exception e) {
+                // Non-critical — will just fall back to LowestAmbiguity strategy
+            }
+        }
 
-        System.out.println("[VisionSubsystem] PhotonVision initialized - Camera: " + Constants.Vision.CAMERA_NAME);
+        /**
+         * Process the latest results from this camera.
+         * If the camera throws any exception (disconnected, NT timeout, etc.)
+         * we clear the pose and return false — the other camera continues working.
+         * @param headingSeeded whether the gyro heading has been initialized from vision
+         * @return true if a valid pose was produced this cycle
+         */
+        boolean update(boolean headingSeeded) {
+            try {
+                return updateInternal(headingSeeded);
+            } catch (Exception e) {
+                consecutiveErrors++;
+                if (consecutiveErrors == 1 || consecutiveErrors % ERROR_LOG_INTERVAL == 0) {
+                    System.err.println("[Vision] " + label + " camera error (#"
+                            + consecutiveErrors + "): " + e.getMessage());
+                }
+                clearPose();
+                return false;
+            }
+        }
+
+        private boolean updateInternal(boolean headingSeeded) {
+            List<PhotonPipelineResult> results = camera.getAllUnreadResults();
+
+            if (results.isEmpty()) {
+                // No new frames — keep previous hasPose state (avoid flicker)
+                return hasPose;
+            }
+
+            PhotonPipelineResult latest = results.get(results.size() - 1);
+            hasTarget = latest.hasTargets();
+
+            if (!hasTarget) {
+                clearPose();
+                return false;
+            }
+
+            // Cache best-target info
+            PhotonTrackedTarget best = latest.getBestTarget();
+            if (best != null) {
+                bestTargetId = best.getFiducialId();
+                horizontalOffset = best.getYaw();
+                targetArea = best.getArea();
+                bestAmbiguity = best.getPoseAmbiguity();
+            }
+            targetCount = latest.getTargets().size();
+
+            // Reject high-ambiguity single-tag results
+            if (targetCount == 1 && bestAmbiguity > Constants.Vision.MAX_AMBIGUITY) {
+                hasPose = false;
+                isMultiTag = false;
+                poseMethod = "REJECTED(ambiguity " + String.format("%.3f", bestAmbiguity) + ")";
+                return false;
+            }
+
+            // --- Try multi-tag first (best accuracy) ---
+            Optional<EstimatedRobotPose> est = poseEstimator.estimateCoprocMultiTagPose(latest);
+            poseMethod = "MultiTag";
+            isMultiTag = est.isPresent();
+
+            if (est.isEmpty()) {
+                isMultiTag = false;
+                if (headingSeeded) {
+                    est = poseEstimator.estimatePnpDistanceTrigSolvePose(latest);
+                    poseMethod = "PnpDistanceTrig";
+                } else {
+                    est = poseEstimator.estimateLowestAmbiguityPose(latest);
+                    poseMethod = "LowestAmbiguity(seeding)";
+                }
+            }
+
+            if (est.isEmpty()) {
+                // Last resort fallback
+                if (headingSeeded) {
+                    est = poseEstimator.estimateLowestAmbiguityPose(latest);
+                    poseMethod = "LowestAmbiguity(fallback)";
+                } else {
+                    est = poseEstimator.estimatePnpDistanceTrigSolvePose(latest);
+                    poseMethod = "PnpDistanceTrig(fallback)";
+                }
+            }
+
+            if (est.isPresent()) {
+                EstimatedRobotPose erp = est.get();
+                Pose2d candidate = erp.estimatedPose.toPose2d();
+
+                // Reject poses outside the field
+                double margin = 0.5;
+                if (candidate.getX() < -margin
+                        || candidate.getX() > Constants.Field.FIELD_LENGTH_METERS + margin
+                        || candidate.getY() < -margin
+                        || candidate.getY() > Constants.Field.FIELD_WIDTH_METERS + margin) {
+                    hasPose = false;
+                    poseMethod = "REJECTED(off-field)";
+                    return false;
+                }
+
+                pose = candidate;
+                timestamp = erp.timestampSeconds;
+                hasPose = true;
+                consecutiveErrors = 0; // Camera is working — reset error counter
+                return true;
+            }
+
+            hasPose = false;
+            return false;
+        }
+
+        private void clearPose() {
+            hasPose = false;
+            bestTargetId = -1;
+            horizontalOffset = 0.0;
+            targetArea = 0.0;
+            targetCount = 0;
+            bestAmbiguity = 1.0;
+            isMultiTag = false;
+            poseMethod = "None";
+        }
+
+        boolean isConnected() {
+            try {
+                return camera.isConnected();
+            } catch (Exception e) {
+                return false;
+            }
+        }
     }
 
-    /**
-     * Initializes SmartDashboard values for tuning target positions.
-     * These can be adjusted live and later copied to Constants.
-     */
+    // =========================================================================
+    // FIELDS
+    // =========================================================================
+
+    private final AprilTagFieldLayout fieldLayout;
+
+    // Two camera modules
+    private final CameraModule frontCam;
+    private final CameraModule rearCam;
+
+    // Merged "best" pose (used for aiming, distance, etc.)
+    private Pose2d robotPose = new Pose2d();
+    private double poseTimestamp = 0;
+    private boolean hasPose = false;
+    private boolean hasTargetInView = false;
+    private int bestTargetId = -1;
+    private double horizontalOffset = 0.0;
+    private double targetArea = 0.0;
+    private int targetCount = 0;
+    private double bestTargetAmbiguity = 1.0;
+    private boolean isMultiTagEstimate = false;
+
+    // Drivetrain fallback
+    private Pose2d drivetrainPose = new Pose2d();
+    private boolean useDrivetrainFallback = true;
+
+    // Heading seeding
+    private boolean headingSeeded = false;
+
+    private final GameStateManager gameState = GameStateManager.getInstance();
+    private int telemetryCounter = 0;
+
+    // =========================================================================
+    // CONSTRUCTOR
+    // =========================================================================
+
+    public VisionSubsystem() {
+        fieldLayout = AprilTagFieldLayout.loadField(AprilTagFields.k2026RebuiltAndymark);
+
+        // --- Front camera ---
+        Transform3d frontTransform = new Transform3d(
+            new Translation3d(
+                Constants.Vision.FRONT_CAMERA_X,
+                Constants.Vision.FRONT_CAMERA_Y,
+                Constants.Vision.FRONT_CAMERA_Z),
+            new Rotation3d(
+                0.0,
+                Math.toRadians(Constants.Vision.FRONT_CAMERA_PITCH_DEG),
+                Math.toRadians(Constants.Vision.FRONT_CAMERA_YAW_DEG)));
+
+        frontCam = new CameraModule(
+            "Front",
+            new PhotonCamera(Constants.Vision.FRONT_CAMERA_NAME),
+            frontTransform,
+            fieldLayout);
+
+        // --- Rear camera ---
+        Transform3d rearTransform = new Transform3d(
+            new Translation3d(
+                Constants.Vision.REAR_CAMERA_X,
+                Constants.Vision.REAR_CAMERA_Y,
+                Constants.Vision.REAR_CAMERA_Z),
+            new Rotation3d(
+                0.0,
+                Math.toRadians(Constants.Vision.REAR_CAMERA_PITCH_DEG),
+                Math.toRadians(Constants.Vision.REAR_CAMERA_YAW_DEG)));
+
+        rearCam = new CameraModule(
+            "Rear",
+            new PhotonCamera(Constants.Vision.REAR_CAMERA_NAME),
+            rearTransform,
+            fieldLayout);
+
+        initializeTunableValues();
+
+        System.out.println("[VisionSubsystem] Dual-camera init - Front: "
+            + Constants.Vision.FRONT_CAMERA_NAME + ", Rear: " + Constants.Vision.REAR_CAMERA_NAME);
+    }
+
     private void initializeTunableValues() {
-        // Hub position offsets (add to base Constants values)
         DashboardHelper.putNumber(Category.TUNING, "Aim/HubOffsetX", 0.0);
         DashboardHelper.putNumber(Category.TUNING, "Aim/HubOffsetY", 0.0);
-
-        // Trench position offsets (add to base Constants values - applies to BOTH trenches)
         DashboardHelper.putNumber(Category.TUNING, "Aim/TrenchOffsetX", 0.0);
         DashboardHelper.putNumber(Category.TUNING, "Aim/TrenchOffsetY", 0.0);
     }
 
-    // Diagnostic checks
+    // =========================================================================
+    // DIAGNOSTIC
+    // =========================================================================
 
-    /** Check if the camera is connected and sending data. */
+    /** Check if at least one camera is connected. */
     public boolean isHealthy() {
-        return camera.isConnected();
+        return frontCam.isConnected() || rearCam.isConnected();
     }
 
-    // TARGET DETECTION METHODS
-
-    /**
-     * Check if PhotonVision has a valid target in view.
-     * @return true if an AprilTag is being tracked
-     */
-    public boolean hasTarget() {
-        return hasTargetInView;
+    /** Check if the front camera is connected. */
+    public boolean isFrontCameraConnected() {
+        return frontCam.isConnected();
     }
 
-    /**
-     * Get the ID of the currently tracked AprilTag (best target).
-     * @return Tag ID (1-32), or -1 if no target
-     */
-    public int getTargetId() {
-        return bestTargetId;
+    /** Check if the rear camera is connected. */
+    public boolean isRearCameraConnected() {
+        return rearCam.isConnected();
     }
 
-    /**
-     * Get the horizontal offset to the target center.
-     * Negative = target is to the left, Positive = target is to the right.
-     * @return Horizontal offset in degrees
-     */
-    public double getHorizontalOffset() {
-        return horizontalOffset;
-    }
+    // =========================================================================
+    // TARGET DETECTION (merged best result)
+    // =========================================================================
 
-    /**
-     * Get the target area (how much of the image the target fills).
-     * Larger area generally means closer target.
-     * @return Target area as percentage of image (0-100)
-     */
-    public double getTargetArea() {
-        return targetArea;
-    }
+    public boolean hasTarget() { return hasTargetInView; }
+    public int getTargetId() { return bestTargetId; }
+    public double getHorizontalOffset() { return horizontalOffset; }
+    public double getTargetArea() { return targetArea; }
+    public int getTargetCount() { return targetCount; }
+    public boolean isMultiTag() { return isMultiTagEstimate; }
+    public double getBestAmbiguity() { return bestTargetAmbiguity; }
 
-    /**
-     * Estimate distance to the currently tracked AprilTag.
-     * Uses the pose estimate if available, otherwise estimates from target area.
-     * @return Estimated distance in meters
-     */
     public double getEstimatedDistanceToTag() {
-        // If we have a valid pose, use the accurate distance to hub
-        if (hasPoseEstimate()) {
-            return getDistanceToHub();
-        }
-
-        // Fallback: Estimate distance from target area
+        if (hasPoseEstimate()) return getDistanceToHub();
         double area = getTargetArea();
-        if (area <= 0) {
-            return 0.0;
-        }
-
-        double k = 3.0; // Calibration constant - adjust based on testing
-        return k / Math.sqrt(area);
+        if (area <= 0) return 0.0;
+        return 3.0 / Math.sqrt(area);
     }
 
-    // POSE ESTIMATION METHODS
+    // =========================================================================
+    // POSE ESTIMATION — merged & per-camera accessors
+    // =========================================================================
 
-    /**
-     * Check if we have a valid, recent pose estimate.
-     * Returns true if EITHER:
-     * - Vision has a valid pose AND we have a target
-     * - OR drivetrain fallback is enabled (for simulation)
-     * 
-     * @return true if we have a usable pose for aiming
-     */
     public boolean hasPoseEstimate() {
-        if (useDrivetrainFallback) {
-            return true;
-        }
+        if (useDrivetrainFallback) return true;
         return hasPose && hasTargetInView;
     }
 
-    /**
-     * Check if we have a valid VISION pose estimate (ignores drivetrain fallback).
-     * Use this for vision fusion to avoid feedback loops.
-     * @return true if vision has provided a pose estimate and we have a target
-     */
     public boolean hasVisionPose() {
         return hasPose && hasTargetInView;
     }
 
-    /**
-     * Update the drivetrain pose used as fallback when vision is unavailable.
-     * Call this from RobotContainer.updateVisionPose() every cycle.
-     * 
-     * @param pose The current drivetrain odometry pose
-     */
+    /** Whether the FRONT camera produced a valid pose this cycle. */
+    public boolean hasFrontPose() { return frontCam.hasPose; }
+
+    /** Whether the REAR camera produced a valid pose this cycle. */
+    public boolean hasRearPose() { return rearCam.hasPose; }
+
+    /** Front camera pose (only valid if hasFrontPose()). */
+    public Pose2d getFrontPose() { return frontCam.pose; }
+    /** Front camera timestamp. */
+    public double getFrontTimestamp() { return frontCam.timestamp; }
+    /** Front camera multi-tag? */
+    public boolean isFrontMultiTag() { return frontCam.isMultiTag; }
+    /** Front camera target count. */
+    public int getFrontTargetCount() { return frontCam.targetCount; }
+
+    /** Rear camera pose (only valid if hasRearPose()). */
+    public Pose2d getRearPose() { return rearCam.pose; }
+    /** Rear camera timestamp. */
+    public double getRearTimestamp() { return rearCam.timestamp; }
+    /** Rear camera multi-tag? */
+    public boolean isRearMultiTag() { return rearCam.isMultiTag; }
+    /** Rear camera target count. */
+    public int getRearTargetCount() { return rearCam.targetCount; }
+
     public void setDrivetrainPose(Pose2d pose) {
         this.drivetrainPose = pose;
     }
 
     /**
-     * Feed the robot's gyro heading to the pose estimator for better single-tag estimates.
-     * PhotonVision's multi-tag PNP doesn't need this, but we store it for potential
-     * future use with reference pose strategies.
-     * 
-     * Call this every cycle from RobotContainer.updateVisionPose().
-     * 
-     * @param yawDegrees   Robot yaw (heading) in degrees (gyro reading)
-     * @param yawRate      Robot yaw rate in degrees per second
-     * @param pitchDegrees Robot pitch in degrees (0 if not available)
-     * @param pitchRate    Robot pitch rate in degrees per second (0 if not available)
-     * @param rollDegrees  Robot roll in degrees (0 if not available)
-     * @param rollRate     Robot roll rate in degrees per second (0 if not available)
+     * Feed the robot's gyro heading to BOTH pose estimators.
      */
     public void setRobotOrientation(double yawDegrees, double yawRate,
                                      double pitchDegrees, double pitchRate,
                                      double rollDegrees, double rollRate) {
-        // Feed heading data to the pose estimator for PNP_DISTANCE_TRIG_SOLVE
-        // and other strategies that benefit from known robot heading.
-        poseEstimator.addHeadingData(
-            edu.wpi.first.wpilibj.Timer.getFPGATimestamp(),
-            Rotation2d.fromDegrees(yawDegrees)
-        );
+        double now = Timer.getFPGATimestamp();
+        Rotation2d heading = Rotation2d.fromDegrees(yawDegrees);
+        frontCam.addHeadingData(now, heading);
+        rearCam.addHeadingData(now, heading);
     }
 
-    /**
-     * Notify the vision subsystem that the gyro heading has been seeded from vision.
-     * After this is called, PnpDistanceTrigSolve can be used safely because the
-     * gyro heading it reads back will be correct.
-     */
     public void notifyHeadingSeeded() {
         headingSeeded = true;
-        System.out.println("[VisionSubsystem] Heading seeded - switching to PnpDistanceTrigSolve strategy");
+        System.out.println("[VisionSubsystem] Heading seeded — using PnpDistanceTrigSolve");
     }
 
     /**
-     * Get the best available robot pose.
-     * Returns vision pose if available, otherwise drivetrain fallback.
-     * @return Robot pose for aiming calculations
+     * Get the best available robot pose (vision or drivetrain fallback).
      */
     public Pose2d getRobotPose() {
-        if (hasPose && hasTargetInView) {
-            return robotPose;
-        } else if (useDrivetrainFallback) {
-            return drivetrainPose;
-        }
+        if (hasPose && hasTargetInView) return robotPose;
+        if (useDrivetrainFallback) return drivetrainPose;
         return robotPose;
     }
 
-    /**
-     * Get the FPGA timestamp of the pose measurement.
-     * Used for latency compensation when fusing with odometry.
-     * @return Timestamp in seconds
-     */
-    public double getPoseTimestamp() {
-        return poseTimestamp;
-    }
+    public double getPoseTimestamp() { return poseTimestamp; }
 
-    /**
-     * Get the number of AprilTags currently visible.
-     * Multi-tag (>= 2) gives significantly more reliable pose estimates.
-     * @return Number of visible tags
-     */
-    public int getTargetCount() {
-        return targetCount;
-    }
-
-    /**
-     * Whether the current pose estimate came from multi-tag PNP (2+ tags).
-     * Multi-tag estimates have much more reliable rotation and position.
-     * @return true if current pose was computed from multiple tags
-     */
-    public boolean isMultiTag() {
-        return isMultiTagEstimate;
-    }
-
-    /**
-     * Get the ambiguity of the best currently tracked target.
-     * Lower = more confident. Typically reject poses with ambiguity > 0.2.
-     * @return Ambiguity value (0-1)
-     */
-    public double getBestAmbiguity() {
-        return bestTargetAmbiguity;
-    }
-
-    /**
-     * Get the shooter position in field coordinates.
-     * For a fixed shooter, this is simply the robot center position.
-     * @return Shooter position as Translation2d in field coordinates
-     */
     public Translation2d getShooterFieldPosition() {
         return getRobotPose().getTranslation();
     }
 
+    // =========================================================================
     // DISTANCE & ANGLE TO HUB
+    // =========================================================================
 
-    /**
-     * Get straight-line distance from robot center to the hub center.
-     * @return Distance in meters
-     */
     public double getDistanceToHub() {
-        Translation2d hubPosition = getHubPosition();
-        Translation2d robotPosition = getShooterFieldPosition();
-        return robotPosition.getDistance(hubPosition);
+        return getShooterFieldPosition().getDistance(getHubPosition());
     }
 
-    /**
-     * Get the FIELD-RELATIVE angle from robot center to hub.
-     * 0 degrees = toward positive X axis of field.
-     * @return Angle in degrees
-     */
     public double getAngleToHub() {
-        Translation2d hubPosition = getHubPosition();
-        Translation2d robotPosition = getShooterFieldPosition();
-
-        double dx = hubPosition.getX() - robotPosition.getX();
-        double dy = hubPosition.getY() - robotPosition.getY();
-
-        return Math.toDegrees(Math.atan2(dy, dx));
+        Translation2d hub = getHubPosition();
+        Translation2d robot = getShooterFieldPosition();
+        return Math.toDegrees(Math.atan2(hub.getY() - robot.getY(), hub.getX() - robot.getX()));
     }
 
-    /**
-     * Get the robot-relative angle to the hub.
-     * For a fixed shooter, this tells you how much the robot needs to rotate
-     * to face the hub.
-     * @return Angle in degrees (-180 to +180, 0 = robot facing hub)
-     */
     public double getRobotAngleToHub() {
-        double fieldAngleToHub = getAngleToHub();
-        double robotHeading = getRobotPose().getRotation().getDegrees();
-
-        double angle = fieldAngleToHub - robotHeading;
-        angle = ((angle + 180) % 360 + 360) % 360 - 180;
-
-        return angle;
+        double angle = getAngleToHub() - getRobotPose().getRotation().getDegrees();
+        return ((angle + 180) % 360 + 360) % 360 - 180;
     }
 
-    /**
-     * Get the hub position for our alliance, including tunable offsets.
-     * @return Hub center position as Translation2d (with offsets applied)
-     */
     public Translation2d getHubPosition() {
         Alliance alliance = DriverStation.getAlliance().orElse(Alliance.Blue);
-        Translation2d basePosition = (alliance == Alliance.Blue) ?
-               Constants.Field.BLUE_HUB_CENTER :
-               Constants.Field.RED_HUB_CENTER;
-
-        double offsetX = DashboardHelper.getNumber(Category.TUNING, "Aim/HubOffsetX", 0.0);
-        double offsetY = DashboardHelper.getNumber(Category.TUNING, "Aim/HubOffsetY", 0.0);
-
-        return new Translation2d(basePosition.getX() + offsetX, basePosition.getY() + offsetY);
+        Translation2d base = (alliance == Alliance.Blue)
+            ? Constants.Field.BLUE_HUB_CENTER : Constants.Field.RED_HUB_CENTER;
+        double ox = DashboardHelper.getNumber(Category.TUNING, "Aim/HubOffsetX", 0.0);
+        double oy = DashboardHelper.getNumber(Category.TUNING, "Aim/HubOffsetY", 0.0);
+        return new Translation2d(base.getX() + ox, base.getY() + oy);
     }
 
-    /**
-     * Get the raw hub position without offsets (for display purposes).
-     * @return Base hub position from Constants
-     */
     public Translation2d getHubPositionRaw() {
         Alliance alliance = DriverStation.getAlliance().orElse(Alliance.Blue);
-        return (alliance == Alliance.Blue) ?
-               Constants.Field.BLUE_HUB_CENTER :
-               Constants.Field.RED_HUB_CENTER;
+        return (alliance == Alliance.Blue)
+            ? Constants.Field.BLUE_HUB_CENTER : Constants.Field.RED_HUB_CENTER;
     }
 
-    // DISTANCE & ANGLE TO TRENCH (for shuttling)
+    // =========================================================================
+    // DISTANCE & ANGLE TO TRENCH
+    // =========================================================================
 
-    /**
-     * Get the CLOSEST trench target position for our alliance, including tunable offsets.
-     * @return Closest trench target position as Translation2d (with offsets applied)
-     */
     public Translation2d getTrenchPosition() {
         Alliance alliance = DriverStation.getAlliance().orElse(Alliance.Blue);
-        Translation2d robotPosition = getRobotPose().getTranslation();
+        Translation2d robot = getRobotPose().getTranslation();
 
-        Translation2d trenchRotating;
-        Translation2d trenchFixed;
-
+        Translation2d rotating, fixed;
         if (alliance == Alliance.Blue) {
-            trenchRotating = Constants.Field.BLUE_TRENCH_ROTATING;
-            trenchFixed = Constants.Field.BLUE_TRENCH_FIXED;
+            rotating = Constants.Field.BLUE_TRENCH_ROTATING;
+            fixed = Constants.Field.BLUE_TRENCH_FIXED;
         } else {
-            trenchRotating = Constants.Field.RED_TRENCH_ROTATING;
-            trenchFixed = Constants.Field.RED_TRENCH_FIXED;
+            rotating = Constants.Field.RED_TRENCH_ROTATING;
+            fixed = Constants.Field.RED_TRENCH_FIXED;
         }
 
-        double distToRotating = robotPosition.getDistance(trenchRotating);
-        double distToFixed = robotPosition.getDistance(trenchFixed);
+        Translation2d base = (robot.getDistance(rotating) <= robot.getDistance(fixed))
+            ? rotating : fixed;
 
-        Translation2d basePosition = (distToRotating <= distToFixed) ? trenchRotating : trenchFixed;
-
-        double offsetX = DashboardHelper.getNumber(Category.TUNING, "Aim/TrenchOffsetX", 0.0);
-        double offsetY = DashboardHelper.getNumber(Category.TUNING, "Aim/TrenchOffsetY", 0.0);
-
-        return new Translation2d(basePosition.getX() + offsetX, basePosition.getY() + offsetY);
+        double ox = DashboardHelper.getNumber(Category.TUNING, "Aim/TrenchOffsetX", 0.0);
+        double oy = DashboardHelper.getNumber(Category.TUNING, "Aim/TrenchOffsetY", 0.0);
+        return new Translation2d(base.getX() + ox, base.getY() + oy);
     }
 
-    /**
-     * Get the rotating arm trench position for our alliance.
-     * @return Rotating trench target position as Translation2d
-     */
     public Translation2d getTrenchRotatingPosition() {
         Alliance alliance = DriverStation.getAlliance().orElse(Alliance.Blue);
-        return (alliance == Alliance.Blue) ?
-               Constants.Field.BLUE_TRENCH_ROTATING :
-               Constants.Field.RED_TRENCH_ROTATING;
+        return (alliance == Alliance.Blue)
+            ? Constants.Field.BLUE_TRENCH_ROTATING : Constants.Field.RED_TRENCH_ROTATING;
     }
 
-    /**
-     * Get the fixed arm trench position for our alliance.
-     * @return Fixed trench target position as Translation2d
-     */
     public Translation2d getTrenchFixedPosition() {
         Alliance alliance = DriverStation.getAlliance().orElse(Alliance.Blue);
-        return (alliance == Alliance.Blue) ?
-               Constants.Field.BLUE_TRENCH_FIXED :
-               Constants.Field.RED_TRENCH_FIXED;
+        return (alliance == Alliance.Blue)
+            ? Constants.Field.BLUE_TRENCH_FIXED : Constants.Field.RED_TRENCH_FIXED;
     }
 
-    /**
-     * Get straight-line distance from robot center to trench target.
-     * @return Distance in meters
-     */
     public double getDistanceToTrench() {
-        Translation2d trenchPosition = getTrenchPosition();
-        Translation2d robotPosition = getShooterFieldPosition();
-        return robotPosition.getDistance(trenchPosition);
+        return getShooterFieldPosition().getDistance(getTrenchPosition());
     }
 
-    /**
-     * Get the FIELD-RELATIVE angle from robot center to trench.
-     * @return Angle in degrees
-     */
     public double getAngleToTrench() {
-        Translation2d trenchPosition = getTrenchPosition();
-        Translation2d robotPosition = getShooterFieldPosition();
-
-        double dx = trenchPosition.getX() - robotPosition.getX();
-        double dy = trenchPosition.getY() - robotPosition.getY();
-
-        return Math.toDegrees(Math.atan2(dy, dx));
+        Translation2d trench = getTrenchPosition();
+        Translation2d robot = getShooterFieldPosition();
+        return Math.toDegrees(Math.atan2(trench.getY() - robot.getY(), trench.getX() - robot.getX()));
     }
 
-    /**
-     * Get the robot-relative angle to the trench.
-     * For a fixed shooter, this tells you how much the robot needs to rotate
-     * to face the trench.
-     * @return Angle in degrees (-180 to +180, 0 = robot facing trench)
-     */
     public double getRobotAngleToTrench() {
-        double fieldAngleToTrench = getAngleToTrench();
-        double robotHeading = getRobotPose().getRotation().getDegrees();
-
-        double angle = fieldAngleToTrench - robotHeading;
-        angle = ((angle + 180) % 360 + 360) % 360 - 180;
-
-        return angle;
+        double angle = getAngleToTrench() - getRobotPose().getRotation().getDegrees();
+        return ((angle + 180) % 360 + 360) % 360 - 180;
     }
 
-    // VISION MEASUREMENT TRUST
+    // =========================================================================
+    // VISION STD DEVS
+    // =========================================================================
 
     /**
-     * Get standard deviations for vision measurement trust.
-     * We trust vision heavily; it is the primary pose source whenever tags are visible.
-     * Gyro/odometry is just the fallback when no tags are in view.
-     * Still scales slightly with distance (farther = slightly less precise).
-     * @return Array of [x_stddev, y_stddev, theta_stddev]
+     * Get standard deviations for the merged best vision measurement.
      */
     public double[] getVisionStdDevs() {
         double distance = getDistanceToHub();
-        // Mild distance scaling: 1.0 at ≤3m, grows slowly beyond that
         double scaleFactor = Math.max(1.0, distance / 3.0);
-
-        // Multi-tag is a bit tighter but we trust single-tag too
         double mtMultiplier = (targetCount >= 2) ? 1.0 : 1.5;
-
-        return new double[]{
+        return new double[] {
             Constants.Vision.VISION_STD_DEV_X * scaleFactor * mtMultiplier,
             Constants.Vision.VISION_STD_DEV_Y * scaleFactor * mtMultiplier,
             Constants.Vision.VISION_STD_DEV_THETA * scaleFactor * mtMultiplier
         };
     }
 
-    // TAG SELECTION
-
     /**
-     * Select the best tag to track from a list of visible tags.
-     * Prioritizes hub tags, then trench tags, then any other tag.
-     * @param visibleTags Array of visible tag IDs
-     * @return Best tag ID to track, or -1 if no tags
+     * Get std devs for a specific camera's result (used by RobotContainer for
+     * independent per-camera fusion).
      */
+    public double[] getStdDevsForCamera(boolean camIsMultiTag, int camTargetCount) {
+        double distance = getDistanceToHub();
+        double scaleFactor = Math.max(1.0, distance / 3.0);
+        double mtMultiplier = (camTargetCount >= 2) ? 1.0 : 1.5;
+        return new double[] {
+            Constants.Vision.VISION_STD_DEV_X * scaleFactor * mtMultiplier,
+            Constants.Vision.VISION_STD_DEV_Y * scaleFactor * mtMultiplier,
+            Constants.Vision.VISION_STD_DEV_THETA * scaleFactor * mtMultiplier
+        };
+    }
+
+    // =========================================================================
+    // TAG SELECTION
+    // =========================================================================
+
     public int selectBestTag(int[] visibleTags) {
-        if (visibleTags.length == 0) {
-            return -1;
-        }
+        if (visibleTags.length == 0) return -1;
 
         Alliance alliance = DriverStation.getAlliance().orElse(Alliance.Blue);
         int[] hubTags = (alliance == Alliance.Blue) ? Constants.Tags.BLUE_HUB : Constants.Tags.RED_HUB;
@@ -552,182 +552,115 @@ public class VisionSubsystem extends SubsystemBase {
         for (int tag : visibleTags) {
             if (contains(trenchTags, tag)) return tag;
         }
-
         return visibleTags[0];
     }
 
-    // PERIODIC UPDATE
+    // =========================================================================
+    // PERIODIC — poll both cameras, merge best result
+    // =========================================================================
 
     @Override
     public void periodic() {
-        updatePoseEstimate();
+        frontCam.update(headingSeeded);
+        rearCam.update(headingSeeded);
+        mergeBestResult();
         publishTelemetry();
     }
 
     /**
-     * Updates the robot pose estimate from PhotonVision data.
-     * 
-     * Uses MULTI_TAG_PNP_ON_COPROCESSOR as the primary strategy, which
-     * computes pose from all visible tags simultaneously for best accuracy.
-     * Falls back to PnpDistanceTrigSolve or LOWEST_AMBIGUITY when only one tag is visible.
-     * 
-     * Filters out bad estimates:
-     *  - Single-tag poses with ambiguity above MAX_AMBIGUITY are rejected
-     *  - Poses outside the field boundaries are rejected
+     * Selects the "best" result across both cameras for the subsystem's
+     * canonical pose, target info, etc. Both cameras' individual poses
+     * remain accessible via hasFrontPose()/hasRearPose() for drivetrain fusion.
      */
-    private void updatePoseEstimate() {
-        // Get all unread results from PhotonVision
-        List<PhotonPipelineResult> results = camera.getAllUnreadResults();
+    private void mergeBestResult() {
+        CameraModule best = null;
 
-        if (results.isEmpty()) {
-            // No new frames; keep last known state
-            // Don't clear hasPose here to avoid flickering when camera FPS < robot loop rate
-            return;
+        boolean frontValid = frontCam.hasPose;
+        boolean rearValid = rearCam.hasPose;
+
+        if (frontValid && rearValid) {
+            // Both have poses — prefer multi-tag, then more tags, then lower ambiguity
+            if (frontCam.isMultiTag && !rearCam.isMultiTag) {
+                best = frontCam;
+            } else if (rearCam.isMultiTag && !frontCam.isMultiTag) {
+                best = rearCam;
+            } else if (frontCam.targetCount != rearCam.targetCount) {
+                best = (frontCam.targetCount > rearCam.targetCount) ? frontCam : rearCam;
+            } else {
+                best = (frontCam.bestAmbiguity <= rearCam.bestAmbiguity) ? frontCam : rearCam;
+            }
+        } else if (frontValid) {
+            best = frontCam;
+        } else if (rearValid) {
+            best = rearCam;
         }
 
-        // Process the most recent result
-        PhotonPipelineResult latestResult = results.get(results.size() - 1);
-
-        // Update target detection state
-        hasTargetInView = latestResult.hasTargets();
-
-        if (!hasTargetInView) {
+        if (best != null) {
+            robotPose = best.pose;
+            poseTimestamp = best.timestamp;
+            hasPose = true;
+            hasTargetInView = true;
+            bestTargetId = best.bestTargetId;
+            horizontalOffset = best.horizontalOffset;
+            targetArea = best.targetArea;
+            // Combined target count across both cameras when both see tags
+            targetCount = best.targetCount
+                + (frontValid && rearValid ? (best == frontCam ? rearCam.targetCount : frontCam.targetCount) : 0);
+            bestTargetAmbiguity = best.bestAmbiguity;
+            isMultiTagEstimate = best.isMultiTag;
+        } else {
             hasPose = false;
+            hasTargetInView = frontCam.hasTarget || rearCam.hasTarget;
             bestTargetId = -1;
             horizontalOffset = 0.0;
             targetArea = 0.0;
             targetCount = 0;
             bestTargetAmbiguity = 1.0;
             isMultiTagEstimate = false;
-            return;
-        }
-
-        // Cache target info from best target
-        PhotonTrackedTarget bestTarget = latestResult.getBestTarget();
-        if (bestTarget != null) {
-            bestTargetId = bestTarget.getFiducialId();
-            horizontalOffset = bestTarget.getYaw(); // PhotonVision yaw = horizontal offset
-            targetArea = bestTarget.getArea();
-            bestTargetAmbiguity = bestTarget.getPoseAmbiguity();
-        }
-        targetCount = latestResult.getTargets().size();
-
-        // --- Reject single-tag estimates with high ambiguity ---
-        // Multi-tag doesn't have ambiguity issues, so only filter single-tag.
-        if (targetCount == 1 && bestTargetAmbiguity > Constants.Vision.MAX_AMBIGUITY) {
-            hasPose = false;
-            isMultiTagEstimate = false;
-            DashboardHelper.putString(Category.DEBUG, "Vision/PoseMethod",
-                    "REJECTED: ambiguity " + String.format("%.3f", bestTargetAmbiguity));
-            return;
-        }
-
-        // Use PhotonPoseEstimator to compute robot pose from the result.
-        // Try multi-tag first (coprocessor-side PNP), which is always best when available.
-        Optional<EstimatedRobotPose> estimatedPose = poseEstimator.estimateCoprocMultiTagPose(latestResult);
-        String poseMethod = "MultiTag";
-        isMultiTagEstimate = estimatedPose.isPresent();
-        
-        if (estimatedPose.isEmpty()) {
-            isMultiTagEstimate = false;
-            if (headingSeeded) {
-                // Heading is seeded correctly, so PnpDistanceTrigSolve will give
-                // accurate X/Y (from tag distance) with correct rotation (from gyro).
-                estimatedPose = poseEstimator.estimatePnpDistanceTrigSolvePose(latestResult);
-                poseMethod = "PnpDistanceTrig";
-            } else {
-                // Heading NOT seeded yet; gyro is still at 0 degrees from boot.
-                // PnpDistanceTrigSolve would just echo back 0° for rotation.
-                // Use LowestAmbiguity instead: it derives rotation from PNP geometry,
-                // giving us a real heading we can use to seed the gyro.
-                estimatedPose = poseEstimator.estimateLowestAmbiguityPose(latestResult);
-                poseMethod = "LowestAmbiguity(seeding)";
-            }
-        }
-        
-        if (estimatedPose.isEmpty()) {
-            // Last resort: try whichever strategy we didn't try above
-            if (headingSeeded) {
-                estimatedPose = poseEstimator.estimateLowestAmbiguityPose(latestResult);
-                poseMethod = "LowestAmbiguity(fallback)";
-            } else {
-                estimatedPose = poseEstimator.estimatePnpDistanceTrigSolvePose(latestResult);
-                poseMethod = "PnpDistanceTrig(fallback)";
-            }
-        }
-
-        if (estimatedPose.isPresent()) {
-            EstimatedRobotPose estimate = estimatedPose.get();
-            Pose3d pose3d = estimate.estimatedPose;
-
-            // Extract 2D pose for field-plane calculations
-            Pose2d candidatePose = pose3d.toPose2d();
-            
-            // --- Reject poses outside the field ---
-            double margin = 0.5; // Allow small margin for camera offset
-            if (candidatePose.getX() < -margin 
-                    || candidatePose.getX() > Constants.Field.FIELD_LENGTH_METERS + margin
-                    || candidatePose.getY() < -margin 
-                    || candidatePose.getY() > Constants.Field.FIELD_WIDTH_METERS + margin) {
-                hasPose = false;
-                DashboardHelper.putString(Category.DEBUG, "Vision/PoseMethod",
-                        "REJECTED: off-field (" + String.format("%.1f, %.1f", 
-                                candidatePose.getX(), candidatePose.getY()) + ")");
-                return;
-            }
-            
-            robotPose = candidatePose;
-            poseTimestamp = estimate.timestampSeconds;
-            hasPose = true;
-            
-            // Debug: show raw vision pose so we can diagnose rotation issues
-            DashboardHelper.putNumber(Category.DEBUG, "Vision/RawPoseX", robotPose.getX());
-            DashboardHelper.putNumber(Category.DEBUG, "Vision/RawPoseY", robotPose.getY());
-            DashboardHelper.putNumber(Category.DEBUG, "Vision/RawPoseRotDeg", robotPose.getRotation().getDegrees());
-            DashboardHelper.putString(Category.DEBUG, "Vision/PoseMethod", poseMethod);
-            DashboardHelper.putBoolean(Category.DEBUG, "Vision/IsMultiTag", isMultiTagEstimate);
-        } else {
-            hasPose = false;
         }
     }
 
-    // SHUTTLE ZONE CHECK
+    // =========================================================================
+    // SHUTTLE ZONE
+    // =========================================================================
 
-    /**
-     * Check if the robot is in the shuttle zone (past the boundary line).
-     * @return true if robot should be in shuttle mode based on position
-     */
     public boolean isInShuttleZone() {
         Alliance alliance = DriverStation.getAlliance().orElse(Alliance.Blue);
         double boundaryX = Constants.Field.AUTO_SHUTTLE_BOUNDARY_X;
         double robotX = getRobotPose().getX();
-
         if (alliance == Alliance.Blue) {
             return robotX > boundaryX;
         } else {
-            double mirroredBoundary = Constants.Field.FIELD_LENGTH_METERS - boundaryX;
-            return robotX < mirroredBoundary;
+            return robotX < (Constants.Field.FIELD_LENGTH_METERS - boundaryX);
         }
     }
 
+    // =========================================================================
     // TELEMETRY
+    // =========================================================================
 
-    /**
-     * Publishes vision data to SmartDashboard for debugging.
-     * Throttles less critical data to reduce NetworkTables traffic.
-     */
     private void publishTelemetry() {
         telemetryCounter++;
 
-        // Essential target info every cycle
+        // Essential — every cycle
         DashboardHelper.putBoolean(Category.MATCH, "Vision/HasTarget", hasTarget());
         DashboardHelper.putBoolean(Category.MATCH, "Vision/HasPose", hasPoseEstimate());
-        DashboardHelper.putBoolean(Category.MATCH, "Vision/CameraConnected", camera.isConnected());
+        DashboardHelper.putBoolean(Category.MATCH, "Vision/FrontConnected", frontCam.isConnected());
+        DashboardHelper.putBoolean(Category.MATCH, "Vision/RearConnected", rearCam.isConnected());
 
-        // Show pose source so driver knows what's happening
+        // Pose source summary
         String poseSource;
         if (hasPose && hasTargetInView) {
-            poseSource = (targetCount >= 2) ? "MultiTag (" + targetCount + " tags)" : "SingleTag (ID " + bestTargetId + ")";
+            StringBuilder sb = new StringBuilder();
+            if (frontCam.hasPose) {
+                sb.append("F:").append(frontCam.poseMethod)
+                  .append("(").append(frontCam.targetCount).append("t) ");
+            }
+            if (rearCam.hasPose) {
+                sb.append("R:").append(rearCam.poseMethod)
+                  .append("(").append(rearCam.targetCount).append("t)");
+            }
+            poseSource = sb.toString().trim();
         } else if (useDrivetrainFallback) {
             poseSource = "Gyro+Odometry (No Tags)";
         } else {
@@ -735,34 +668,59 @@ public class VisionSubsystem extends SubsystemBase {
         }
         DashboardHelper.putString(Category.MATCH, "Vision/PoseSource", poseSource);
 
-        // Less critical telemetry every 10 cycles (200ms)
+        // Detailed debug telemetry every 10 cycles (~200ms)
         if (telemetryCounter >= 10) {
             telemetryCounter = 0;
             updateAimTelemetry();
 
-            // Extra PhotonVision diagnostics
             DashboardHelper.putNumber(Category.DEBUG, "Vision/TagCount", targetCount);
             DashboardHelper.putNumber(Category.DEBUG, "Vision/BestTagId", bestTargetId);
             DashboardHelper.putNumber(Category.DEBUG, "Vision/Ambiguity", bestTargetAmbiguity);
-            DashboardHelper.putNumber(Category.DEBUG, "Vision/HorizontalOffset", horizontalOffset);
+
+            // Per-camera debug
+            DashboardHelper.putString(Category.DEBUG, "Vision/Front/Method", frontCam.poseMethod);
+            DashboardHelper.putNumber(Category.DEBUG, "Vision/Front/Tags", frontCam.targetCount);
+            DashboardHelper.putBoolean(Category.DEBUG, "Vision/Front/HasPose", frontCam.hasPose);
+            DashboardHelper.putNumber(Category.DEBUG, "Vision/Front/Errors", frontCam.consecutiveErrors);
+
+            DashboardHelper.putString(Category.DEBUG, "Vision/Rear/Method", rearCam.poseMethod);
+            DashboardHelper.putNumber(Category.DEBUG, "Vision/Rear/Tags", rearCam.targetCount);
+            DashboardHelper.putBoolean(Category.DEBUG, "Vision/Rear/HasPose", rearCam.hasPose);
+            DashboardHelper.putNumber(Category.DEBUG, "Vision/Rear/Errors", rearCam.consecutiveErrors);
+
+            // Camera health summary: show which cameras are active
+            int activeCameras = (frontCam.isConnected() ? 1 : 0) + (rearCam.isConnected() ? 1 : 0);
+            String healthStatus;
+            if (activeCameras == 2) {
+                healthStatus = "OK (2 cameras)";
+            } else if (activeCameras == 1) {
+                healthStatus = "DEGRADED (" + (frontCam.isConnected() ? "Front" : "Rear") + " only)";
+            } else {
+                healthStatus = "NO CAMERAS";
+            }
+            DashboardHelper.putString(Category.MATCH, "Vision/CameraHealth", healthStatus);
+
+            if (hasPose) {
+                DashboardHelper.putNumber(Category.DEBUG, "Vision/RawPoseX", robotPose.getX());
+                DashboardHelper.putNumber(Category.DEBUG, "Vision/RawPoseY", robotPose.getY());
+                DashboardHelper.putNumber(Category.DEBUG, "Vision/RawPoseRotDeg",
+                    robotPose.getRotation().getDegrees());
+                DashboardHelper.putBoolean(Category.DEBUG, "Vision/IsMultiTag", isMultiTagEstimate);
+            }
         }
     }
 
-    /**
-     * Updates aim-related telemetry (target info, shuttle zone status).
-     */
     private void updateAimTelemetry() {
         boolean isShuttleMode = gameState.isShuttleMode();
-        String targetName = isShuttleMode ? "TRENCH" : "HUB";
-        DashboardHelper.putString(Category.MATCH, "Aim/CurrentTarget", targetName);
+        DashboardHelper.putString(Category.MATCH, "Aim/CurrentTarget",
+            isShuttleMode ? "TRENCH" : "HUB");
         DashboardHelper.putBoolean(Category.MATCH, "Aim/InShuttleZone", isInShuttleZone());
     }
 
-    // UTILITY METHODS
+    // =========================================================================
+    // UTILITY
+    // =========================================================================
 
-    /**
-     * Check if an array contains a value.
-     */
     private boolean contains(int[] array, int value) {
         for (int item : array) {
             if (item == value) return true;

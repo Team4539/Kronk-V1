@@ -58,7 +58,7 @@ public class Robot extends TimedRobot {
     LEDSubsystem leds = m_robotContainer.getLEDs();
     if (leds != null) leds.clearAction();
     notify("Robot Disabled", "Safe to approach");
-    
+    Elastic.selectTab("Pre-Match");
   }
 
   @Override
@@ -71,7 +71,8 @@ public class Robot extends TimedRobot {
     
     String autoName = m_autonomousCommand != null ? m_autonomousCommand.getName() : "None";
     notify("AUTO STARTED", "Running: " + autoName);
-    
+    Elastic.selectTab("Auto");
+
     if (m_autonomousCommand != null) {
       CommandScheduler.getInstance().schedule(m_autonomousCommand);
     }
@@ -87,6 +88,7 @@ public class Robot extends TimedRobot {
     }
     setLEDState(LEDState.TELEOP);
     notify("TELEOP STARTED", "Driver control active");
+    Elastic.selectTab("Match");
   }
 
   @Override

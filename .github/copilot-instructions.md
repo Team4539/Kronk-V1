@@ -19,8 +19,8 @@ The shooting system runs entirely on the roboRIO with no external dependencies:
 1. **PhotonVision** provides robot pose via AprilTag detection
 2. **ShootingCalculator** (singleton, `util/ShootingCalculator.java`) computes:
    - Distance to target (HUB or TRENCH based on `GameStateManager` target mode)
-   - Robot-relative angle to target (driver/auto must rotate the robot to aim)
-   - Flywheel RPM via inverse-distance-weighted interpolation from `Constants.Shooter.SHOOTING_CALIBRATION`
+   - Robot-relative angle to target (auto-aim rotates the robot via P controller on rotation rate)
+   - Flywheel RPM via linear interpolation from distance-based `Constants.Shooter.SHOOTING_CALIBRATION`
 3. **Update loop**: `RobotContainer.updateVisionPose()` calls `shootingCalculator.update()` every cycle with current pose, chassis speeds, target mode, and RPM offset
 4. **Commands read** from `ShootingCalculator` — they never calculate independently
 
@@ -30,8 +30,9 @@ The shooting system runs entirely on the roboRIO with no external dependencies:
 
 Since there is **no turret**, aiming is done by rotating the entire robot:
 - `ShootingCalculator.getAngleToTarget()` returns how far off the robot heading is from the target
-- `ShootingCalculator.getTargetRPM()` returns the interpolated RPM for the current position
-- **RPM interpolation**: `List<double[]>` stores calibration points as `{relX, relY, bearingDeg, shooterRPM}`, interpolated using inverse-distance-weighting
+- `ShootingCalculator.getTargetRPM()` returns the interpolated RPM for the current distance
+- **RPM interpolation**: `List<double[]>` stores calibration points as `{distanceMeters, shooterRPM}`, linearly interpolated between the two nearest distance points
+- **Auto-aim**: LT/LB bindings use `fieldCentric.withRotationalRate()` with a P controller on `angleToTarget` to rotate the robot toward the target
 
 ### Command Architecture
 
@@ -113,7 +114,7 @@ All controls on one controller (port 0):
 - `Field` - Field geometry, alliance-specific poses (BLUE_HUB_CENTER, RED_TRENCH_ROTATING)
 - Per-subsystem constants (Shooter, Intake, Trigger, Vision, LEDs, etc.)
 
-**Pattern**: Calibration data uses `List<double[]>` with inverse-distance-weighted interpolation (e.g., `{relX, relY, bearingDeg, shooterRPM}`).
+**Pattern**: Calibration data uses `List<double[]>` with linear interpolation (e.g., `{distanceMeters, shooterRPM}`).
 
 ### Subsystem Nullability Pattern
 
@@ -188,9 +189,9 @@ Use `DashboardHelper.Category` enum to organize SmartDashboard entries:
 4. Update `Constants.java` from dashboard output
 
 **Tune shooting calibration**:
-1. Drive robot to known positions relative to the target
-2. Use `CalibrationManager` sliders to adjust RPM until shots land
-3. Click "RecordPoint" to save `{relX, relY, bearing, RPM}` tuples
+1. Drive robot to various distances from the target
+2. Use `CalibrationManager` RPM slider to adjust until shots land
+3. Click "RecordPoint" to save `{distance, RPM}` pair
 4. Click "PrintTable" to export copy-paste code
-5. Update `Constants.Shooter.SHOOTING_CALIBRATION` list
-6. `ShootingCalculator` will automatically interpolate between calibration points
+5. Update `Constants.Shooter.SHOOTING_CALIBRATION` list (sorted by distance)
+6. `ShootingCalculator` will linearly interpolate RPM between calibration points

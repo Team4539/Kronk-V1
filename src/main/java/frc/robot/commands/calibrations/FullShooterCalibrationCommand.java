@@ -6,20 +6,17 @@ import frc.robot.CalibrationManager;
 import frc.robot.subsystems.VisionSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.util.Elastic;
-import frc.robot.util.ShootingCalculator;
 
 public class FullShooterCalibrationCommand extends Command {
     
     private final ShooterSubsystem shooter;
     private final VisionSubsystem vision;
     private final CalibrationManager calibration;
-    private final ShootingCalculator shootingCalc;
     
     public FullShooterCalibrationCommand(ShooterSubsystem shooter, VisionSubsystem vision) {
         this.shooter = shooter;
         this.vision = vision;
         this.calibration = CalibrationManager.getInstance();
-        this.shootingCalc = ShootingCalculator.getInstance();
         addRequirements(shooter);
     }
     
@@ -68,22 +65,16 @@ public class FullShooterCalibrationCommand extends Command {
     private void updateStatusDisplay() {
         double distance = calibration.getCurrentDistance();
         double rpm = calibration.getShooterRPM();
-        double bearing = shootingCalc.getRawBearing();
-        double relX = shootingCalc.getRelativeX();
-        double relY = shootingCalc.getRelativeY();
         String status;
         if (!vision.hasTarget()) {
             status = "WARNING: NO TARGET - Move to see AprilTags";
         } else if (distance <= 0) {
             status = "WARNING: Tag visible, no pose";
         } else {
-            status = String.format("OK Dist: %.2fm | RelX: %.2f RelY: %.2f | Bearing: %.0f deg | RPM: %.0f", 
-                distance, relX, relY, bearing, rpm);
+            status = String.format("OK Dist: %.2fm | RPM: %.0f | %s", 
+                distance, rpm, shooter.isReady() ? "READY" : "Spinning...");
         }
         SmartDashboard.putString("Cal/Status", status);
-        SmartDashboard.putNumber("Cal/Robot/RelX", relX);
-        SmartDashboard.putNumber("Cal/Robot/RelY", relY);
-        SmartDashboard.putNumber("Cal/Robot/Bearing", bearing);
         SmartDashboard.putNumber("Cal/Robot/Distance", distance);
         if (vision.hasTarget()) {
             SmartDashboard.putNumber("Cal/RawTX", vision.getHorizontalOffset());

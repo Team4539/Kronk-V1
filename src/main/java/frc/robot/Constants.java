@@ -101,23 +101,18 @@ public final class Constants {
     
     // --- Shooting Calibration ---
     //
-    // Distance-based calibration table for the fixed shooter.
-    // Each entry: {relX, relY, bearingDeg, shooterRPM}
-    //   - relX:       Robot X relative to target (meters, robotX - targetX)
-    //   - relY:       Robot Y relative to target (meters, robotY - targetY)
-    //   - bearingDeg: Robot-relative angle to target (degrees, -180 to +180)
-    //   - shooterRPM: Shooter motor RPM at this pose
+    // Simple distance-based calibration table for the fixed shooter.
+    // Each entry: {distanceMeters, shooterRPM}
+    //   - distanceMeters: Straight-line distance from robot to target (meters)
+    //   - shooterRPM:     Shooter motor RPM at this distance
     //
-    // At runtime, ShootingCalculator computes the robot's current (relX, relY, bearing)
-    // and uses inverse-distance-weighted interpolation to produce the RPM.
+    // At runtime, ShootingCalculator computes the robot's distance to the target
+    // and linearly interpolates between the two nearest calibration points.
+    // The table should be sorted by distance (smallest first).
     //
-    public static final double CALIBRATION_BEARING_WEIGHT = 0.05;
     public static final List<double[]> SHOOTING_CALIBRATION = new ArrayList<>() {{
-      add(new double[]{2.81, 0.76, 19, 2500}); add(new double[]{0.79, 1.95, 62, 2500});
-      add(new double[]{3.41, 0.46, 4, 2500}); add(new double[]{2.29, 1.76, 81, 2500});
-      add(new double[]{4.61, -0.27, 7, 3050}); add(new double[]{5.32, 1.41, 38, 3050});
-      add(new double[]{3.22, -0.18, 13, 2500}); add(new double[]{1.99, 0.61, 30, 2500});
-      add(new double[]{2.48, 1.32, 35, 2600}); add(new double[]{3.76, 1.13, 4, 2500});
+      add(new double[]{3.34, 3500});
+      
     }};
   }
 
@@ -142,46 +137,75 @@ public final class Constants {
     // Pivot limits
     public static final double MIN_PIVOT_ANGLE_DEG = 59.7;
     public static final double MAX_PIVOT_ANGLE_DEG = 156.0;
-    public static final double RETRACTED_ANGLE_DEG = 59.7;
-    public static final double DEPLOYED_ANGLE_DEG = 156;
-    public static final double IDLE_ANGLE_DEG =  90.;
+    public static final double RETRACTED_ANGLE_DEG = 63.7;
+    public static final double DEPLOYED_ANGLE_DEG = 166.0;
+    public static final double IDLE_ANGLE_DEG =  60.0;
+    public static final double HALF_SHOOT_ANGLE_DEG = 90.0;
     // Tolerance for "at target" check (degrees)
     public static final double PIVOT_TOLERANCE_DEG = 2.0;
     
 
-    // Jiggle: oscillate pivot between retracted and idle while shooting
+    // Jiggle: oscillate pivot slightly while shooting
     // to keep balls loose and feeding smoothly.
-    public static final double JIGGLE_CYCLE_SECONDS = 0.6; // Full retract→idle→retract cycle time
+    public static final double JIGGLE_CYCLE_SECONDS = 1.2; // Full cycle time (slower = gentler)
+    public static final double JIGGLE_AMPLITUDE_DEG = 6.0; // ±6° from retracted position
 
     // Roller (RPM-based, controlled via Motion Magic Velocity)
     public static final double INTAKE_SPEED_RPM = 6000.0;
     public static final double OUTTAKE_SPEED_RPM = -3000.0;
     public static final double STOP_SPEED = 0.0;
+
+    // Stall detection & auto-reverse
+    // If supply current exceeds threshold AND roller velocity drops below threshold
+    // for STALL_TIME_SECONDS, the roller reverses at full speed for REVERSE_TIME_SECONDS.
+    public static final double STALL_CURRENT_THRESHOLD_AMPS = 35.0;  // Supply current indicating stall
+    public static final double STALL_VELOCITY_THRESHOLD_RPS = 10.0;  // Below this = not spinning (rot/s)
+    public static final double STALL_TIME_SECONDS = 0.15;            // How long stall conditions must hold
+    public static final double REVERSE_TIME_SECONDS = 0.5;           // How long to reverse after stall
+    public static final double REVERSE_SPEED_RPM = -6000.0;          // Full reverse speed
   }
 
   /** PhotonVision camera configuration */
   public static final class Vision {
+    // === FRONT CAMERA ===
+    // Mounted high up, dead center on the robot, pointing forward and slightly up.
     /** Camera name as configured in PhotonVision UI (http://photonvision.local:5800) */
-    public static final String CAMERA_NAME = "Arducam_OV9782_USB_Camera";
+    public static final String FRONT_CAMERA_NAME = "Arducam_OV9782_USB_Camera";
     
-    // Camera mounting position relative to robot center (meters)
-    // Camera is at the front of the robot, about 3 inches behind the front edge
-    /** Forward/backward from robot center (+ = forward) */
-    public static final double CAMERA_X_OFFSET = 0.2032;
+    // Front camera mounting position relative to robot center (meters)
+    /** Forward/backward from robot center (+ = forward) — centered */
+    public static final double FRONT_CAMERA_X = 0.0;
+    /** Left/right from robot center (+ = left) — centered */
+    public static final double FRONT_CAMERA_Y = 0.0;
+    /** Height from ground to camera lens (~20 inches) */
+    public static final double FRONT_CAMERA_Z = 0.508;
+    /** Pitch in degrees (+ = tilted up from horizontal) — slightly up */
+    public static final double FRONT_CAMERA_PITCH_DEG = 5.0;
+    /** Yaw in degrees (0 = facing forward) */
+    public static final double FRONT_CAMERA_YAW_DEG = 180;
+    
+    // === REAR CAMERA ===
+    // Mounted at the back, pointing backward and tilted up. Sees tags behind the robot.
+    public static final String REAR_CAMERA_NAME = "Arducam_OV9782_USB_Camera_Rear";
+    
+    // Rear camera mounting position relative to robot center (meters)
+    // TODO: Measure and update these values for the actual rear camera mount
+    /** Forward/backward from robot center (+ = forward, so rear is negative) */
+    public static final double REAR_CAMERA_X = -0.2032;
     /** Left/right from robot center (+ = left) */
-    public static final double CAMERA_Y_OFFSET = -0.1524;
+    public static final double REAR_CAMERA_Y = 0.0;
     /** Height from ground to camera lens */
-    public static final double CAMERA_Z_OFFSET = 0.23495 ;
-    /** Tilt angle in degrees (+ = tilted up) */
-    public static final double CAMERA_PITCH_DEGREES = 38;
-    /** Yaw rotation in degrees (0 = facing forward, 90 = facing left, 180 = facing backward) */
-    public static final double CAMERA_YAW_DEGREES = 0.0; // Camera faces FORWARD on robot
+    public static final double REAR_CAMERA_Z = 0.30;
+    /** Pitch in degrees (+ = tilted up from horizontal) */
+    public static final double REAR_CAMERA_PITCH_DEG = 25.0;
+    /** Yaw in degrees (180 = facing backward) */
+    public static final double REAR_CAMERA_YAW_DEG = 180.0;
     
     // Vision measurement trust (standard deviations for pose estimator)
     // Lower = trust vision more, Higher = trust odometry more
     public static final double VISION_STD_DEV_X = 0.7;
     public static final double VISION_STD_DEV_Y = 0.7;
-    public static final double VISION_STD_DEV_THETA = 10;
+    public static final double VISION_STD_DEV_THETA = 0.5;  // Trust camera rotation for auto-aim
     
     /** Maximum pose ambiguity to accept a vision measurement (0-1, lower = stricter) */
     public static final double MAX_AMBIGUITY = 0.1;
@@ -193,6 +217,12 @@ public final class Constants {
     public static final double MAX_DRIVE_SPEED_MPS = 4.5;
     public static final double MAX_ANGULAR_SPEED_RAD = Math.PI * 2;
     public static final double SLOW_MODE_MULTIPLIER = 0.3;
+    
+    // Auto-aim heading P controller (rotation rate = -KP * error_radians)
+    // Controls how aggressively the robot rotates to face the target.
+    public static final double AIM_HEADING_KP = 0.9;   // Proportional (rad/s per radian of error)
+    /** Angle tolerance in degrees — "aimed" when error is within this */
+    public static final double AIM_TOLERANCE_DEG = 3.0;
   }
   
   public static final class Tags {
@@ -273,16 +303,26 @@ public final class Constants {
     public static final int[] FMS_DISCONNECTED_COLOR = {255, 200, 0};
     
     // ── Action ──
-    public static final int[] SHOOTING_COLOR = {0, 255, 60};     // Vivid green with cyan tint
-    public static final int[] SHOOTING_HIGHLIGHT = {180, 255, 200}; // Bright mint for leading edges
-    public static final int[] AIMING_COLOR = {255, 200, 0};      // Amber-gold targeting
-    public static final int[] AIMING_HIGHLIGHT = {255, 255, 180}; // Bright yellow-white lock flash
+    // STRATEGY: Each state uses a completely different hue family so they
+    // are instantly distinguishable even through smoky/translucent panels.
+    //   SHOOT NOW  = solid GREEN + WHITE strobe    (GO! GO! GO!)
+    //   FIRING     = RED + ORANGE explosive fire   (muzzle blast)
+    //   AIMING     = PURPLE/VIOLET radar sweep     (targeting)
+    //   SPOOLING   = ORANGE power fill             (charging up)
+    //   INTAKING   = YELLOW-GREEN inward flow      (sucking in)
+    //   CLIMBING   = DEEP BLUE rising flames       (upward effort)
+    public static final int[] SHOOTING_COLOR = {0, 255, 0};      // Pure vivid green
+    public static final int[] SHOOTING_HIGHLIGHT = {255, 255, 255}; // Bright white for strobing
+    public static final int[] FIRING_COLOR = {255, 30, 0};       // Hot red-orange
+    public static final int[] FIRING_HIGHLIGHT = {255, 160, 0};  // Bright orange flash
+    public static final int[] AIMING_COLOR = {160, 0, 255};      // Vivid purple
+    public static final int[] AIMING_HIGHLIGHT = {220, 160, 255}; // Lavender-white lock flash
     public static final int[] SPOOLING_COLOR = {255, 80, 0};     // Deep charging orange
     public static final int[] SPOOLING_HIGHLIGHT = {255, 200, 100}; // Hot white-orange leading edge
-    public static final int[] INTAKING_COLOR = {255, 40, 120};   // Vivid magenta-pink
-    public static final int[] INTAKING_HIGHLIGHT = {255, 180, 220}; // Soft pink-white tip
-    public static final int[] CLIMBING_COLOR = {180, 0, 255};    // Rich violet
-    public static final int[] CLIMBING_HIGHLIGHT = {220, 140, 255}; // Lavender tip
+    public static final int[] INTAKING_COLOR = {180, 255, 0};    // Yellow-green (distinct from pure green)
+    public static final int[] INTAKING_HIGHLIGHT = {255, 255, 100}; // Bright yellow-white tip
+    public static final int[] CLIMBING_COLOR = {0, 60, 255};     // Deep rich blue
+    public static final int[] CLIMBING_HIGHLIGHT = {100, 180, 255}; // Sky-blue tip
     public static final int[] ESTOP_COLOR = {255, 0, 0};
     public static final int[] ESTOP_CORE = {255, 40, 0};         // Orange-red hot core
     public static final int[] BROWNOUT_COLOR = {80, 35, 0};      // Warmer brown

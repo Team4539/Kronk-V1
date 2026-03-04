@@ -19,14 +19,14 @@
                 "data": {
                   "name": "spinUpShooter"
                 }
-              },
-              {
-                "type": "named",
-                "data": {
-                  "name": "aimAtPose"
-                }
               }
             ]
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "aimAtPose"
           }
         }
       ]

@@ -28,7 +28,7 @@ public class ShooterSubsystem extends SubsystemBase {
     private boolean isSpunUp = false;
     private long spinUpStartTime = 0;
     
-    private static final double RPM_READY_TOLERANCE = 1500.0;
+    private static final double RPM_READY_TOLERANCE = 300.0;
     private static final double TEMP_WARNING_THRESHOLD = 70.0;
     private boolean hasWarnedHighTemp = false;
     private int tempCheckCounter = 0;

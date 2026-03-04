@@ -96,13 +96,25 @@ public class GameStateManager {
             currentPhase = GamePhase.AUTO;
         } else if (DriverStation.isTeleop()) {
             double t = DriverStation.getMatchTime();
-            if      (t > 130) currentPhase = GamePhase.TRANSITION;
-            else if (t > 105) currentPhase = GamePhase.SHIFT_1;
-            else if (t > 80)  currentPhase = GamePhase.SHIFT_2;
-            else if (t > 55)  currentPhase = GamePhase.SHIFT_3;
-            else if (t > 30)  currentPhase = GamePhase.SHIFT_4;
-            else if (t > 0)   currentPhase = GamePhase.END_GAME;
-            else              currentPhase = GamePhase.POST_MATCH;
+            // matchTime is -1 when no FMS is connected (practice / local testing).
+            // Treat that as normal teleop with no shift timing — NOT endgame.
+            if (t < 0) {
+                currentPhase = GamePhase.SHIFT_1; // Generic active-teleop phase
+            } else if (t > 130) {
+                currentPhase = GamePhase.TRANSITION;
+            } else if (t > 105) {
+                currentPhase = GamePhase.SHIFT_1;
+            } else if (t > 80) {
+                currentPhase = GamePhase.SHIFT_2;
+            } else if (t > 55) {
+                currentPhase = GamePhase.SHIFT_3;
+            } else if (t > 30) {
+                currentPhase = GamePhase.SHIFT_4;
+            } else if (t > 0) {
+                currentPhase = GamePhase.END_GAME;
+            } else {
+                currentPhase = GamePhase.POST_MATCH;
+            }
         } else {
             // Disabled
             if (currentPhase == GamePhase.END_GAME || currentPhase == GamePhase.POST_MATCH) {

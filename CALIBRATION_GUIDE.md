@@ -184,17 +184,15 @@ Current values in `Constants.Vision`:
 3. Click `Tuning/EndCalibration` to re-enable baked-in offsets
 
 ### Calibration Points Format
-Each point stores `{relX, relY, bearingDeg, shooterRPM}`:
-- `relX` -- Robot X relative to target (meters)
-- `relY` -- Robot Y relative to target (meters)
-- `bearingDeg` -- Robot-relative angle to target (degrees)
-- `shooterRPM` -- Shooter motor RPM at this position
+Each point stores `{distanceMeters, shooterRPM}`:
+- `distanceMeters` -- Straight-line distance from robot to target (meters)
+- `shooterRPM` -- Shooter motor RPM at this distance
 
 ### Tips
 - **Start close** and work outward
-- Cover a variety of angles, not just straight-on shots
+- Record multiple distances to get good interpolation coverage
 - Charge the battery between sessions (power affects consistency)
-- The `Cal/Status` display shows current position and distance info
+- The `Cal/Status` display shows current distance and RPM info
 
 ---
 
@@ -221,13 +219,13 @@ Each point stores `{relX, relY, bearingDeg, shooterRPM}`:
 
 **Procedure**:
 1. Run `Tuning/Cal: Full Shooter`
-2. The display shows: distance, relative X/Y, bearing, and current RPM
+2. The display shows: distance and current RPM
 3. Adjust `Tuning/Shooter/RPM` to tune shots
 4. Use **POV Down** on controller to feed balls
 5. Click `Tuning/RecordPoint` after a good shot
 6. Click `Tuning/PrintTable` when done to get copy-paste code
 
-**Remember**: Since this is a fixed shooter, you must **rotate the entire robot** to aim at the target. The `Cal/Status` display shows the bearing angle to help you orient correctly.
+**Remember**: Since this is a fixed shooter, the robot auto-aims toward the target when you hold LT (pre-spool) or LB (auto-shoot). Just focus on getting the RPM right at each distance.
 
 ---
 
@@ -287,10 +285,9 @@ Before each match:
 
 | Constant | Location | Default | Purpose |
 |----------|----------|---------|---------|
-| `SHOOTING_CALIBRATION` | `Shooter` | List<double[]> | Pose-based RPM calibration |
+| `SHOOTING_CALIBRATION` | `Shooter` | List<double[]> | Distance-based RPM calibration |
 | `DEFAULT_IDLE_RPM` | `Shooter` | `500.0` | Idle flywheel RPM |
-| `CALIBRATION_BEARING_WEIGHT` | `Shooter` | `0.05` | Bearing weight in interpolation |
-| `RETRACTED_ANGLE_DEG` | `Intake` | `0.0` | Intake retracted angle |
+| `RETRACTED_ANGLE_DEG` | `Intake` | `63.7` | Intake retracted angle |
 | `DEPLOYED_ANGLE_DEG` | `Intake` | `130.0` | Intake deployed angle |
 | `CANCODER_OFFSET_DEG` | `Intake` | `-100.107` | CANcoder zero offset |
 | `PIVOT_PID_P` | `Intake` | `0.02` | Intake pivot PID |

@@ -20,7 +20,6 @@ import frc.robot.commands.calibrations.VisionCalibrationCommand;
 import frc.robot.commands.calibrations.ShootingCalibrationCommand;
 import frc.robot.commands.intake.DeployIntakeCommand;
 import frc.robot.commands.intake.IntakeJiggleCommand;
-import frc.robot.commands.intake.RetractIntakeCommand;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.IntakeSubsystem;
@@ -59,6 +58,11 @@ public class RobotContainer {
     private final SwerveRequest.FieldCentric fieldCentric = new SwerveRequest.FieldCentric()
             .withDeadband(Constants.Driver.MAX_DRIVE_SPEED_MPS * Constants.Driver.STICK_DEADBAND)
             .withRotationalDeadband(Constants.Driver.MAX_ANGULAR_SPEED_RAD * Constants.Driver.STICK_DEADBAND)
+            .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
+    // Separate instance for auto-aim so it doesn't share mutable state with the default drive request
+    private final SwerveRequest.FieldCentric aimFieldCentric = new SwerveRequest.FieldCentric()
+            .withDeadband(Constants.Driver.MAX_DRIVE_SPEED_MPS * Constants.Driver.STICK_DEADBAND)
+            .withRotationalDeadband(0) // No rotational deadband during auto-aim
             .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
     private final SwerveRequest.RobotCentric robotCentric = new SwerveRequest.RobotCentric()
             .withDeadband(Constants.Driver.MAX_DRIVE_SPEED_MPS * Constants.Driver.STICK_DEADBAND)
@@ -137,6 +141,23 @@ public class RobotContainer {
                 Commands.runOnce(() -> gameState.setShuttleMode(true)));
         NamedCommands.registerCommand("disableShuttleMode",
                 Commands.runOnce(() -> gameState.setShuttleMode(false)));
+
+        // Auto-aim: rotate robot to face the current target (hub or trench).
+        // Uses robot-relative angleToTarget with simple P controller for rotation rate.
+        if (drivetrain != null) {
+            NamedCommands.registerCommand("aimAtPose",
+                    drivetrain.applyRequest(() -> {
+                        double errorDeg = shootingCalc.getAngleToTarget();
+                        double omega = -Math.toRadians(errorDeg) * Constants.Driver.AIM_HEADING_KP;
+                        return aimFieldCentric
+                                .withVelocityX(0)
+                                .withVelocityY(0)
+                                .withRotationalRate(omega);
+                    }).until(() -> Math.abs(shootingCalc.getAngleToTarget())
+                                    < Constants.Driver.AIM_TOLERANCE_DEG)
+                     .withTimeout(1.5));
+        }
+
         NamedCommands.registerCommand("wait0.5", Commands.waitSeconds(0.5));
         NamedCommands.registerCommand("wait1.0", Commands.waitSeconds(1.0));
         NamedCommands.registerCommand("wait2.0", Commands.waitSeconds(2.0));
@@ -156,9 +177,9 @@ public class RobotContainer {
      * LEFT STICK:  Drive X/Y (translation)
      * RIGHT STICK: Rotation
      * RT:          Slow mode (proportional)
-     * LT:          Pre-spool shooter (hold)
+     * LT:          Pre-spool shooter + auto-aim (hold)
      * RB:          Intake deploy (hold) / retract (release)
-     * LB:          Auto-shoot (hold to shoot)
+     * LB:          Auto-shoot + auto-aim (hold to shoot)
      * A:           E-stop all motors
      * B:           Force shoot toggle
      * X:           Shuttle mode toggle
@@ -169,36 +190,78 @@ public class RobotContainer {
      * POV DOWN:    Feed shot (calibration, hold)
      */
     private void configureSingleControllerBindings() {
-        // LT: Pre-spool shooter (hold)
+        // LT: Pre-spool shooter + auto-aim (hold)
+        // Spools shooter to calculated RPM AND rotates robot toward target via camera.
+        // Driver keeps translation control; rotation auto-aims toward target.
         if (shooter != null) {
-            driver.leftTrigger(0.5).whileTrue(
-                    Commands.run(() -> {
-                        shooter.setTargetRPM(shootingCalc.getTargetRPM());
-                        if (leds != null) leds.setAction(LEDSubsystem.ActionState.SPOOLING);
-                    }, shooter).finallyDo(() -> {
-                        shooter.stop();
-                        if (leds != null) leds.clearAction();
-                    }));
-        }
+            Command spoolCmd = Commands.run(() -> {
+                shooter.setTargetRPM(shootingCalc.getTargetRPM());
+                if (leds != null) leds.setAction(LEDSubsystem.ActionState.SPOOLING);
+            }, shooter).finallyDo(() -> {
+                shooter.stop();
+                if (leds != null) leds.clearAction();
+            });
 
-        // LB: Auto-shoot (hold) — also jiggles intake to keep balls feeding
-        if (shooter != null && vision != null) {
-            Command shootCmd = new AutoShootCommand(shooter, vision, leds, trigger, drivetrain);
-            if (intake != null) {
-                // Run jiggle alongside shooting; intake is a separate subsystem requirement
-                driver.leftBumper().whileTrue(
-                        shootCmd.alongWith(new IntakeJiggleCommand(intake)));
+            if (drivetrain != null) {
+                // Auto-aim: rotate toward target while driver controls translation
+                Command aimCmd = drivetrain.applyRequest(() -> {
+                    double slow = driver.getRightTriggerAxis() > 0.3
+                            ? Constants.Driver.SLOW_MODE_MULTIPLIER : 1.0;
+                    double vx = -driver.getLeftY() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
+                    double vy = -driver.getLeftX() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
+                    double errorDeg = shootingCalc.getAngleToTarget();
+                    double omega = -Math.toRadians(errorDeg) * Constants.Driver.AIM_HEADING_KP;
+                    return aimFieldCentric
+                            .withVelocityX(vx)
+                            .withVelocityY(vy)
+                            .withRotationalRate(omega);
+                });
+                driver.leftTrigger(0.5).whileTrue(spoolCmd.alongWith(aimCmd));
             } else {
-                driver.leftBumper().whileTrue(shootCmd);
+                driver.leftTrigger(0.5).whileTrue(spoolCmd);
             }
         }
 
+        // LB: Auto-shoot (hold) — also jiggles intake to keep balls feeding
+        // Auto-aims robot toward target via camera while shooting.
+        if (shooter != null && vision != null) {
+            Command shootCmd = new AutoShootCommand(shooter, vision, leds, trigger, drivetrain);
+            
+            Command fullCmd = shootCmd;
+            if (intake != null) {
+                fullCmd = fullCmd.alongWith(new IntakeJiggleCommand(intake));
+            }
+            // Auto-aim: rotate toward target while driver controls translation
+            if (drivetrain != null) {
+                Command aimCmd = drivetrain.applyRequest(() -> {
+                    double slow = driver.getRightTriggerAxis() > 0.3
+                            ? Constants.Driver.SLOW_MODE_MULTIPLIER : 1.0;
+                    double vx = -driver.getLeftY() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
+                    double vy = -driver.getLeftX() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
+                    double errorDeg = shootingCalc.getAngleToTarget();
+                    double omega = -Math.toRadians(errorDeg) * Constants.Driver.AIM_HEADING_KP;
+                    return aimFieldCentric
+                            .withVelocityX(vx)
+                            .withVelocityY(vy)
+                            .withRotationalRate(omega);
+                });
+                fullCmd = fullCmd.alongWith(aimCmd);
+            }
+            driver.leftBumper().whileTrue(fullCmd);
+        }
+
         // RB: Intake deploy/retract (hold/release)
+        // DeployIntakeCommand runs continuously with stall detection while held.
+        // On release, whileTrue interrupts it (calls end → stops rollers),
+        // then finallyDo retracts the pivot and clears LEDs.
         if (intake != null) {
-            driver.rightBumper().onTrue(new DeployIntakeCommand(intake)
-                    .alongWith(ledAction(LEDSubsystem.ActionState.INTAKING)));
-            driver.rightBumper().onFalse(new RetractIntakeCommand(intake)
-                    .alongWith(ledClear()));
+            driver.rightBumper().whileTrue(
+                    new DeployIntakeCommand(intake)
+                            .alongWith(ledAction(LEDSubsystem.ActionState.INTAKING))
+                            .finallyDo(() -> {
+                                intake.stopAndRetract();
+                                if (leds != null) leds.clearAction();
+                            }));
         }
 
         // A: E-stop all motors
@@ -343,15 +406,18 @@ public class RobotContainer {
 
         // Update shooting calculator with current pose
         if (drivetrain != null) {
+            // In calibration mode, pass the absolute RPM slider value so
+            // ShootingCalculator uses it directly (bypasses interpolation table).
+            // In normal mode, pass the RPM offset added on top of interpolated RPM.
+            double rpmParam = shootingCalc.isCalibrationMode()
+                    ? calibration.getShooterRPM()
+                    : calibration.getRPMOffset();
             shootingCalc.update(
                     drivetrain.getState().Pose,
                     drivetrain.getState().Speeds,
                     gameState.getTargetMode(),
-                    calibration.getRPMOffset());
+                    rpmParam);
             calibration.setCurrentDistance(shootingCalc.getDistance());
-            calibration.setCurrentBearing(shootingCalc.getRawBearing());
-            calibration.setCurrentX(shootingCalc.getRelativeX());
-            calibration.setCurrentY(shootingCalc.getRelativeY());
         }
 
         if (vision == null || drivetrain == null) return;
@@ -367,54 +433,49 @@ public class RobotContainer {
         // Auto-shuttle zone check
         gameState.update(isInShuttleZone());
 
-        // Fuse vision into drivetrain odometry.
-        if (vision.hasVisionPose()) {
-            edu.wpi.first.math.geometry.Pose2d visionPose = vision.getRobotPose();
-            
+        // --- Heading seeding (first time we get any vision pose) ---
+        if (!hasSeededHeadingFromVision && vision.hasVisionPose()) {
+            edu.wpi.first.math.geometry.Pose2d seedPose = vision.getRobotPose();
             if (vision.isMultiTag()) {
-                if (!hasSeededHeadingFromVision) {
-                    drivetrain.resetPose(visionPose);
-                    hasSeededHeadingFromVision = true;
-                    vision.notifyHeadingSeeded();
-                    System.out.println("[RobotContainer] Vision pose initialized (MultiTag): "
-                            + String.format("(%.2f, %.2f) @ %.1f\u00b0",
-                                    visionPose.getX(), visionPose.getY(),
-                                    visionPose.getRotation().getDegrees()));
-                    Elastic.sendNotification(
-                            new Elastic.Notification(NotificationLevel.INFO,
-                                    "Vision Pose Initialized",
-                                    String.format("MultiTag: (%.1f, %.1f) @ %.1f\u00b0 from %d tags",
-                                            visionPose.getX(), visionPose.getY(),
-                                            visionPose.getRotation().getDegrees(),
-                                            vision.getTargetCount())));
-                }
-
-                double[] std = vision.getVisionStdDevs();
-                drivetrain.addVisionMeasurement(
-                        visionPose,
-                        vision.getPoseTimestamp(),
-                        VecBuilder.fill(std[0], std[1], std[2]));
+                // Multi-tag gives accurate rotation — hard-reset the whole pose
+                drivetrain.resetPose(seedPose);
+                hasSeededHeadingFromVision = true;
+                vision.notifyHeadingSeeded();
+                System.out.println("[RobotContainer] Vision pose initialized (MultiTag): "
+                        + String.format("(%.2f, %.2f) @ %.1f\u00b0",
+                                seedPose.getX(), seedPose.getY(),
+                                seedPose.getRotation().getDegrees()));
+                Elastic.sendNotification(
+                        new Elastic.Notification(NotificationLevel.INFO,
+                                "Vision Pose Initialized",
+                                String.format("MultiTag: (%.1f, %.1f) @ %.1f\u00b0 from %d tags",
+                                        seedPose.getX(), seedPose.getY(),
+                                        seedPose.getRotation().getDegrees(),
+                                        vision.getTargetCount())));
             } else {
-                double[] std = vision.getVisionStdDevs();
-                double looseTheta = 999.0;
-                drivetrain.addVisionMeasurement(
-                        visionPose,
-                        vision.getPoseTimestamp(),
-                        VecBuilder.fill(std[0], std[1], looseTheta));
-                        
-                if (!hasSeededHeadingFromVision) {
-                    hasSeededHeadingFromVision = true;
-                    vision.notifyHeadingSeeded();
-                    System.out.println("[RobotContainer] Vision X/Y initialized (SingleTag, gyro heading kept): "
-                            + String.format("(%.2f, %.2f)", visionPose.getX(), visionPose.getY()));
-                    Elastic.sendNotification(
-                            new Elastic.Notification(NotificationLevel.INFO,
-                                    "Vision X/Y Initialized",
-                                    String.format("SingleTag ID %d: (%.1f, %.1f) - heading from gyro",
-                                            vision.getTargetId(),
-                                            visionPose.getX(), visionPose.getY())));
-                }
+                // Single-tag: trust X/Y, keep gyro heading
+                hasSeededHeadingFromVision = true;
+                vision.notifyHeadingSeeded();
+                System.out.println("[RobotContainer] Vision X/Y initialized (SingleTag, gyro heading kept): "
+                        + String.format("(%.2f, %.2f)", seedPose.getX(), seedPose.getY()));
+                Elastic.sendNotification(
+                        new Elastic.Notification(NotificationLevel.INFO,
+                                "Vision X/Y Initialized",
+                                String.format("SingleTag ID %d: (%.1f, %.1f) - heading from gyro",
+                                        vision.getTargetId(),
+                                        seedPose.getX(), seedPose.getY())));
             }
+        }
+
+        // --- Fuse EACH camera's pose independently into drivetrain odometry ---
+        // This gives the Kalman filter two measurements per cycle when both cameras see tags.
+        if (vision.hasFrontPose()) {
+            fuseCamera(vision.getFrontPose(), vision.getFrontTimestamp(),
+                       vision.isFrontMultiTag(), vision.getFrontTargetCount());
+        }
+        if (vision.hasRearPose()) {
+            fuseCamera(vision.getRearPose(), vision.getRearTimestamp(),
+                       vision.isRearMultiTag(), vision.getRearTargetCount());
         }
     }
 
@@ -448,6 +509,17 @@ public class RobotContainer {
     // =========================================================================
     // HELPERS
     // =========================================================================
+
+    /**
+     * Fuse a single camera's pose into the drivetrain Kalman filter.
+     * Both multi-tag and single-tag results now feed rotation to support auto-aim.
+     * Single-tag uses a looser theta std dev via the scale factor in VisionSubsystem.
+     */
+    private void fuseCamera(edu.wpi.first.math.geometry.Pose2d pose, double timestamp,
+                            boolean isMultiTag, int tagCount) {
+        double[] std = vision.getStdDevsForCamera(isMultiTag, tagCount);
+        drivetrain.addVisionMeasurement(pose, timestamp, VecBuilder.fill(std[0], std[1], std[2]));
+    }
 
     private Command ledAction(LEDSubsystem.ActionState action) {
         return Commands.runOnce(() -> { if (leds != null) leds.setAction(action); });

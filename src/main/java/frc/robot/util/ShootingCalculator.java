@@ -50,15 +50,6 @@ public class ShootingCalculator {
     /** Whether we're aiming at trench (true) or hub (false) */
     private boolean aimingAtTrench = false;
 
-    /** Robot-relative bearing to target BEFORE any offsets (degrees, -180 to +180). */
-    private double rawBearing = 0.0;
-
-    /** Robot X position relative to target (meters). Alliance-independent. */
-    private double relativeX = 0.0;
-
-    /** Robot Y position relative to target (meters). Alliance-independent. */
-    private double relativeY = 0.0;
-
     // --- References ---
     
     private final GameStateManager gameState = GameStateManager.getInstance();
@@ -122,33 +113,28 @@ public class ShootingCalculator {
         // --- 1. Get target position ---
         Translation2d targetPos = getTargetPosition(isBlue, aimingAtTrench);
 
-        // --- 2. Calculate robot center position (no turret offset needed) ---
+        // --- 2. Calculate distance and angle to target ---
         double robotX = robotPose.getX();
         double robotY = robotPose.getY();
-
-        // Cache position relative to target (alliance-independent)
-        relativeX = robotX - targetPos.getX();
-        relativeY = robotY - targetPos.getY();
-
-        // --- 3. Calculate distance and base angle ---
         double dx = targetPos.getX() - robotX;
         double dy = targetPos.getY() - robotY;
         distance = Math.sqrt(dx * dx + dy * dy);
         double fieldAngle = Math.toDegrees(Math.atan2(dy, dx));
 
-        // --- 4. Convert field angle to robot-relative angle ---
+        // --- 3. Convert field angle to robot-relative angle ---
         double robotHeading = robotPose.getRotation().getDegrees();
-        angleToTarget = fieldAngle - robotHeading;
-        angleToTarget = normalizeAngle(angleToTarget);
+        angleToTarget = normalizeAngle(fieldAngle - robotHeading);
 
-        // Save the raw bearing before any offsets
-        rawBearing = angleToTarget;
-
-        // --- 5. Interpolate shooter RPM from calibration table ---
-        double[] calResult = interpolateUnified(relativeX, relativeY, rawBearing,
-                Constants.Shooter.SHOOTING_CALIBRATION);
+        // --- 4. Interpolate shooter RPM from distance-based calibration table ---
+        // In calibration mode, skip interpolation — use only the manual RPM offset
+        // so the CalibrationManager slider directly controls the shooter.
+        if (calibrationMode) {
+            targetRPM = rpmOffset;
+        } else {
+            targetRPM = interpolateRPM(distance, Constants.Shooter.SHOOTING_CALIBRATION) + rpmOffset;
+        }
         double maxRPM = Constants.Shooter.MOTOR_FREE_SPEED_RPS * 60.0;
-        targetRPM = clamp(calResult[0] + rpmOffset, 0, maxRPM);
+        targetRPM = clamp(targetRPM, 0, maxRPM);
 
         // --- 6. Publish telemetry ---
         publishTelemetry();
@@ -178,44 +164,39 @@ public class ShootingCalculator {
     // ========================================================================
 
     /**
-     * Interpolates RPM from the calibration table using inverse-distance-weighted
-     * averaging in (relX, relY, bearing) space.
+     * Linearly interpolates RPM from a distance-based calibration table.
      * 
-     * Each calibration point stores {relX, relY, bearingDeg, shooterRPM}.
+     * Each calibration point stores {distanceMeters, shooterRPM}.
+     * Table should be sorted by distance (smallest first).
      * 
-     * @param relX    Robot X relative to target (meters)
-     * @param relY    Robot Y relative to target (meters)
-     * @param bearing Robot-relative bearing to target (degrees, -180 to +180)
-     * @param table   List of {relX, relY, bearingDeg, shooterRPM}
-     * @return double[1]: {shooterRPM}
+     * - Below the closest point: returns that point's RPM
+     * - Above the farthest point: returns that point's RPM
+     * - Between two points: linearly interpolates
+     * 
+     * @param dist  Current distance to target (meters)
+     * @param table List of {distanceMeters, shooterRPM}, sorted by distance
+     * @return Interpolated shooter RPM
      */
-    private double[] interpolateUnified(double relX, double relY, double bearing, List<double[]> table) {
-        if (table == null || table.isEmpty()) return new double[]{3000};
-        if (table.size() == 1) {
-            double[] pt = table.get(0);
-            return new double[]{pt[3]};
-        }
+    private double interpolateRPM(double dist, List<double[]> table) {
+        if (table == null || table.isEmpty()) return 3000; // Fallback
+        if (table.size() == 1) return table.get(0)[1];
 
-        double bearingWeight = Constants.Shooter.CALIBRATION_BEARING_WEIGHT;
-        double totalWeight = 0.0;
-        double weightedRPM = 0.0;
+        // Below the closest calibration point
+        if (dist <= table.get(0)[0]) return table.get(0)[1];
+        // Above the farthest calibration point
+        if (dist >= table.get(table.size() - 1)[0]) return table.get(table.size() - 1)[1];
 
-        for (double[] point : table) {
-            double dxp = relX - point[0];
-            double dyp = relY - point[1];
-            double dBearing = normalizeAngle(bearing - point[2]) * bearingWeight;
-            double proximity = Math.sqrt(dxp * dxp + dyp * dyp + dBearing * dBearing);
-
-            if (proximity < 0.001) {
-                return new double[]{point[3]};
+        // Find the two bracketing points and lerp
+        for (int i = 0; i < table.size() - 1; i++) {
+            double d0 = table.get(i)[0];
+            double d1 = table.get(i + 1)[0];
+            if (dist >= d0 && dist <= d1) {
+                double t = (dist - d0) / (d1 - d0);
+                return table.get(i)[1] + t * (table.get(i + 1)[1] - table.get(i)[1]);
             }
-
-            double weight = 1.0 / (proximity * proximity);
-            totalWeight += weight;
-            weightedRPM += weight * point[3];
         }
-
-        return new double[]{weightedRPM / totalWeight};
+        // Shouldn't reach here, but fallback to last point
+        return table.get(table.size() - 1)[1];
     }
 
     // ========================================================================
@@ -237,15 +218,6 @@ public class ShootingCalculator {
 
     /** Whether currently aiming at trench vs hub. */
     public boolean isAimingAtTrench() { return aimingAtTrench; }
-
-    /** Robot-relative bearing to target before offsets (degrees, -180 to +180). */
-    public double getRawBearing() { return rawBearing; }
-
-    /** Robot X position relative to target (meters). Alliance-independent. */
-    public double getRelativeX() { return relativeX; }
-
-    /** Robot Y position relative to target (meters). Alliance-independent. */
-    public double getRelativeY() { return relativeY; }
 
     /** Whether calibration mode is active. */
     public boolean isCalibrationMode() { return calibrationMode; }
@@ -292,9 +264,12 @@ public class ShootingCalculator {
         Pose2d[] fieldPoses = new Pose2d[calTable.size()];
         for (int i = 0; i < calTable.size(); i++) {
             double[] pt = calTable.get(i);
-            double fieldX = targetPos.getX() + pt[0];
-            double fieldY = targetPos.getY() + pt[1];
-            fieldPoses[i] = new Pose2d(fieldX, fieldY, Rotation2d.fromDegrees(pt[2]));
+            double dist = pt[0];
+            // Place calibration points in a ring around the target at this distance
+            // (show them on the +X axis for visualization purposes)
+            double fieldX = targetPos.getX() + dist;
+            double fieldY = targetPos.getY();
+            fieldPoses[i] = new Pose2d(fieldX, fieldY, Rotation2d.fromDegrees(0));
         }
         calibrationField.getObject("CalPoints").setPoses(fieldPoses);
         lastPublishedTarget = targetPos;
