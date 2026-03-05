@@ -99,6 +99,15 @@ public final class Constants {
     /** Free speed of the motor in rotations per second (Kraken X60 ~100 rps) */
     public static final double MOTOR_FREE_SPEED_RPS = 100.0;
     
+    // --- Stall detection & auto-reverse ---
+    // If the shooter is commanded to spin but actual RPM stays near 0 for
+    // STALL_TIME_SECONDS, it reverses at full speed for STALL_REVERSE_TIME_SECONDS
+    // to clear a jam, then resumes the commanded RPM.
+    public static final double STALL_RPM_THRESHOLD = 50.0;         // Below this = not spinning
+    public static final double STALL_TIME_SECONDS = 1.0;           // How long at 0 RPM before stall confirmed
+    public static final double STALL_REVERSE_TIME_SECONDS = 0.5;   // How long to reverse to clear jam
+    public static final double STALL_REVERSE_RPS = -100.0;         // Full speed reverse (rotations/sec)
+    
     // --- Shooting Calibration ---
     //
     // Simple distance-based calibration table for the fixed shooter.
@@ -111,7 +120,7 @@ public final class Constants {
     // The table should be sorted by distance (smallest first).
     //
     public static final List<double[]> SHOOTING_CALIBRATION = new ArrayList<>() {{
-      add(new double[]{3.34, 3500});
+      add(new double[]{0.60, 2250}); add(new double[]{3.01, 3250}); add(new double[]{5.31, 4250});
       
     }};
   }
@@ -136,19 +145,21 @@ public final class Constants {
   
     // Pivot limits
     public static final double MIN_PIVOT_ANGLE_DEG = 59.7;
-    public static final double MAX_PIVOT_ANGLE_DEG = 156.0;
+    public static final double MAX_PIVOT_ANGLE_DEG = 160.0;
     public static final double RETRACTED_ANGLE_DEG = 63.7;
-    public static final double DEPLOYED_ANGLE_DEG = 166.0;
+    public static final double DEPLOYED_ANGLE_DEG = 160.0;  // Must be <= MAX_PIVOT_ANGLE_DEG
     public static final double IDLE_ANGLE_DEG =  60.0;
     public static final double HALF_SHOOT_ANGLE_DEG = 90.0;
     // Tolerance for "at target" check (degrees)
     public static final double PIVOT_TOLERANCE_DEG = 2.0;
     
 
-    // Jiggle: oscillate pivot slightly while shooting
-    // to keep balls loose and feeding smoothly.
-    public static final double JIGGLE_CYCLE_SECONDS = 1.2; // Full cycle time (slower = gentler)
-    public static final double JIGGLE_AMPLITUDE_DEG = 6.0; // ±6° from retracted position
+    // Jiggle: oscillate pivot while shooting to force balls into the shooter.
+    // Sweeps from near-retracted to near-deployed with rollers spinning inward.
+    public static final double JIGGLE_CYCLE_SECONDS = 0.5;  // Full cycle time (fast pump action)
+    public static final double JIGGLE_MIN_ANGLE_DEG = 70.0;  // Near retracted — where balls feed
+    public static final double JIGGLE_MAX_ANGLE_DEG = 140.0; // Near deployed — pushes balls back down
+    public static final double JIGGLE_ROLLER_RPM = 4000.0;   // Rollers spin inward to force-feed balls
 
     // Roller (RPM-based, controlled via Motion Magic Velocity)
     public static final double INTAKE_SPEED_RPM = 6000.0;
@@ -218,11 +229,27 @@ public final class Constants {
     public static final double MAX_ANGULAR_SPEED_RAD = Math.PI * 2;
     public static final double SLOW_MODE_MULTIPLIER = 0.3;
     
-    // Auto-aim heading P controller (rotation rate = -KP * error_radians)
+    // Auto-aim heading PD controller (rotation rate = KP * error - KD * errorRate)
     // Controls how aggressively the robot rotates to face the target.
-    public static final double AIM_HEADING_KP = 0.9;   // Proportional (rad/s per radian of error)
+    // KP drives toward the target; KD damps oscillation as the error shrinks.
+    // Inside AIM_SLOW_ZONE_DEG, KP scales down so the robot decelerates smoothly.
+    // Output is clamped to MAX_ANGULAR_SPEED_RAD so large errors don't command unsafe rates.
+    public static final double AIM_HEADING_KP = 9;    // Proportional (rad/s per radian of error)
+    public static final double AIM_HEADING_KD = 0.03;   // Derivative (rad/s per rad/s of error change)
+    /** Below this error (degrees), output zero — prevents micro-oscillation jitter near target */
+    public static final double AIM_DEADBAND_DEG = 0.0;
+    /** When error is within this zone (degrees), KP ramps down for a smooth approach */
+    public static final double AIM_SLOW_ZONE_DEG = 0.0;
     /** Angle tolerance in degrees — "aimed" when error is within this */
-    public static final double AIM_TOLERANCE_DEG = 3.0;
+    public static final double AIM_TOLERANCE_DEG = 1;
+    /** 
+     * Sign multiplier for auto-aim rotation direction.
+     * +1.0 = normal (positive angleToTarget → CCW rotation)
+     * -1.0 = inverted (use if Pigeon mount compensation isn't working)
+     * 
+     * If the robot rotates AWAY from the target, flip this to -1.0.
+     */
+    public static final double AIM_DIRECTION = -1.0;
   }
   
   public static final class Tags {

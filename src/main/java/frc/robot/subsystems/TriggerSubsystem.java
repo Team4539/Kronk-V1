@@ -159,8 +159,12 @@ public class TriggerSubsystem extends SubsystemBase {
      */
     @Override
     public void periodic() {
-        // SAFETY: When robot is disabled, do NOT send any CAN frames.
+        // SAFETY: When robot is disabled, explicitly command zero output.
+        // Just returning without a setControl() leaves the last command active.
         if (DriverStation.isDisabled()) {
+            motor.setControl(dutyControl.withOutput(0));
+            targetRPS = 0.0;
+            isShooting = false;
             updateDashboard();
             return;
         }

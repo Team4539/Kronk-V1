@@ -73,6 +73,8 @@ public class RobotContainer {
 
     // State
     private boolean useRobotCentric = false;
+    /** Persistent E-stop flag. When true, all motor outputs are suppressed until cleared. */
+    private boolean eStopActive = false;
     private final SendableChooser<Command> autoChooser;
 
     /** Whether vision has seeded the gyro heading at least once since boot. */
@@ -148,7 +150,7 @@ public class RobotContainer {
             NamedCommands.registerCommand("aimAtPose",
                     drivetrain.applyRequest(() -> {
                         double errorDeg = shootingCalc.getAngleToTarget();
-                        double omega = -Math.toRadians(errorDeg) * Constants.Driver.AIM_HEADING_KP;
+                        double omega = aimOmega(errorDeg);
                         return aimFieldCentric
                                 .withVelocityX(0)
                                 .withVelocityY(0)
@@ -175,11 +177,14 @@ public class RobotContainer {
      * All controls on a single Xbox controller:
      * 
      * LEFT STICK:  Drive X/Y (translation)
-     * RIGHT STICK: Rotation
+     * RIGHT STICK: Rotation (manual, overridden by auto-aim when LT held)
      * RT:          Slow mode (proportional)
-     * LT:          Pre-spool shooter + auto-aim (hold)
+     * LT:          Auto-aim + pre-spool shooter + deploy intake (hold)
+     *              - Default drive command auto-rotates toward target when LT > 0.5
+     *              - Simultaneously spools shooter to calculated RPM
+     *              - Deploys intake so ball is ready to feed on LB press
      * RB:          Intake deploy (hold) / retract (release)
-     * LB:          Auto-shoot + auto-aim (hold to shoot)
+     * LB:          Auto-shoot + auto-aim + jiggle (hold to shoot)
      * A:           E-stop all motors
      * B:           Force shoot toggle
      * X:           Shuttle mode toggle
@@ -190,9 +195,11 @@ public class RobotContainer {
      * POV DOWN:    Feed shot (calibration, hold)
      */
     private void configureSingleControllerBindings() {
-        // LT: Pre-spool shooter + auto-aim (hold)
-        // Spools shooter to calculated RPM AND rotates robot toward target via camera.
-        // Driver keeps translation control; rotation auto-aims toward target.
+        // LT: Pre-spool shooter + deploy intake (hold)
+        // Spools shooter to calculated RPM and drops the intake so the ball
+        // is ready to feed immediately when LB (shoot) is pressed.
+        // Auto-aim rotation is handled by the default drive command
+        // (detects LT > 0.5 and auto-rotates toward target).
         if (shooter != null) {
             Command spoolCmd = Commands.run(() -> {
                 shooter.setTargetRPM(shootingCalc.getTargetRPM());
@@ -202,21 +209,13 @@ public class RobotContainer {
                 if (leds != null) leds.clearAction();
             });
 
-            if (drivetrain != null) {
-                // Auto-aim: rotate toward target while driver controls translation
-                Command aimCmd = drivetrain.applyRequest(() -> {
-                    double slow = driver.getRightTriggerAxis() > 0.3
-                            ? Constants.Driver.SLOW_MODE_MULTIPLIER : 1.0;
-                    double vx = -driver.getLeftY() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
-                    double vy = -driver.getLeftX() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
-                    double errorDeg = shootingCalc.getAngleToTarget();
-                    double omega = -Math.toRadians(errorDeg) * Constants.Driver.AIM_HEADING_KP;
-                    return aimFieldCentric
-                            .withVelocityX(vx)
-                            .withVelocityY(vy)
-                            .withRotationalRate(omega);
-                });
-                driver.leftTrigger(0.5).whileTrue(spoolCmd.alongWith(aimCmd));
+            // Deploy intake alongside spool so it's ready to feed
+            if (intake != null) {
+                Command intakeDeployCmd = Commands.startEnd(
+                        () -> intake.deploy(),
+                        () -> intake.stopAndRetract(),
+                        intake);
+                driver.leftTrigger(0.5).whileTrue(spoolCmd.alongWith(intakeDeployCmd));
             } else {
                 driver.leftTrigger(0.5).whileTrue(spoolCmd);
             }
@@ -238,8 +237,7 @@ public class RobotContainer {
                             ? Constants.Driver.SLOW_MODE_MULTIPLIER : 1.0;
                     double vx = -driver.getLeftY() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
                     double vy = -driver.getLeftX() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
-                    double errorDeg = shootingCalc.getAngleToTarget();
-                    double omega = -Math.toRadians(errorDeg) * Constants.Driver.AIM_HEADING_KP;
+                    double omega = aimOmega(shootingCalc.getAngleToTarget());
                     return aimFieldCentric
                             .withVelocityX(vx)
                             .withVelocityY(vy)
@@ -264,11 +262,12 @@ public class RobotContainer {
                             }));
         }
 
-        // A: E-stop all motors
+        // A: E-stop all motors (persistent until mode change)
         driver.a().onTrue(Commands.runOnce(() -> {
-            if (shooter != null) shooter.stop();
-            if (trigger != null) trigger.stop();
-            notify("E-STOP");
+            eStopActive = true;
+            stopAllMotors();
+            if (leds != null) leds.setAction(LEDSubsystem.ActionState.ESTOP);
+            notify("E-STOP ACTIVE");
         }));
 
         // B: Force shoot toggle
@@ -311,13 +310,18 @@ public class RobotContainer {
                     drivetrain.applyRequest(() -> pointWheels.withModuleDirection(Rotation2d.kZero)));
         }
 
-        // POV Down: Feed shot (calibration - feeds ball into shooter while held)
+        // POV Down: Feed shot (calibration - mimics the exact normal shooting sequence)
+        // Runs trigger + intake jiggle just like LB auto-shoot does, so calibration
+        // shots behave identically to real match shots.
         if (trigger != null) {
-            driver.povDown().whileTrue(
-                    Commands.startEnd(
-                            () -> trigger.setShoot(),
-                            () -> trigger.stop(),
-                            trigger));
+            Command feedCmd = Commands.startEnd(
+                    () -> trigger.setShoot(),
+                    () -> trigger.stop(),
+                    trigger);
+            if (intake != null) {
+                feedCmd = feedCmd.alongWith(new IntakeJiggleCommand(intake));
+            }
+            driver.povDown().whileTrue(feedCmd);
         }
     }
 
@@ -326,11 +330,14 @@ public class RobotContainer {
     // =========================================================================
 
     private void configureDefaultCommands() {
-        // Drivetrain: swerve drive with slow-mode on RT
+        // Drivetrain: swerve drive with auto-aim integration.
+        // When LT is held past 0.5, rotation automatically tracks the shooting target
+        // (P controller on angleToTarget). Otherwise, right stick controls rotation normally.
+        // Translation (left stick) and slow mode (RT) always work regardless of auto-aim.
         if (drivetrain != null) {
             drivetrain.setDefaultCommand(drivetrain.applyRequest(() -> {
-                // SAFETY: Do not drive while disabled; send idle/brake request
-                if (DriverStation.isDisabled()) {
+                // SAFETY: Do not drive while disabled or E-stopped; send idle/brake request
+                if (DriverStation.isDisabled() || eStopActive) {
                     return brake;
                 }
 
@@ -338,8 +345,17 @@ public class RobotContainer {
                         ? Constants.Driver.SLOW_MODE_MULTIPLIER : 1.0;
                 double vx = -driver.getLeftY()  * Constants.Driver.MAX_DRIVE_SPEED_MPS  * slow;
                 double vy = -driver.getLeftX()  * Constants.Driver.MAX_DRIVE_SPEED_MPS  * slow;
-                double vr = driver.getRightX() * Constants.Driver.MAX_ANGULAR_SPEED_RAD * slow;
 
+                // On-the-fly auto-aim: LT held → auto-rotate toward target
+                boolean autoAim = driver.getLeftTriggerAxis() > 0.5;
+                if (autoAim) {
+                    double omega = aimOmega(shootingCalc.getAngleToTarget());
+                    // Use aimFieldCentric (no rotational deadband) for precise auto-aim
+                    return aimFieldCentric.withVelocityX(vx).withVelocityY(vy)
+                            .withRotationalRate(omega);
+                }
+
+                double vr = driver.getRightX() * Constants.Driver.MAX_ANGULAR_SPEED_RAD * slow;
                 if (useRobotCentric) {
                     return robotCentric.withVelocityX(vx).withVelocityY(vy).withRotationalRate(vr);
                 }
@@ -353,6 +369,11 @@ public class RobotContainer {
         if (shooter != null) {
             SmartDashboard.putNumber("Shooter/IdleRPM", Constants.Shooter.DEFAULT_IDLE_RPM);
             shooter.setDefaultCommand(Commands.run(() -> {
+                // SAFETY: Do not spin shooter while disabled or E-stopped
+                if (DriverStation.isDisabled() || eStopActive) {
+                    shooter.stop();
+                    return;
+                }
                 double idleRPM = SmartDashboard.getNumber("Shooter/IdleRPM",
                         Constants.Shooter.DEFAULT_IDLE_RPM);
                 if (idleRPM > 0.1) {
@@ -386,14 +407,18 @@ public class RobotContainer {
         }
 
         // Quick-fire dashboard button for calibration: feeds a ball into the shooter
-        // without requiring alliance windows or the full AutoShoot sequence.
+        // mimicking the exact normal shooting sequence (trigger + intake jiggle).
         if (trigger != null) {
-            SmartDashboard.putData("Tuning/Feed Shot",
-                    Commands.startEnd(
+            Command dashFeedCmd = Commands.startEnd(
                             () -> trigger.setShoot(),
                             () -> trigger.stop(),
                             trigger
-                    ).withName("Feed Shot"));
+                    ).withName("Feed Shot");
+            if (intake != null) {
+                dashFeedCmd = dashFeedCmd.alongWith(
+                        new IntakeJiggleCommand(intake)).withName("Feed Shot");
+            }
+            SmartDashboard.putData("Tuning/Feed Shot", dashFeedCmd);
         }
     }
 
@@ -494,8 +519,18 @@ public class RobotContainer {
 
     public Command getAutonomousCommand() { return autoChooser.getSelected(); }
     public LEDSubsystem getLEDs() { return leds; }
+    /** Returns true when the driver E-stop is active. */
+    public boolean isEStopActive() { return eStopActive; }
 
-    /** Stop all motors - called from Robot.disabledInit(). */
+    /** Clear the E-stop flag. Called on mode transitions (auto/teleop init). */
+    public void clearEStop() {
+        if (eStopActive) {
+            eStopActive = false;
+            notify("E-Stop Cleared");
+        }
+    }
+
+    /** Stop all motors - called from Robot.disabledInit() and E-stop. */
     public void stopAllMotors() {
         if (drivetrain != null) drivetrain.setControl(brake);
         if (shooter != null)    shooter.stop();
@@ -527,6 +562,62 @@ public class RobotContainer {
 
     private Command ledClear() {
         return Commands.runOnce(() -> { if (leds != null) leds.clearAction(); });
+    }
+
+    /** Previous aim error in radians — used for D term to damp oscillation */
+    private double previousAimErrorRad = 0.0;
+
+    /**
+     * Computes the auto-aim rotational rate (rad/s) from a heading error (degrees).
+     * PD controller with slow-approach zone, deadband, and saturation:
+     *   - P term drives toward the target
+     *   - Inside AIM_SLOW_ZONE_DEG, effective KP ramps down proportionally
+     *     so the robot decelerates smoothly as it approaches the target
+     *   - D term damps oscillation by opposing rapid error changes
+     *   - Deadband zeroes output for tiny errors to prevent micro-jitter
+     *   - Output is clamped to MAX_ANGULAR_SPEED_RAD
+     * 
+     * Uses AIM_DIRECTION to flip the sign if the Pigeon mount compensation
+     * isn't working correctly. If the robot rotates AWAY from the target,
+     * flip AIM_DIRECTION to -1.0 in Constants.
+     */
+    private double aimOmega(double errorDeg) {
+        // Deadband: zero output when error is tiny to prevent micro-oscillation
+        if (Math.abs(errorDeg) < Constants.Driver.AIM_DEADBAND_DEG) {
+            previousAimErrorRad = 0.0;
+            return 0.0;
+        }
+
+        double errorRad = Math.toRadians(errorDeg);
+        double absErrorDeg = Math.abs(errorDeg);
+
+        // Slow-approach zone: scale KP down as we get closer to the target.
+        // Outside the zone → full KP. At the deadband edge → KP scaled to near-minimum.
+        // This creates a smooth deceleration ramp instead of an abrupt slowdown.
+        double kp = Constants.Driver.AIM_HEADING_KP;
+        double slowZone = Constants.Driver.AIM_SLOW_ZONE_DEG;
+        if (absErrorDeg < slowZone) {
+            // Scale from 1.0 (at zone edge) down to ~0.3 (near deadband)
+            double blend = (absErrorDeg - Constants.Driver.AIM_DEADBAND_DEG)
+                         / (slowZone - Constants.Driver.AIM_DEADBAND_DEG);
+            blend = Math.max(0.0, Math.min(1.0, blend));
+            // Minimum 30% KP so we still have enough authority to reach the target
+            kp *= 0.3 + 0.7 * blend;
+        }
+
+        // P term: proportional to current error (with slow-zone scaling)
+        double pTerm = errorRad * kp;
+
+        // D term: opposes rapid changes in error (damps oscillation)
+        double errorRate = (errorRad - previousAimErrorRad) / 0.020;
+        double dTerm = errorRate * Constants.Driver.AIM_HEADING_KD;
+        previousAimErrorRad = errorRad;
+
+        double omega = (pTerm + dTerm) * Constants.Driver.AIM_DIRECTION;
+
+        // Clamp to max rotation speed so large errors don't command unsafe rates
+        double maxOmega = Constants.Driver.MAX_ANGULAR_SPEED_RAD;
+        return Math.max(-maxOmega, Math.min(maxOmega, omega));
     }
 
     private void notify(String title) {

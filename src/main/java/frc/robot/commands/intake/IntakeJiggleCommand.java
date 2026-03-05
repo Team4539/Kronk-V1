@@ -6,14 +6,14 @@ import frc.robot.Constants;
 import frc.robot.subsystems.IntakeSubsystem;
 
 /**
- * Oscillates the intake pivot between retracted and idle positions
- * while the shooter is active. This "jiggles" balls to keep them
- * loose and feeding smoothly into the shooter.
+ * Aggressively pumps the intake pivot back and forth while spinning rollers
+ * inward to force-feed balls into the shooter during firing.
  *
- * The pivot swings on a configurable cycle time (JIGGLE_CYCLE_SECONDS).
- * Rollers are left stopped — this is purely a pivot movement.
+ * The pivot sweeps from near-retracted (where balls enter the shooter) to
+ * near-deployed (pushing balls back down) on a fast cycle. Rollers spin
+ * inward the whole time to keep balls moving toward the shooter.
  *
- * Run this command .alongWith() AutoShootCommand while holding LT.
+ * Run this command .alongWith() AutoShootCommand while holding LB.
  * It ends when interrupted (button released).
  */
 public class IntakeJiggleCommand extends Command {
@@ -29,7 +29,8 @@ public class IntakeJiggleCommand extends Command {
     @Override
     public void initialize() {
         startTime = Timer.getFPGATimestamp();
-        intake.stopRollers(); // No rolling, just jiggle the pivot
+        // Start rollers spinning inward to force-feed balls
+        intake.setRollerSpeed(Constants.Intake.JIGGLE_ROLLER_RPM);
     }
 
     @Override
@@ -41,17 +42,20 @@ public class IntakeJiggleCommand extends Command {
         double phase = (elapsed % cycleTime) / cycleTime;
         double blend = (phase < 0.5) ? (phase * 2.0) : (2.0 - phase * 2.0);
 
-        // Gentle oscillation: retracted position ± JIGGLE_AMPLITUDE_DEG
-        double center = Constants.Intake.RETRACTED_ANGLE_DEG;
-        double amplitude = Constants.Intake.JIGGLE_AMPLITUDE_DEG;
-        double targetAngle = center + blend * amplitude;
+        // Sweep between min and max jiggle angles
+        double minAngle = Constants.Intake.JIGGLE_MIN_ANGLE_DEG;
+        double maxAngle = Constants.Intake.JIGGLE_MAX_ANGLE_DEG;
+        double targetAngle = minAngle + blend * (maxAngle - minAngle);
 
         intake.setPivotAngle(targetAngle);
+        
+        // Keep rollers spinning inward
+        intake.setRollerSpeed(Constants.Intake.JIGGLE_ROLLER_RPM);
     }
 
     @Override
     public void end(boolean interrupted) {
-        // Return to idle position when shooting stops
+        intake.stopRollers();
         intake.retract();
     }
 

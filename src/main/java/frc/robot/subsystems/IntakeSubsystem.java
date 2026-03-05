@@ -103,7 +103,7 @@ public class IntakeSubsystem extends SubsystemBase {
         
         // Slot 0: DEPLOY — aggressive PID for fast, forceful deployment (going down)
         // Chain slop doesn't matter as much deploying because gravity helps.
-        config.Slot0.kP = 80.0;   // High P for snappy deploy
+        config.Slot0.kP = 45.0;   // High P for snappy deploy
         config.Slot0.kI = 0.0;
         config.Slot0.kD = 0.3;    // Light damping — we want speed
         config.Slot0.kS = 0.15;   // Static friction feedforward
@@ -316,8 +316,12 @@ public class IntakeSubsystem extends SubsystemBase {
         // 1. Read current angle from the fused CANcoder (mechanism rotations → degrees)
         currentPivotAngle = pivotMotor.getPosition().getValueAsDouble() * 360.0;
         
-        // SAFETY: When robot is disabled, do NOT send any CAN frames.
+        // SAFETY: When robot is disabled, explicitly command zero output to both motors.
+        // Just returning without a setControl() leaves the last command active.
         if (DriverStation.isDisabled()) {
+            rollerMotor.setControl(rollerDutyControl.withOutput(0));
+            pivotMotor.setControl(pivotMotionMagic.withPosition(currentPivotAngle / 360.0).withSlot(1));
+            targetRollerRPS = 0.0;
             updateDashboard();
             return;
         }

@@ -44,9 +44,6 @@ public class ShootingCalculator {
     /** Distance from robot to target (meters) */
     private double distance = 0.0;
     
-    /** Whether the robot is moving fast enough to need lead compensation */
-    private boolean isMoving = false;
-    
     /** Whether we're aiming at trench (true) or hub (false) */
     private boolean aimingAtTrench = false;
 
@@ -102,7 +99,6 @@ public class ShootingCalculator {
             angleToTarget = 0.0;
             targetRPM = 0.0;
             distance = 0.0;
-            isMoving = false;
             return;
         }
 
@@ -122,8 +118,11 @@ public class ShootingCalculator {
         double fieldAngle = Math.toDegrees(Math.atan2(dy, dx));
 
         // --- 3. Convert field angle to robot-relative angle ---
+        // The shooter fires out the BACK of the robot, so we need the robot's
+        // rear facing the target. Adding 180° flips the aim direction so auto-aim
+        // rotates the back toward the target instead of the front.
         double robotHeading = robotPose.getRotation().getDegrees();
-        angleToTarget = normalizeAngle(fieldAngle - robotHeading);
+        angleToTarget = normalizeAngle(fieldAngle - robotHeading + 180.0);
 
         // --- 4. Interpolate shooter RPM from distance-based calibration table ---
         // In calibration mode, skip interpolation — use only the manual RPM offset
@@ -136,7 +135,7 @@ public class ShootingCalculator {
         double maxRPM = Constants.Shooter.MOTOR_FREE_SPEED_RPS * 60.0;
         targetRPM = clamp(targetRPM, 0, maxRPM);
 
-        // --- 6. Publish telemetry ---
+        // --- 5. Publish telemetry ---
         publishTelemetry();
     }
 
@@ -212,9 +211,6 @@ public class ShootingCalculator {
 
     /** Distance from robot to target (meters). */
     public double getDistance() { return distance; }
-
-    /** Whether robot is moving fast enough for lead compensation. */
-    public boolean isMoving() { return isMoving; }
 
     /** Whether currently aiming at trench vs hub. */
     public boolean isAimingAtTrench() { return aimingAtTrench; }

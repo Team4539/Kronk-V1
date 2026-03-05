@@ -1760,67 +1760,62 @@ public class LEDSubsystem extends SubsystemBase {
         double onboardBright = 0.5 + 0.5 * ((Math.sin(onboardPhase * Math.PI * 2.0) + 1.0) / 2.0);
         setOnboardColor(scaleColor(allianceColor, onboardBright * masterBrightness));
         
-        // Pick an accent color based on alliance for peak-tinting
-        // Blue alliance → warm white peaks (avoids cyan/blue confusion)
-        // Red alliance → orange/gold peaks
-        boolean isBlueAlliance = (allianceColor[2] > allianceColor[0]);
-        int[] accentColor = isBlueAlliance ? Constants.LEDs.WARM_WHITE : Constants.LEDs.TEAM_GOLD;
+        // Accent color: team gold for both alliances — pops against blue AND red
+        int[] accentColor = Constants.LEDs.TEAM_GOLD;
         
-        // Three sine waves at different speeds and wavelengths for plasma look.
-        // Wider wavelengths (1.5-2.5 cycles) so bands are fat and visible through smoke.
-        double drift1 = currentTime * 0.30;  // Slow drift
-        double drift2 = currentTime * 0.18;  // Slower counter-drift
-        double drift3 = currentTime * 0.45;  // Medium drift for complexity
+        // Slow-drifting wave decides which LEDs are alliance vs accent.
+        // Using a HARD threshold — no lerp between the two colors.
+        // This keeps blue looking blue and gold looking gold, no washed-out middle.
+        double drift = currentTime * 0.25;  // Slow drift speed
         
         for (int i = 0; i < stripCount; i++) {
             double pos = (double) i / stripCount;
             
-            // Wide plasma waves
-            double wave1 = (Math.sin((pos * 1.5 - drift1) * Math.PI * 2) + 1) / 2;
-            double wave2 = (Math.sin((pos * 2.5 + drift2) * Math.PI * 2) + 1) / 2;
-            double wave3 = (Math.sin((pos * 1.0 + drift3) * Math.PI * 2) + 1) / 2;
+            // Two overlapping waves create an organic-looking boundary
+            double wave1 = Math.sin((pos * 2.0 - drift) * Math.PI * 2);
+            double wave2 = Math.sin((pos * 3.0 + drift * 0.7) * Math.PI * 2) * 0.4;
+            double combined = wave1 + wave2;
             
-            // Combine with cubic falloff for punchy peaks and deep valleys
-            double combined = wave1 * wave1 * 0.45 + wave2 * wave2 * 0.35 + wave3 * wave3 * 0.20;
+            // Hard color pick: positive = alliance, negative = accent
+            // Tiny crossfade zone (±0.15) at the boundary for a clean but not jagged edge
+            int[] pixelColor;
+            if (combined > 0.15) {
+                pixelColor = allianceColor;
+            } else if (combined < -0.15) {
+                pixelColor = accentColor;
+            } else {
+                // Very narrow transition — just 2-3 pixels will ever be in this zone
+                double edge = (combined + 0.15) / 0.3;  // 0 to 1
+                pixelColor = lerpColor(accentColor, allianceColor, edge);
+            }
             
-            // High contrast range: 8% floor → 100% (valleys are nearly black behind smoke)
-            double brightness = combined * 0.92 + 0.08;
-            
-            // Color: blend alliance → accent at peaks, push toward white-hot at crests
-            double accentMix = combined * combined * 0.35;  // More accent at brighter spots
-            double whiteMix = Math.max(0, combined - 0.7) / 0.3;  // White-hot above 70%
-            whiteMix = whiteMix * whiteMix * 0.4;
-            
-            int[] pixelColor = lerpColor(allianceColor, accentColor, accentMix);
-            pixelColor = lerpColor(pixelColor, Constants.LEDs.WARM_WHITE, whiteMix);
+            // Gentle brightness variation for depth (high floor so colors stay vivid)
+            double brightness = 0.6 + 0.4 * ((Math.sin((pos * 1.5 - drift * 0.5) * Math.PI * 2) + 1) / 2);
             
             setLED(stripStart + i, scaleColor(pixelColor, brightness * masterBrightness));
         }
         
-        // === Roaming highlight comet A (forward) ===
-        // Bright accent comet that punches through diffusion
-        int trailLen = 8;
-        double cometPhaseA = (currentTime % 5.0) / 5.0;
+        // === Roaming highlight comet A (forward, accent colored) ===
+        int trailLen = 6;
+        double cometPhaseA = (currentTime % 4.0) / 4.0;
         int cometHeadA = (int)(cometPhaseA * stripCount) % stripCount;
         
         for (int t = 0; t < trailLen; t++) {
             int idx = ((cometHeadA - t) % stripCount + stripCount) % stripCount;
             double fade = 1.0 - ((double) t / trailLen);
             fade = fade * fade;
-            int[] cometColor = (t == 0) ? Constants.LEDs.WHITE : accentColor;
-            blendAdditive(stripStart + idx, cometColor, fade * 0.6 * masterBrightness);
+            blendAdditive(stripStart + idx, accentColor, fade * 0.35 * masterBrightness);
         }
         
-        // === Roaming highlight comet B (reverse, offset) ===
-        double cometPhaseB = (1.0 - (currentTime % 7.0) / 7.0) % 1.0;
+        // === Roaming highlight comet B (reverse, alliance colored) ===
+        double cometPhaseB = (1.0 - (currentTime % 6.0) / 6.0) % 1.0;
         int cometHeadB = (int)(cometPhaseB * stripCount) % stripCount;
         
         for (int t = 0; t < trailLen; t++) {
             int idx = ((cometHeadB + t) % stripCount + stripCount) % stripCount;
             double fade = 1.0 - ((double) t / trailLen);
             fade = fade * fade;
-            int[] cometColor = (t == 0) ? Constants.LEDs.WARM_WHITE : allianceColor;
-            blendAdditive(stripStart + idx, cometColor, fade * 0.5 * masterBrightness);
+            blendAdditive(stripStart + idx, allianceColor, fade * 0.35 * masterBrightness);
         }
         
         pushBuffer();

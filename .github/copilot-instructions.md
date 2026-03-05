@@ -32,7 +32,7 @@ Since there is **no turret**, aiming is done by rotating the entire robot:
 - `ShootingCalculator.getAngleToTarget()` returns how far off the robot heading is from the target
 - `ShootingCalculator.getTargetRPM()` returns the interpolated RPM for the current distance
 - **RPM interpolation**: `List<double[]>` stores calibration points as `{distanceMeters, shooterRPM}`, linearly interpolated between the two nearest distance points
-- **Auto-aim**: LT/LB bindings use `fieldCentric.withRotationalRate()` with a P controller on `angleToTarget` to rotate the robot toward the target
+- **Auto-aim**: Integrated into the **default drive command** — when LT > 0.5, the right-stick rotation is replaced by a P controller (`aimOmega()`) that rotates the robot toward the target. Uses `aimFieldCentric` (separate from `fieldCentric`, no rotational deadband). Output is clamped to `MAX_ANGULAR_SPEED_RAD`. `AIM_DIRECTION` constant flips sign if Pigeon mount is inverted.
 
 ### Command Architecture
 
@@ -47,11 +47,11 @@ All controls on one controller (port 0):
 | Button | Function |
 |--------|----------|
 | Left Stick | Drive X/Y (translation) |
-| Right Stick X | Rotation |
+| Right Stick X | Rotation (manual; overridden by auto-aim when LT held) |
 | RT | Slow mode (proportional) |
-| LT | Auto-shoot (hold) |
+| LT | Auto-aim + pre-spool shooter (hold) |
 | RB | Intake deploy (hold) / retract (release) |
-| LB | Pre-spool shooter (hold) |
+| LB | Auto-shoot + auto-aim + jiggle (hold to shoot) |
 | A | E-stop all motors |
 | B | Force shoot toggle |
 | X | Shuttle mode toggle |

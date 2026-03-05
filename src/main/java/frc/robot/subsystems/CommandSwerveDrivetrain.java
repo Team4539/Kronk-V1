@@ -441,9 +441,11 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             return;
         }
         
-        // Convert robot-relative angle to field angle
+        // Convert robot-relative angle to field angle.
+        // angleToTarget includes a 180° offset because the shooter fires out the back,
+        // so we subtract 180° here to get the true field angle toward the target for drawing.
         double robotHeadingDeg = robotPose.getRotation().getDegrees();
-        double fieldAngleDeg = robotHeadingDeg + angleToTarget;
+        double fieldAngleDeg = robotHeadingDeg + angleToTarget - 180.0;
         double fieldAngleRad = Math.toRadians(fieldAngleDeg);
         
         // Calculate the computed target point
@@ -474,7 +476,6 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         DashboardHelper.putNumber(Category.DEBUG, "Aim/AngleToTarget", angleToTarget);
         DashboardHelper.putNumber(Category.DEBUG, "Aim/TargetX", targetX);
         DashboardHelper.putNumber(Category.DEBUG, "Aim/TargetY", targetY);
-        DashboardHelper.putBoolean(Category.DEBUG, "Aim/IsMoving", calc.isMoving());
     }
     
     /**
