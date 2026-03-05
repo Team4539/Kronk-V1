@@ -56,9 +56,20 @@ public class Robot extends TimedRobot {
     // Clear E-stop state so it doesn't persist across enable/disable cycles
     m_robotContainer.clearEStop();
     
-    setLEDState(LEDState.DISABLED);
+    // During the auto→teleop transition (~3 seconds), we want the red/blue
+    // cycling pattern to continue. Only switch to DISABLED if we weren't in
+    // a match, or if the match is truly over (post-teleop).
+    // The LED state machine handles MATCH_END detection automatically.
     LEDSubsystem leds = m_robotContainer.getLEDs();
-    if (leds != null) leds.clearAction();
+    if (leds != null) {
+      LEDState current = leds.getState();
+      // If we're coming from AUTO, keep the AUTO pattern (red/blue cycle)
+      // through the transition. teleopInit() will switch to TELEOP.
+      if (current != LEDState.AUTO) {
+        leds.setState(LEDState.DISABLED);
+      }
+      leds.clearAction();
+    }
     notify("Robot Disabled", "Safe to approach");
     Elastic.selectTab("Pre-Match");
   }

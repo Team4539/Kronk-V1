@@ -161,7 +161,7 @@ public class GameStateManager {
     // ALLIANCE TIMING
     // ========================================================================
     
-    private Alliance getCurrentlyActiveAlliance() {
+    public Alliance getCurrentlyActiveAlliance() {
         if (!receivedGameMessage || firstActiveAlliance == null) return null;
         
         Alliance other = (firstActiveAlliance == Alliance.Blue) ? Alliance.Red : Alliance.Blue;
@@ -222,6 +222,33 @@ public class GameStateManager {
     /** Alias for getSecondsUntilOurNextShift() - seconds until our alliance is active. */
     public double getTimeUntilActive() {
         return getSecondsUntilOurNextShift();
+    }
+    
+    /**
+     * Returns how far through the current shift we are, as 0.0 → 1.0.
+     * 0.0 = shift just started, 1.0 = shift is about to end.
+     * Works for ANY shift (not alliance-specific) so LEDs can show urgency
+     * regardless of which alliance is active.
+     * Returns -1 if not in a shift phase (transition, endgame, no FMS, etc.).
+     */
+    public double getCurrentShiftProgress() {
+        double t = DriverStation.getMatchTime();
+        if (t < 0) return -1; // No FMS timing
+        
+        // Each shift is 25 seconds. Find how far through the current one we are.
+        double shiftStart; // matchTime value at shift START (higher number = earlier in match)
+        double shiftEnd;   // matchTime value at shift END
+        switch (currentPhase) {
+            case SHIFT_1: shiftStart = 130; shiftEnd = 105; break;
+            case SHIFT_2: shiftStart = 105; shiftEnd = 80;  break;
+            case SHIFT_3: shiftStart = 80;  shiftEnd = 55;  break;
+            case SHIFT_4: shiftStart = 55;  shiftEnd = 30;  break;
+            default: return -1; // Not in a shift
+        }
+        // matchTime counts DOWN, so progress = how far from start toward end
+        double elapsed = shiftStart - t;   // 0 at start, 25 at end
+        double duration = shiftStart - shiftEnd; // 25
+        return Math.max(0.0, Math.min(1.0, elapsed / duration));
     }
     
     // ========================================================================

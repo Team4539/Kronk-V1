@@ -256,7 +256,7 @@ public class VisionSubsystem extends SubsystemBase {
     // =========================================================================
 
     public VisionSubsystem() {
-        fieldLayout = AprilTagFieldLayout.loadField(AprilTagFields.k2026RebuiltAndymark);
+        fieldLayout = AprilTagFieldLayout.loadField(AprilTagFields.k2026RebuiltWelded);
 
         // --- Front camera ---
         Transform3d frontTransform = new Transform3d(

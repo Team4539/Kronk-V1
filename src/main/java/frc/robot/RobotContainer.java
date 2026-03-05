@@ -203,7 +203,15 @@ public class RobotContainer {
         if (shooter != null) {
             Command spoolCmd = Commands.run(() -> {
                 shooter.setTargetRPM(shootingCalc.getTargetRPM());
-                if (leds != null) leds.setAction(LEDSubsystem.ActionState.SPOOLING);
+                if (leds != null) {
+                    // Show GREEN when shooter is at speed (ready to fire!)
+                    // Show ORANGE breathing while still spooling up
+                    if (shooter.isReady()) {
+                        leds.setAction(LEDSubsystem.ActionState.SHOOTING);
+                    } else {
+                        leds.setAction(LEDSubsystem.ActionState.SPOOLING);
+                    }
+                }
             }, shooter).finallyDo(() -> {
                 shooter.stop();
                 if (leds != null) leds.clearAction();
