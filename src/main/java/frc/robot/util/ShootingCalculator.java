@@ -152,7 +152,8 @@ public class ShootingCalculator {
 
     private Translation2d getTargetPosition(boolean isBlue, boolean trench) {
         if (trench) {
-            return isBlue ? Constants.Field.BLUE_TRENCH_ROTATING : Constants.Field.RED_TRENCH_ROTATING;
+            // Shuttle mode: aim at alliance zone side instead of trenches
+            return isBlue ? Constants.Field.BLUE_SHUTTLE_TARGET : Constants.Field.RED_SHUTTLE_TARGET;
         } else {
             return isBlue ? Constants.Field.BLUE_HUB_CENTER : Constants.Field.RED_HUB_CENTER;
         }

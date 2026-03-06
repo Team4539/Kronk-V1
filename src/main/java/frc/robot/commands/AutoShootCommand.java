@@ -2,6 +2,7 @@ package frc.robot.commands;
 
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
+import frc.robot.Constants;
 import frc.robot.GameStateManager;
 import frc.robot.GameStateManager.TargetMode;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
@@ -42,6 +43,7 @@ public class AutoShootCommand extends Command {
     // STATE TRACKING
     
     private boolean shooterReady = false;
+    private boolean linedUp = false;
     private boolean allianceActive = false;
     private double distanceToTarget = 0.0;
     private TargetMode currentTargetMode = TargetMode.DISABLED;
@@ -87,6 +89,7 @@ public class AutoShootCommand extends Command {
     public void initialize() {
         SmartDashboard.putString("AutoShoot/Status", "Initializing");
         shooterReady = false;
+        linedUp = false;
         hasNotifiedReady = false;
         wasAllianceActive = false;
         hasNotifiedHeadBack = false;
@@ -138,6 +141,9 @@ public class AutoShootCommand extends Command {
         
         // Check shooter ready status
         shooterReady = shooter.isReady();
+        
+        // Check if robot is aimed at the target
+        linedUp = Math.abs(shootingCalc.getAngleToTarget()) < Constants.Driver.AIM_TOLERANCE_DEG;
         
         // Control trigger motor - feed balls when shooter is spun up and alliance is active
         boolean firing = isReadyToFire();
@@ -218,9 +224,11 @@ public class AutoShootCommand extends Command {
         
         if (wasFiring) {
             leds.setAction(ActionState.FIRING);
-        } else if (shooterReady && (allianceActive || gameState.isGreenLightPreShift() || gameState.isForceShootEnabled())) {
+        } else if (isReadyToFire()) {
+            // Shooter at speed + robot lined up + alliance active = green light
             leds.setAction(ActionState.SHOOTING);
-        } else if (!shooterReady) {
+        } else if (shooterReady && !linedUp) {
+            // Shooter at speed but robot not aimed yet — keep spooling indicator
             leds.setAction(ActionState.SPOOLING);
         } else {
             leds.setAction(ActionState.SPOOLING);
@@ -264,6 +272,8 @@ public class AutoShootCommand extends Command {
         String targetStr = (currentTargetMode == TargetMode.TRENCH) ? "[TRENCH] " : "[HUB] ";
         if (!shooterReady) {
             return targetStr + "Spinning Up...";
+        } else if (!linedUp) {
+            return targetStr + String.format("AIMING (%.1f\u00b0 off)", shootingCalc.getAngleToTarget());
         } else {
             return targetStr + "READY!";
         }
@@ -271,11 +281,13 @@ public class AutoShootCommand extends Command {
     
     private void publishTelemetry() {
         SmartDashboard.putBoolean("AutoShoot/ReadyToFire", isReadyToFire());
+        SmartDashboard.putBoolean("AutoShoot/LinedUp", linedUp);
+        SmartDashboard.putNumber("AutoShoot/AimError", shootingCalc.getAngleToTarget());
         SmartDashboard.putNumber("AutoShoot/Distance", distanceToTarget);
     }
     
     public boolean isReadyToFire() {
-        return shooterReady && 
+        return shooterReady  &&
                (allianceActive || gameState.isForceShootEnabled() || gameState.isGreenLightPreShift());
     }
     

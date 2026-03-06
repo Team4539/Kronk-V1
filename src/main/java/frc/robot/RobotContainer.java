@@ -20,6 +20,7 @@ import frc.robot.commands.calibrations.VisionCalibrationCommand;
 import frc.robot.commands.calibrations.ShootingCalibrationCommand;
 import frc.robot.commands.intake.DeployIntakeCommand;
 import frc.robot.commands.intake.IntakeJiggleCommand;
+import frc.robot.commands.intake.RetractIntakeCommand;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.IntakeSubsystem;
@@ -124,7 +125,7 @@ public class RobotContainer {
         if (shooter != null && vision != null) {
             NamedCommands.registerCommand("autoShoot",
                     new AutoShootCommand(shooter, vision, leds, trigger, drivetrain)
-                            .withTimeout(3.0));
+                            .withTimeout(5.0));
             NamedCommands.registerCommand("quickShoot",
                     new AutoShootCommand(shooter, vision, leds, trigger, drivetrain)
                             .withTimeout(1.5));
@@ -139,6 +140,35 @@ public class RobotContainer {
             NamedCommands.registerCommand("stopShooter",
                     Commands.runOnce(() -> shooter.stop(), shooter));
         }
+        // Intake commands
+        if (intake != null) {
+            NamedCommands.registerCommand("deployIntake",
+                    new DeployIntakeCommand(intake));
+            NamedCommands.registerCommand("retractIntake",
+                    new RetractIntakeCommand(intake));
+            NamedCommands.registerCommand("intakeJiggle",
+                    new IntakeJiggleCommand(intake));
+        }
+
+        // Trigger: feed shot (trigger + intake jiggle, mimics normal shooting feed)
+        if (trigger != null) {
+            Command feedCmd = Commands.startEnd(
+                    () -> trigger.setShoot(),
+                    () -> trigger.stop(),
+                    trigger);
+            if (intake != null) {
+                feedCmd = feedCmd.alongWith(new IntakeJiggleCommand(intake));
+            }
+            NamedCommands.registerCommand("feedShot", feedCmd.withTimeout(1.0));
+        }
+
+        // Stop everything (shooter + trigger + intake)
+        NamedCommands.registerCommand("stopAll", Commands.runOnce(() -> {
+            if (shooter != null) shooter.stop();
+            if (trigger != null) trigger.stop();
+            if (intake != null) intake.stopAndRetract();
+        }));
+
         NamedCommands.registerCommand("enableShuttleMode",
                 Commands.runOnce(() -> gameState.setShuttleMode(true)));
         NamedCommands.registerCommand("disableShuttleMode",
@@ -363,7 +393,8 @@ public class RobotContainer {
                             .withRotationalRate(omega);
                 }
 
-                double vr = driver.getRightX() * Constants.Driver.MAX_ANGULAR_SPEED_RAD * slow;
+                double vr = driver.getRightX() * Constants.Driver.MAX_ANGULAR_SPEED_RAD * slow
+                          * Constants.Driver.AIM_DIRECTION;
                 if (useRobotCentric) {
                     return robotCentric.withVelocityX(vx).withVelocityY(vy).withRotationalRate(vr);
                 }
@@ -621,7 +652,7 @@ public class RobotContainer {
         double dTerm = errorRate * Constants.Driver.AIM_HEADING_KD;
         previousAimErrorRad = errorRad;
 
-        double omega = (pTerm + dTerm) * Constants.Driver.AIM_DIRECTION;
+        double omega = (pTerm + dTerm) *-1.0 ;
 
         // Clamp to max rotation speed so large errors don't command unsafe rates
         double maxOmega = Constants.Driver.MAX_ANGULAR_SPEED_RAD;

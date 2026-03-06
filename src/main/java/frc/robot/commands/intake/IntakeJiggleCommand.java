@@ -47,6 +47,8 @@ public class IntakeJiggleCommand extends Command {
         double maxAngle = Constants.Intake.JIGGLE_MAX_ANGLE_DEG;
         double targetAngle = minAngle + blend * (maxAngle - minAngle);
 
+        
+
         intake.setPivotAngle(targetAngle);
         
         // Keep rollers spinning inward

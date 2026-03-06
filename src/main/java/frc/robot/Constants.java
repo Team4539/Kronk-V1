@@ -68,6 +68,14 @@ public final class Constants {
     public static final Translation2d RED_TRENCH_FIXED = new Translation2d(FIELD_LENGTH_METERS - TRENCH_FIXED_X, FIELD_WIDTH_METERS - TRENCH_FIXED_Y);
     public static final Translation2d RED_TRENCH_TARGET = RED_TRENCH_ROTATING;
 
+    // Shuttle targets — alliance zone side positions (shoot to the wall side of your zone)
+    // Blue: left side of field (low X), near the bottom side wall (low Y)
+    // Red: right side of field (high X), near the top side wall (high Y), mirrored
+    public static final double SHUTTLE_X = 2.0;                     // ~2m into blue alliance zone
+    public static final double SHUTTLE_Y = 4.034631;                     // Near side wall
+    public static final Translation2d BLUE_SHUTTLE_TARGET = new Translation2d(SHUTTLE_X, SHUTTLE_Y);
+    public static final Translation2d RED_SHUTTLE_TARGET = new Translation2d(FIELD_LENGTH_METERS - SHUTTLE_X, FIELD_WIDTH_METERS - SHUTTLE_Y);
+
     public static final boolean OVERRIDE_FMS_CHECK = false;
     public static final double AUTO_SHUTTLE_BOUNDARY_X = 4.0;
     public static final boolean AUTO_SHUTTLE_ENABLED = true;
@@ -156,10 +164,10 @@ public final class Constants {
 
     // Jiggle: oscillate pivot while shooting to force balls into the shooter.
     // Sweeps from near-retracted to near-deployed with rollers spinning inward.
-    public static final double JIGGLE_CYCLE_SECONDS = 0.5;  // Full cycle time (fast pump action)
-    public static final double JIGGLE_MIN_ANGLE_DEG = 70.0;  // Near retracted — where balls feed
-    public static final double JIGGLE_MAX_ANGLE_DEG = 140.0; // Near deployed — pushes balls back down
-    public static final double JIGGLE_ROLLER_RPM = 4000.0;   // Rollers spin inward to force-feed balls
+    public static final double JIGGLE_CYCLE_SECONDS = 0.35;  // Full cycle time (aggressive pump action)
+    public static final double JIGGLE_MIN_ANGLE_DEG = 65.0;  // Near retracted — where balls feed
+    public static final double JIGGLE_MAX_ANGLE_DEG = 150.0; // Near deployed — pushes balls back down
+    public static final double JIGGLE_ROLLER_RPM = 6000.0;   // Rollers spin inward to force-feed balls
 
     // Roller (RPM-based, controlled via Motion Magic Velocity)
     public static final double INTAKE_SPEED_RPM = 6000.0;
@@ -234,7 +242,7 @@ public final class Constants {
     // KP drives toward the target; KD damps oscillation as the error shrinks.
     // Inside AIM_SLOW_ZONE_DEG, KP scales down so the robot decelerates smoothly.
     // Output is clamped to MAX_ANGULAR_SPEED_RAD so large errors don't command unsafe rates.
-    public static final double AIM_HEADING_KP = 9;    // Proportional (rad/s per radian of error)
+    public static final double AIM_HEADING_KP = 15;    // Proportional (rad/s per radian of error)
     public static final double AIM_HEADING_KD = 0.03;   // Derivative (rad/s per rad/s of error change)
     /** Below this error (degrees), output zero — prevents micro-oscillation jitter near target */
     public static final double AIM_DEADBAND_DEG = 0.0;
@@ -249,7 +257,7 @@ public final class Constants {
      * 
      * If the robot rotates AWAY from the target, flip this to -1.0.
      */
-    public static final double AIM_DIRECTION = -1.0;
+    public static final double AIM_DIRECTION = 1.0;
   }
   
   public static final class Tags {
@@ -263,32 +271,26 @@ public final class Constants {
     public static final int CANDLE_ID = CANIds.CANDLE;
     
     // === PHYSICAL LAYOUT ===
-    // The CANdle's data line is Y-spliced to TWO physical strips:
-    //   - Strip A (top/back of robot): 38 LEDs
-    //   - Strip B (belly pan):         ~58 LEDs (same data line, continues after Strip A's length)
+    // The CANdle's data line drives a single back/top strip only.
+    // The belly pan strip is disconnected (broken).
     //
-    // Because they share the same data signal:
-    //   Indices 0-7:   CANdle onboard LEDs (visible on belly pan)
-    //   Indices 8-45:  "SHARED ZONE" — these 38 LEDs light up on BOTH strips simultaneously
-    //                  (Strip A top/back shows all 38, Strip B belly shows first 38)
-    //   Indices 46-65: "BELLY ONLY ZONE" — these ~20 LEDs only exist on Strip B (belly pan)
-    //                  Strip A has no LEDs at these addresses.
+    //   Indices 0-7:   CANdle onboard LEDs
+    //   Indices 8-45:  Back/top strip: 38 LEDs
     //
-    // For animations: the shared zone (8-45) is the main show — it's visible from
-    // both top and bottom. The belly-only zone (46-65) is bonus visibility underneath.
+    // No belly-only zone — those LEDs are gone.
     
-    public static final int ONBOARD_LED_COUNT = 8;    // CANdle built-in LEDs (indices 0-7), belly pan
-    public static final int SHARED_STRIP_COUNT = 38;  // Mirrored on BOTH top strip and belly strip
-    public static final int BELLY_ONLY_COUNT = 20;    // Only on belly strip (after shared zone)
+    public static final int ONBOARD_LED_COUNT = 8;    // CANdle built-in LEDs (indices 0-7)
+    public static final int SHARED_STRIP_COUNT = 38;  // Back/top strip only
+    public static final int BELLY_ONLY_COUNT = 0;     // Belly strip is disconnected (broken)
     
     // Computed layout indices
     public static final int STRIP_START = ONBOARD_LED_COUNT;                          // 8
     public static final int SHARED_END = STRIP_START + SHARED_STRIP_COUNT - 1;        // 45
     public static final int BELLY_START = SHARED_END + 1;                             // 46
-    public static final int BELLY_END = BELLY_START + BELLY_ONLY_COUNT - 1;           // 65
+    public static final int BELLY_END = BELLY_START + BELLY_ONLY_COUNT - 1;           // 45 (empty range)
     
-    public static final int LED_COUNT = ONBOARD_LED_COUNT + SHARED_STRIP_COUNT + BELLY_ONLY_COUNT; // 66
-    public static final int STRIP_COUNT = SHARED_STRIP_COUNT + BELLY_ONLY_COUNT;      // 58 total strip LEDs
+    public static final int LED_COUNT = ONBOARD_LED_COUNT + SHARED_STRIP_COUNT + BELLY_ONLY_COUNT; // 46
+    public static final int STRIP_COUNT = SHARED_STRIP_COUNT + BELLY_ONLY_COUNT;      // 38 total strip LEDs
     
     public static final double BOOT_ANIMATION_DURATION = 2.5;
     public static final double CHASE_SPEED = 0.15;

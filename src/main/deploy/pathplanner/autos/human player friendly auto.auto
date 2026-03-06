@@ -5,9 +5,16 @@
     "data": {
       "commands": [
         {
-          "type": "path",
+          "type": "parallel",
           "data": {
-            "pathName": "New Path"
+            "commands": [
+              {
+                "type": "path",
+                "data": {
+                  "pathName": "human player friendly"
+                }
+              }
+            ]
           }
         }
       ]

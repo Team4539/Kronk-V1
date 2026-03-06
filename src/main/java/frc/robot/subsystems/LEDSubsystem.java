@@ -26,10 +26,9 @@ import frc.robot.util.Elastic.NotificationLevel;
  * Simple patterns that are easy to distinguish even through smoke/panels.
  * Only IDLE/DISABLED uses complex animations (robot is disabled, looks cool).
  * 
- * PHYSICAL LAYOUT (Y-spliced two-strip configuration):
- *   Indices 0-7:   Onboard LEDs (belly pan)
- *   Indices 8-45:  SHARED ZONE — visible on BOTH top and belly (38 LEDs)
- *   Indices 46-65: BELLY-ONLY ZONE — only on belly strip (20 LEDs)
+ * PHYSICAL LAYOUT (back strip only — belly strip disconnected):
+ *   Indices 0-7:   Onboard LEDs
+ *   Indices 8-45:  Back/top strip (38 LEDs)
  * 
  * STATE SUMMARY (each is instantly recognizable):
  *   DISABLED/IDLE  = Scrolling orange/blue blocks (clean, looks great in pits)

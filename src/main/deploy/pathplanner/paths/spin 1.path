@@ -3,29 +3,29 @@
   "waypoints": [
     {
       "anchor": {
-        "x": 3.0,
-        "y": 4.0
+        "x": 7.39052245959901,
+        "y": 5.551183765812923
       },
       "prevControl": null,
       "nextControl": {
-        "x": 3.25,
-        "y": 4.75
+        "x": 7.467352663943642,
+        "y": 4.6774123392607025
       },
       "isLocked": false,
-      "linkedName": "TrainingStop1"
+      "linkedName": "end of spin init spin"
     },
     {
       "anchor": {
-        "x": 3.5,
-        "y": 5.5
+        "x": 8.024276730721457,
+        "y": 4.136574343631142
       },
       "prevControl": {
-        "x": 3.25,
-        "y": 5.0
+        "x": 7.871279865733364,
+        "y": 5.001067025703295
       },
       "nextControl": null,
       "isLocked": false,
-      "linkedName": "TrainingStop2"
+      "linkedName": "end of spin 1"
     }
   ],
   "rotationTargets": [],
@@ -33,22 +33,22 @@
   "pointTowardsZones": [],
   "eventMarkers": [],
   "globalConstraints": {
-    "maxVelocity": 2.0,
-    "maxAcceleration": 2.0,
-    "maxAngularVelocity": 540.0,
+    "maxVelocity": 3.0,
+    "maxAcceleration": 3.0,
+    "maxAngularVelocity": 800.0,
     "maxAngularAcceleration": 720.0,
     "nominalVoltage": 12.0,
     "unlimited": false
   },
   "goalEndState": {
-    "velocity": 0,
-    "rotation": -30.0
+    "velocity": 5.0,
+    "rotation": 179.3689035367243
   },
   "reversed": false,
-  "folder": "Training",
+  "folder": "spinny",
   "idealStartingState": {
-    "velocity": 0,
-    "rotation": 0.0
+    "velocity": 5.0,
+    "rotation": -14.088665373298795
   },
-  "useDefaultConstraints": false
+  "useDefaultConstraints": true
 }

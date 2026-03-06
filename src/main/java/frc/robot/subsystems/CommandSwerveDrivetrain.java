@@ -373,7 +373,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         boolean isShuttleMode = gameState.isShuttleMode();
         
         var currentTarget = isShuttleMode ? 
-            getClosestTrench(currentPose, trenchRotating, trenchFixed) : hubPosition;
+            ((alliance == Alliance.Blue) ? Constants.Field.BLUE_SHUTTLE_TARGET : Constants.Field.RED_SHUTTLE_TARGET) : hubPosition;
         
         m_aimTargetObject.setPose(new Pose2d(currentTarget, Rotation2d.kZero));
         
