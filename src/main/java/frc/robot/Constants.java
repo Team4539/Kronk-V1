@@ -128,7 +128,7 @@ public final class Constants {
     // The table should be sorted by distance (smallest first).
     //
     public static final List<double[]> SHOOTING_CALIBRATION = new ArrayList<>() {{
-      add(new double[]{0.60, 2250}); add(new double[]{3.01, 3250}); add(new double[]{5.31, 4250});
+      add(new double[]{0.60, 2250}); add(new double[]{3.01, 3150}); add(new double[]{5.31, 4150});
       
     }};
   }
@@ -137,7 +137,7 @@ public final class Constants {
     public static final int MOTOR_ID = CANIds.TRIGGER_MOTOR;
     public static final boolean MOTOR_INVERTED = false;
     /** Idle RPM — slow feed to stage balls near the shooter */
-    public static final double IDLE_SPEED_RPM = 500.0;
+    public static final double IDLE_SPEED_RPM = 2250;
     /** Shoot RPM — full speed reverse to feed balls into shooter (negative = reverse) */
     public static final double SHOOT_SPEED_RPM = -3000.0;
   }
@@ -202,23 +202,6 @@ public final class Constants {
     public static final double FRONT_CAMERA_PITCH_DEG = 5.0;
     /** Yaw in degrees (0 = facing forward) */
     public static final double FRONT_CAMERA_YAW_DEG = 180;
-    
-    // === REAR CAMERA ===
-    // Mounted at the back, pointing backward and tilted up. Sees tags behind the robot.
-    public static final String REAR_CAMERA_NAME = "Arducam_OV9782_USB_Camera_Rear";
-    
-    // Rear camera mounting position relative to robot center (meters)
-    // TODO: Measure and update these values for the actual rear camera mount
-    /** Forward/backward from robot center (+ = forward, so rear is negative) */
-    public static final double REAR_CAMERA_X = -0.2032;
-    /** Left/right from robot center (+ = left) */
-    public static final double REAR_CAMERA_Y = 0.0;
-    /** Height from ground to camera lens */
-    public static final double REAR_CAMERA_Z = 0.30;
-    /** Pitch in degrees (+ = tilted up from horizontal) */
-    public static final double REAR_CAMERA_PITCH_DEG = 25.0;
-    /** Yaw in degrees (180 = facing backward) */
-    public static final double REAR_CAMERA_YAW_DEG = 180.0;
     
     // Vision measurement trust (standard deviations for pose estimator)
     // Lower = trust vision more, Higher = trust odometry more

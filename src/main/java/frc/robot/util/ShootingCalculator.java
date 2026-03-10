@@ -164,27 +164,41 @@ public class ShootingCalculator {
     // ========================================================================
 
     /**
-     * Linearly interpolates RPM from a distance-based calibration table.
+     * Linearly interpolates (or extrapolates) RPM from a distance-based calibration table.
      * 
      * Each calibration point stores {distanceMeters, shooterRPM}.
      * Table should be sorted by distance (smallest first).
      * 
-     * - Below the closest point: returns that point's RPM
-     * - Above the farthest point: returns that point's RPM
+     * - Below the closest point: extrapolates using the slope of the first two points
+     * - Above the farthest point: extrapolates using the slope of the last two points
      * - Between two points: linearly interpolates
+     * 
+     * Extrapolated RPM is clamped to a minimum of 0 to avoid negative values.
      * 
      * @param dist  Current distance to target (meters)
      * @param table List of {distanceMeters, shooterRPM}, sorted by distance
-     * @return Interpolated shooter RPM
+     * @return Interpolated (or extrapolated) shooter RPM
      */
     private double interpolateRPM(double dist, List<double[]> table) {
         if (table == null || table.isEmpty()) return 3000; // Fallback
         if (table.size() == 1) return table.get(0)[1];
 
-        // Below the closest calibration point
-        if (dist <= table.get(0)[0]) return table.get(0)[1];
-        // Above the farthest calibration point
-        if (dist >= table.get(table.size() - 1)[0]) return table.get(table.size() - 1)[1];
+        // Below the closest calibration point — extrapolate from first two points
+        if (dist <= table.get(0)[0]) {
+            double d0 = table.get(0)[0], rpm0 = table.get(0)[1];
+            double d1 = table.get(1)[0], rpm1 = table.get(1)[1];
+            double slope = (rpm1 - rpm0) / (d1 - d0);
+            return Math.max(0, rpm0 + slope * (dist - d0));
+        }
+
+        // Above the farthest calibration point — extrapolate from last two points
+        int last = table.size() - 1;
+        if (dist >= table.get(last)[0]) {
+            double d0 = table.get(last - 1)[0], rpm0 = table.get(last - 1)[1];
+            double d1 = table.get(last)[0],     rpm1 = table.get(last)[1];
+            double slope = (rpm1 - rpm0) / (d1 - d0);
+            return Math.max(0, rpm1 + slope * (dist - d1));
+        }
 
         // Find the two bracketing points and lerp
         for (int i = 0; i < table.size() - 1; i++) {

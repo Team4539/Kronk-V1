@@ -12,7 +12,6 @@ import org.photonvision.targeting.PhotonTrackedTarget;
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.apriltag.AprilTagFields;
 import edu.wpi.first.math.geometry.Pose2d;
-import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Transform3d;
@@ -28,17 +27,14 @@ import frc.robot.util.DashboardHelper;
 import frc.robot.util.DashboardHelper.Category;
 
 /**
- * Handles vision processing using TWO PhotonVision cameras for pose estimation.
+ * Handles vision processing using a single PhotonVision front camera for pose estimation.
  * 
  * CAMERA LAYOUT:
  *   - FRONT camera: mounted up top, pointing forward — sees scoring-side tags
- *   - REAR camera:  mounted at the back, pointing backward & tilted up — sees tags behind
  * 
- * Both cameras contribute AprilTag pose estimates that are fused into the
- * drivetrain's pose estimator. Each cycle, both cameras are polled independently.
- * The "best" result (preferring multi-tag, then lowest ambiguity) is used as
- * the subsystem's canonical pose for aiming calculations, while BOTH cameras'
- * estimates are fed to the drivetrain for fusion.
+ * The camera provides AprilTag pose estimates that are fused into the
+ * drivetrain's pose estimator. Each cycle, the camera is polled and its
+ * result is used as the subsystem's canonical pose for aiming calculations.
  */
 public class VisionSubsystem extends SubsystemBase {
 
@@ -225,9 +221,8 @@ public class VisionSubsystem extends SubsystemBase {
 
     private final AprilTagFieldLayout fieldLayout;
 
-    // Two camera modules
+    // Camera module
     private final CameraModule frontCam;
-    private final CameraModule rearCam;
 
     // Merged "best" pose (used for aiming, distance, etc.)
     private Pose2d robotPose = new Pose2d();
@@ -275,27 +270,10 @@ public class VisionSubsystem extends SubsystemBase {
             frontTransform,
             fieldLayout);
 
-        // --- Rear camera ---
-        Transform3d rearTransform = new Transform3d(
-            new Translation3d(
-                Constants.Vision.REAR_CAMERA_X,
-                Constants.Vision.REAR_CAMERA_Y,
-                Constants.Vision.REAR_CAMERA_Z),
-            new Rotation3d(
-                0.0,
-                Math.toRadians(Constants.Vision.REAR_CAMERA_PITCH_DEG),
-                Math.toRadians(Constants.Vision.REAR_CAMERA_YAW_DEG)));
-
-        rearCam = new CameraModule(
-            "Rear",
-            new PhotonCamera(Constants.Vision.REAR_CAMERA_NAME),
-            rearTransform,
-            fieldLayout);
-
         initializeTunableValues();
 
-        System.out.println("[VisionSubsystem] Dual-camera init - Front: "
-            + Constants.Vision.FRONT_CAMERA_NAME + ", Rear: " + Constants.Vision.REAR_CAMERA_NAME);
+        System.out.println("[VisionSubsystem] Single-camera init - Front: "
+            + Constants.Vision.FRONT_CAMERA_NAME);
     }
 
     private void initializeTunableValues() {
@@ -309,19 +287,14 @@ public class VisionSubsystem extends SubsystemBase {
     // DIAGNOSTIC
     // =========================================================================
 
-    /** Check if at least one camera is connected. */
+    /** Check if the camera is connected. */
     public boolean isHealthy() {
-        return frontCam.isConnected() || rearCam.isConnected();
+        return frontCam.isConnected();
     }
 
     /** Check if the front camera is connected. */
     public boolean isFrontCameraConnected() {
         return frontCam.isConnected();
-    }
-
-    /** Check if the rear camera is connected. */
-    public boolean isRearCameraConnected() {
-        return rearCam.isConnected();
     }
 
     // =========================================================================
@@ -359,9 +332,6 @@ public class VisionSubsystem extends SubsystemBase {
     /** Whether the FRONT camera produced a valid pose this cycle. */
     public boolean hasFrontPose() { return frontCam.hasPose; }
 
-    /** Whether the REAR camera produced a valid pose this cycle. */
-    public boolean hasRearPose() { return rearCam.hasPose; }
-
     /** Front camera pose (only valid if hasFrontPose()). */
     public Pose2d getFrontPose() { return frontCam.pose; }
     /** Front camera timestamp. */
@@ -371,21 +341,12 @@ public class VisionSubsystem extends SubsystemBase {
     /** Front camera target count. */
     public int getFrontTargetCount() { return frontCam.targetCount; }
 
-    /** Rear camera pose (only valid if hasRearPose()). */
-    public Pose2d getRearPose() { return rearCam.pose; }
-    /** Rear camera timestamp. */
-    public double getRearTimestamp() { return rearCam.timestamp; }
-    /** Rear camera multi-tag? */
-    public boolean isRearMultiTag() { return rearCam.isMultiTag; }
-    /** Rear camera target count. */
-    public int getRearTargetCount() { return rearCam.targetCount; }
-
     public void setDrivetrainPose(Pose2d pose) {
         this.drivetrainPose = pose;
     }
 
     /**
-     * Feed the robot's gyro heading to BOTH pose estimators.
+     * Feed the robot's gyro heading to the pose estimator.
      */
     public void setRobotOrientation(double yawDegrees, double yawRate,
                                      double pitchDegrees, double pitchRate,
@@ -393,7 +354,6 @@ public class VisionSubsystem extends SubsystemBase {
         double now = Timer.getFPGATimestamp();
         Rotation2d heading = Rotation2d.fromDegrees(yawDegrees);
         frontCam.addHeadingData(now, heading);
-        rearCam.addHeadingData(now, heading);
     }
 
     public void notifyHeadingSeeded() {
@@ -562,55 +522,28 @@ public class VisionSubsystem extends SubsystemBase {
     @Override
     public void periodic() {
         frontCam.update(headingSeeded);
-        rearCam.update(headingSeeded);
-        mergeBestResult();
+        updateFromCamera();
         publishTelemetry();
     }
 
     /**
-     * Selects the "best" result across both cameras for the subsystem's
-     * canonical pose, target info, etc. Both cameras' individual poses
-     * remain accessible via hasFrontPose()/hasRearPose() for drivetrain fusion.
+     * Updates the subsystem's canonical pose from the front camera result.
      */
-    private void mergeBestResult() {
-        CameraModule best = null;
-
-        boolean frontValid = frontCam.hasPose;
-        boolean rearValid = rearCam.hasPose;
-
-        if (frontValid && rearValid) {
-            // Both have poses — prefer multi-tag, then more tags, then lower ambiguity
-            if (frontCam.isMultiTag && !rearCam.isMultiTag) {
-                best = frontCam;
-            } else if (rearCam.isMultiTag && !frontCam.isMultiTag) {
-                best = rearCam;
-            } else if (frontCam.targetCount != rearCam.targetCount) {
-                best = (frontCam.targetCount > rearCam.targetCount) ? frontCam : rearCam;
-            } else {
-                best = (frontCam.bestAmbiguity <= rearCam.bestAmbiguity) ? frontCam : rearCam;
-            }
-        } else if (frontValid) {
-            best = frontCam;
-        } else if (rearValid) {
-            best = rearCam;
-        }
-
-        if (best != null) {
-            robotPose = best.pose;
-            poseTimestamp = best.timestamp;
+    private void updateFromCamera() {
+        if (frontCam.hasPose) {
+            robotPose = frontCam.pose;
+            poseTimestamp = frontCam.timestamp;
             hasPose = true;
             hasTargetInView = true;
-            bestTargetId = best.bestTargetId;
-            horizontalOffset = best.horizontalOffset;
-            targetArea = best.targetArea;
-            // Combined target count across both cameras when both see tags
-            targetCount = best.targetCount
-                + (frontValid && rearValid ? (best == frontCam ? rearCam.targetCount : frontCam.targetCount) : 0);
-            bestTargetAmbiguity = best.bestAmbiguity;
-            isMultiTagEstimate = best.isMultiTag;
+            bestTargetId = frontCam.bestTargetId;
+            horizontalOffset = frontCam.horizontalOffset;
+            targetArea = frontCam.targetArea;
+            targetCount = frontCam.targetCount;
+            bestTargetAmbiguity = frontCam.bestAmbiguity;
+            isMultiTagEstimate = frontCam.isMultiTag;
         } else {
             hasPose = false;
-            hasTargetInView = frontCam.hasTarget || rearCam.hasTarget;
+            hasTargetInView = frontCam.hasTarget;
             bestTargetId = -1;
             horizontalOffset = 0.0;
             targetArea = 0.0;
@@ -646,7 +579,6 @@ public class VisionSubsystem extends SubsystemBase {
         DashboardHelper.putBoolean(Category.MATCH, "Vision/HasTarget", hasTarget());
         DashboardHelper.putBoolean(Category.MATCH, "Vision/HasPose", hasPoseEstimate());
         DashboardHelper.putBoolean(Category.MATCH, "Vision/FrontConnected", frontCam.isConnected());
-        DashboardHelper.putBoolean(Category.MATCH, "Vision/RearConnected", rearCam.isConnected());
 
         // Pose source summary
         String poseSource;
@@ -654,11 +586,7 @@ public class VisionSubsystem extends SubsystemBase {
             StringBuilder sb = new StringBuilder();
             if (frontCam.hasPose) {
                 sb.append("F:").append(frontCam.poseMethod)
-                  .append("(").append(frontCam.targetCount).append("t) ");
-            }
-            if (rearCam.hasPose) {
-                sb.append("R:").append(rearCam.poseMethod)
-                  .append("(").append(rearCam.targetCount).append("t)");
+                  .append("(").append(frontCam.targetCount).append("t)");
             }
             poseSource = sb.toString().trim();
         } else if (useDrivetrainFallback) {
@@ -683,21 +611,8 @@ public class VisionSubsystem extends SubsystemBase {
             DashboardHelper.putBoolean(Category.DEBUG, "Vision/Front/HasPose", frontCam.hasPose);
             DashboardHelper.putNumber(Category.DEBUG, "Vision/Front/Errors", frontCam.consecutiveErrors);
 
-            DashboardHelper.putString(Category.DEBUG, "Vision/Rear/Method", rearCam.poseMethod);
-            DashboardHelper.putNumber(Category.DEBUG, "Vision/Rear/Tags", rearCam.targetCount);
-            DashboardHelper.putBoolean(Category.DEBUG, "Vision/Rear/HasPose", rearCam.hasPose);
-            DashboardHelper.putNumber(Category.DEBUG, "Vision/Rear/Errors", rearCam.consecutiveErrors);
-
-            // Camera health summary: show which cameras are active
-            int activeCameras = (frontCam.isConnected() ? 1 : 0) + (rearCam.isConnected() ? 1 : 0);
-            String healthStatus;
-            if (activeCameras == 2) {
-                healthStatus = "OK (2 cameras)";
-            } else if (activeCameras == 1) {
-                healthStatus = "DEGRADED (" + (frontCam.isConnected() ? "Front" : "Rear") + " only)";
-            } else {
-                healthStatus = "NO CAMERAS";
-            }
+            // Camera health summary
+            String healthStatus = frontCam.isConnected() ? "OK" : "NO CAMERA";
             DashboardHelper.putString(Category.MATCH, "Vision/CameraHealth", healthStatus);
 
             if (hasPose) {

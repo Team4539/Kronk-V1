@@ -3,35 +3,42 @@
   "waypoints": [
     {
       "anchor": {
-        "x": 7.39052245959901,
-        "y": 5.551183765812923
+        "x": 3.580826962430713,
+        "y": 4.0234691727329315
       },
       "prevControl": null,
       "nextControl": {
-        "x": 7.467352663943642,
-        "y": 4.6774123392607025
+        "x": 3.186969200616319,
+        "y": 4.028270783226083
       },
       "isLocked": false,
-      "linkedName": "end of spin init spin"
+      "linkedName": null
     },
     {
       "anchor": {
-        "x": 8.024276730721457,
-        "y": 4.136574343631142
+        "x": 1.5230611220883659,
+        "y": 4.0234691727329315
       },
       "prevControl": {
-        "x": 7.871279865733364,
-        "y": 5.001067025703295
+        "x": 2.408791346498565,
+        "y": 4.015879528626871
       },
       "nextControl": null,
       "isLocked": false,
-      "linkedName": "end of spin 1"
+      "linkedName": null
     }
   ],
   "rotationTargets": [],
   "constraintZones": [],
   "pointTowardsZones": [],
-  "eventMarkers": [],
+  "eventMarkers": [
+    {
+      "name": "deployIntake",
+      "waypointRelativePos": 0.6196671561680094,
+      "endWaypointRelativePos": null,
+      "command": null
+    }
+  ],
   "globalConstraints": {
     "maxVelocity": 3.0,
     "maxAcceleration": 3.0,
@@ -41,14 +48,14 @@
     "unlimited": false
   },
   "goalEndState": {
-    "velocity": 5.0,
-    "rotation": 179.3689035367243
+    "velocity": 0,
+    "rotation": 180.0
   },
   "reversed": false,
-  "folder": null,
+  "folder": "Center shoot",
   "idealStartingState": {
-    "velocity": 5.0,
-    "rotation": -14.088665373298795
+    "velocity": 0,
+    "rotation": 180.0
   },
   "useDefaultConstraints": true
 }

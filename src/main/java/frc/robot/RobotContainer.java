@@ -247,16 +247,10 @@ public class RobotContainer {
                 if (leds != null) leds.clearAction();
             });
 
-            // Deploy intake alongside spool so it's ready to feed
-            if (intake != null) {
-                Command intakeDeployCmd = Commands.startEnd(
-                        () -> intake.deploy(),
-                        () -> intake.stopAndRetract(),
-                        intake);
-                driver.leftTrigger(0.5).whileTrue(spoolCmd.alongWith(intakeDeployCmd));
-            } else {
+            
+            
                 driver.leftTrigger(0.5).whileTrue(spoolCmd);
-            }
+            
         }
 
         // LB: Auto-shoot (hold) — also jiggles intake to keep balls feeding
@@ -269,8 +263,14 @@ public class RobotContainer {
                 fullCmd = fullCmd.alongWith(new IntakeJiggleCommand(intake));
             }
             // Auto-aim: rotate toward target while driver controls translation
+            // BRAKE LOCK: When shooter ready + aimed, lock wheels unless driver is driving
             if (drivetrain != null) {
                 Command aimCmd = drivetrain.applyRequest(() -> {
+                    // Brake lock while shooting if ready + aimed + not trying to drive
+                    boolean aimed = Math.abs(shootingCalc.getAngleToTarget()) < Constants.Driver.AIM_TOLERANCE_DEG;
+                    if (shooter.isReady() && aimed && !isDriverCommanding()) {
+                        return brake;
+                    }
                     double slow = driver.getRightTriggerAxis() > 0.3
                             ? Constants.Driver.SLOW_MODE_MULTIPLIER : 1.0;
                     double vx = -driver.getLeftY() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
@@ -387,6 +387,12 @@ public class RobotContainer {
                 // On-the-fly auto-aim: LT held → auto-rotate toward target
                 boolean autoAim = driver.getLeftTriggerAxis() > 0.5;
                 if (autoAim) {
+                    // BRAKE LOCK: When shooter is spun up and robot is aimed at the target,
+                    // lock wheels in X-pattern to resist defense — unless driver is driving.
+                    boolean aimed = Math.abs(shootingCalc.getAngleToTarget()) < Constants.Driver.AIM_TOLERANCE_DEG;
+                    if (shooter != null && shooter.isReady() && aimed && !isDriverCommanding()) {
+                        return brake;
+                    }
                     double omega = aimOmega(shootingCalc.getAngleToTarget());
                     // Use aimFieldCentric (no rotational deadband) for precise auto-aim
                     return aimFieldCentric.withVelocityX(vx).withVelocityY(vy)
@@ -531,15 +537,10 @@ public class RobotContainer {
             }
         }
 
-        // --- Fuse EACH camera's pose independently into drivetrain odometry ---
-        // This gives the Kalman filter two measurements per cycle when both cameras see tags.
+        // --- Fuse front camera's pose into drivetrain odometry ---
         if (vision.hasFrontPose()) {
             fuseCamera(vision.getFrontPose(), vision.getFrontTimestamp(),
                        vision.isFrontMultiTag(), vision.getFrontTargetCount());
-        }
-        if (vision.hasRearPose()) {
-            fuseCamera(vision.getRearPose(), vision.getRearTimestamp(),
-                       vision.isRearMultiTag(), vision.getRearTargetCount());
         }
     }
 
@@ -601,6 +602,17 @@ public class RobotContainer {
 
     private Command ledClear() {
         return Commands.runOnce(() -> { if (leds != null) leds.clearAction(); });
+    }
+
+    /**
+     * Returns true when the driver is commanding significant translation (left stick).
+     * Used to release swerve brake lock during shooting — if the driver pushes a stick
+     * they can escape defense even while the brake-on-aim feature is active.
+     */
+    private boolean isDriverCommanding() {
+        double deadband = Constants.Driver.STICK_DEADBAND;
+        return Math.abs(driver.getLeftY()) > deadband
+            || Math.abs(driver.getLeftX()) > deadband;
     }
 
     /** Previous aim error in radians — used for D term to damp oscillation */
