@@ -53,8 +53,8 @@ public class Robot extends TimedRobot {
     // Each subsystem's periodic() also sends zero power when disabled,
     // but this ensures an immediate stop at the transition.
     m_robotContainer.stopAllMotors();
-    // Clear E-stop state so it doesn't persist across enable/disable cycles
-    m_robotContainer.clearEStop();
+    // Clear defensive mode so it doesn't persist across enable/disable cycles
+    m_robotContainer.clearDefensiveMode();
     
     // During the auto→teleop transition (~3 seconds), we want the red/blue
     // cycling pattern to continue. Only switch to DISABLED if we weren't in
@@ -79,8 +79,8 @@ public class Robot extends TimedRobot {
 
   @Override
   public void autonomousInit() {
-    // Clear E-stop on mode transition so robot can operate
-    m_robotContainer.clearEStop();
+    // Clear defensive mode on mode transition
+    m_robotContainer.clearDefensiveMode();
     
     m_autonomousCommand = m_robotContainer.getAutonomousCommand();
     setLEDState(LEDState.AUTO);
@@ -99,8 +99,8 @@ public class Robot extends TimedRobot {
 
   @Override
   public void teleopInit() {
-    // Clear E-stop on mode transition so robot can operate
-    m_robotContainer.clearEStop();
+    // Clear defensive mode on mode transition
+    m_robotContainer.clearDefensiveMode();
     
     if (m_autonomousCommand != null) {
       m_autonomousCommand.cancel();

@@ -31,8 +31,8 @@ The shooting system runs entirely on the roboRIO with no external dependencies:
 Since there is **no turret**, aiming is done by rotating the entire robot:
 - `ShootingCalculator.getAngleToTarget()` returns how far off the robot heading is from the target
 - `ShootingCalculator.getTargetRPM()` returns the interpolated RPM for the current distance
-- **RPM interpolation**: `List<double[]>` stores calibration points as `{distanceMeters, shooterRPM}`, linearly interpolated between the two nearest distance points
-- **Auto-aim**: Integrated into the **default drive command** — when LT > 0.5, the right-stick rotation is replaced by a P controller (`aimOmega()`) that rotates the robot toward the target. Uses `aimFieldCentric` (separate from `fieldCentric`, no rotational deadband). Output is clamped to `MAX_ANGULAR_SPEED_RAD`. `AIM_DIRECTION` constant flips sign if Pigeon mount is inverted.
+- **RPM interpolation**: `List<double[]>` stores calibration points as `{distanceMeters, shooterRPM}`, linearly interpolated between the two nearest distance points. Extrapolates linearly beyond calibration range using the slope of the nearest two points.
+- **Auto-aim**: Integrated into the **default drive command** — when LT > 0.5, the right-stick rotation is replaced by a PD controller (`aimOmega()`) that rotates the robot toward the target. Uses `aimFieldCentric` (separate from `fieldCentric`, no rotational deadband). Has a slow-approach zone near the target for smooth deceleration. Output is clamped to `MAX_ANGULAR_SPEED_RAD`. `AIM_DIRECTION` constant flips sign if Pigeon mount is inverted.
 
 ### Command Architecture
 
@@ -49,10 +49,10 @@ All controls on one controller (port 0):
 | Left Stick | Drive X/Y (translation) |
 | Right Stick X | Rotation (manual; overridden by auto-aim when LT held) |
 | RT | Slow mode (proportional) |
-| LT | Auto-aim + pre-spool shooter (hold) |
+| LT | Auto-aim + pre-spool shooter + deploy intake (hold) |
 | RB | Intake deploy (hold) / retract (release) |
 | LB | Auto-shoot + auto-aim + jiggle (hold to shoot) |
-| A | E-stop all motors |
+| A | Defensive brake mode toggle (X-brake unless driving) |
 | B | Force shoot toggle |
 | X | Shuttle mode toggle |
 | Y | Reset gyro |
@@ -70,6 +70,17 @@ All controls on one controller (port 0):
 - **Active alliance windows**: Only your alliance can score during designated 25-second shifts
 
 **Critical**: All pose-based aiming auto-adjusts for Red alliance (field coordinates are mirrored).
+
+### LED System
+
+`LEDSubsystem` uses CTRE CANdle (8 onboard + 38 strip LEDs) with a priority-based pattern dispatch. Patterns are updated at ~10Hz (50Hz during game data announcement for crisp strobes).
+
+**Key patterns**:
+- **Progressive Chase**: Dot with growing tail — used for all TELEOP states. Urgency (0→1) controls tail length (5 LEDs → full strip), speed (0.4→2.0 strip/sec), and tail floor brightness.
+- **Game Data Announcement**: 3-second excessive celebration when FMS sends who goes first. "WE GO FIRST" = alliance strobe + scanner explosion. "They go first" = their color flash → fade to ours.
+- **E-Stop**: Excessive dual red scanner + white strobe + alternating onboard LEDs.
+
+**Priority order**: Brownout > E-Stop > Game Data > Firing > Ready > Spooling > Intaking > Force Shoot > Defensive > Match phase patterns.
 
 ### Calibration System
 
@@ -171,7 +182,8 @@ Use `DashboardHelper.Category` enum to organize SmartDashboard entries:
 | `AutoShootCommand.java` | Full shooting sequence with alliance window checks |
 | `CommandSwerveDrivetrain.java` | Phoenix 6 swerve + PathPlanner integration + field visualization |
 | `Constants.java` | All tunable values, subsystem enable flags, shooting calibration tables |
-| `VisionSubsystem.java` | PhotonVision camera, AprilTag pose estimation |
+| `VisionSubsystem.java` | PhotonVision single front camera, AprilTag pose estimation |
+| `LEDSubsystem.java` | CANdle LED state machine with priority-based pattern dispatch |
 
 ## Common Tasks
 

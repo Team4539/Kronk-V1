@@ -128,7 +128,7 @@ public final class Constants {
     // The table should be sorted by distance (smallest first).
     //
     public static final List<double[]> SHOOTING_CALIBRATION = new ArrayList<>() {{
-      add(new double[]{0.60, 2250}); add(new double[]{3.01, 3150}); add(new double[]{5.31, 4150});
+      add(new double[]{0.60, 2250}); add(new double[]{3.01, 3175}); add(new double[]{5.31, 4175});
       
     }};
   }
@@ -148,14 +148,14 @@ public final class Constants {
     public static final int CANCODER_ID = CANIds.INTAKE_CANCODER;
     public static final boolean PIVOT_MOTOR_INVERTED = true;
     public static final boolean ROLLER_MOTOR_INVERTED = true;
-    public static final double CANCODER_OFFSET_DEG = -100.107;
+    public static final double CANCODER_OFFSET_DEG = 0;
     public static final double PIVOT_GEAR_RATIO = 81.0;
   
     // Pivot limits
-    public static final double MIN_PIVOT_ANGLE_DEG = 59.7;
-    public static final double MAX_PIVOT_ANGLE_DEG = 160.0;
+    public static final double MIN_PIVOT_ANGLE_DEG = 95.4;  // cancoder got moved old value 59.7
+    public static final double MAX_PIVOT_ANGLE_DEG = 202.7;
     public static final double RETRACTED_ANGLE_DEG = 63.7;
-    public static final double DEPLOYED_ANGLE_DEG = 160.0;  // Must be <= MAX_PIVOT_ANGLE_DEG
+    public static final double DEPLOYED_ANGLE_DEG = 208.7;  // Must be <= MAX_PIVOT_ANGLE_DEG
     public static final double IDLE_ANGLE_DEG =  60.0;
     public static final double HALF_SHOOT_ANGLE_DEG = 90.0;
     // Tolerance for "at target" check (degrees)
@@ -232,7 +232,7 @@ public final class Constants {
     /** When error is within this zone (degrees), KP ramps down for a smooth approach */
     public static final double AIM_SLOW_ZONE_DEG = 0.0;
     /** Angle tolerance in degrees — "aimed" when error is within this */
-    public static final double AIM_TOLERANCE_DEG = 1;
+    public static final double AIM_TOLERANCE_DEG = .25;
     /** 
      * Sign multiplier for auto-aim rotation direction.
      * +1.0 = normal (positive angleToTarget → CCW rotation)

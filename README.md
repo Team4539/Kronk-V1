@@ -41,12 +41,12 @@ All controls are on a single Xbox controller (port 0):
 | Input | Function |
 |-------|----------|
 | Left Stick | Drive translation (X/Y) |
-| Right Stick X | Drive rotation |
+| Right Stick X | Drive rotation (overridden by auto-aim when LT held) |
 | RT | Slow mode (proportional) |
-| LT | Auto-shoot (hold) |
+| LT | Auto-aim + pre-spool shooter + deploy intake (hold) |
 | RB | Intake deploy (hold) / retract (release) |
-| LB | Pre-spool shooter (hold) |
-| A | E-stop all motors |
+| LB | Auto-shoot + auto-aim + jiggle (hold to shoot) |
+| A | Defensive brake mode toggle (X-brake unless driving) |
 | B | Force shoot toggle |
 | X | Shuttle mode toggle |
 | Y | Reset gyro |
@@ -59,12 +59,44 @@ All controls are on a single Xbox controller (port 0):
 
 The shooting system runs entirely on the roboRIO:
 
-1. **PhotonVision** provides field-relative robot pose via AprilTag detection
+1. **PhotonVision** provides field-relative robot pose via AprilTag detection (single front camera)
 2. **ShootingCalculator** computes distance to target, angle offset, and flywheel RPM
-3. RPM is interpolated from a pose-based calibration table using inverse-distance weighting
-4. Since there is no turret, the **driver rotates the entire robot** to aim
+3. RPM is linearly interpolated (and extrapolated) from a distance-based calibration table
+4. Since there is no turret, the **robot auto-rotates** to aim when the driver holds LT (PD controller on heading error)
 
 See [CALIBRATION_GUIDE.md](CALIBRATION_GUIDE.md) for the shooting calibration workflow.
+
+## LED System
+
+CTRE CANdle drives 8 onboard LEDs + 38 strip LEDs with a priority-based pattern dispatch:
+
+| Priority | Pattern | Trigger |
+|----------|---------|---------|
+| 1 | Dim amber flicker | Battery brownout (< 7V) |
+| 2 | Excessive red scanner + strobe | FMS/DS E-stop |
+| 3 | Alliance color announcement (3s) | Game data received (who goes first) |
+| 4 | Fast white strobe | Actively firing |
+| 5 | Solid bright green | Shooter ready (pull trigger!) |
+| 6 | Orange breathing | Shooter spooling up |
+| 7 | Solid yellow-green | Intake running |
+| 8 | Purple breathing | Force shoot enabled |
+| 9 | Pulsing amber/gold | Defensive brake mode |
+| 10 | Phase-based patterns | See below |
+
+**Teleop uses a progressive chase pattern** — a dot races along the strip with a growing tail:
+- **Our shift active**: Alliance color chase; tail fills as our shift time runs out
+- **Waiting for our shift**: Other alliance's color, blends to ours in last 5 seconds
+- **Endgame** (last 30s): Alliance chase starting at 50% urgency, ramps to full solid
+
+**Other phase patterns**: Disabled = scrolling orange/blue blocks, Auto = red/blue half-and-half cycling, Match End = victory sparkle celebration.
+
+## Game State
+
+The game uses alternating 25-second alliance scoring shifts. `GameStateManager` tracks:
+- **Alliance color** from FMS for field-flipped coordinates
+- **Game phases**: AUTO → TRANSITION → SHIFT_1-4 → END_GAME → POST_MATCH
+- **Scoring windows**: Only your alliance can score during designated shifts
+- **Game data announcement**: When FMS sends who goes first, the robot announces it via LEDs before the drivers may even see the field display
 
 ## Autonomous
 

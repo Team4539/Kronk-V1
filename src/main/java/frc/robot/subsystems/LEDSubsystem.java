@@ -20,7 +20,7 @@ import frc.robot.util.Elastic;
 import frc.robot.util.Elastic.NotificationLevel;
 
 /**
- * LED subsystem using CTRE CANdle — SIMPLIFIED for clarity.
+ * LED subsystem using CTRE CANdle with priority-based pattern dispatch.
  * 
  * DESIGN PHILOSOPHY: Every state looks completely different at a glance.
  * Simple patterns that are easy to distinguish even through smoke/panels.
@@ -30,20 +30,29 @@ import frc.robot.util.Elastic.NotificationLevel;
  *   Indices 0-7:   Onboard LEDs
  *   Indices 8-45:  Back/top strip (38 LEDs)
  * 
- * STATE SUMMARY (each is instantly recognizable):
- *   DISABLED/IDLE  = Scrolling orange/blue blocks (clean, looks great in pits)
+ * PATTERN SUMMARY (each is instantly recognizable):
+ *   DISABLED/IDLE  = Scrolling orange/blue blocks with gentle breathing
  *   AUTO/TRANSITION = Half red, half blue cycling back and forth (2 Hz)
- *   TELEOP         = Alliance color flowing comet (speeds up as shift ends)
- *   SPOOLING       = Orange breathing pulse ("warming up")
+ *   TELEOP ACTIVE  = Alliance color progressive chase (tail fills as shift ends)
+ *   TELEOP WAITING = Other alliance color chase, blends to ours in last 5s
+ *   ENDGAME        = Alliance color chase starting at 50% urgency, ramps to full
+ *   BROWNOUT       = Dim amber flicker (safety — highest priority)
+ *   E-STOP         = EXCESSIVE dual red scanner + strobe + alternating onboard
+ *   GAME DATA      = Announcement when FMS sends who goes first (3s, runs at 50Hz)
+ *   FIRING         = Fast white strobe (15 Hz)
  *   READY TO SHOOT = Solid bright GREEN ("PULL THE TRIGGER!")
- *   FIRING         = Fast white strobe ("balls are flying!")
+ *   SPOOLING       = Orange breathing pulse ("warming up")
  *   INTAKING       = Solid yellow-green
- *   E-STOP         = Red scanner sweep + pulse (dramatic, robot is disabled)
- *   ENDGAME        = Half red, half blue fast cycling (5 Hz — urgent transition look)
- *   HEAD BACK      = Breathing white/alliance ("get to position")
- *   GREEN LIGHT    = Fast cyan/white strobe ("GO GO GO!")
- *   BROWNOUT       = Dim amber flicker
- *   MATCH END      = Victory gold/team color celebration
+ *   FORCE SHOOT    = Purple breathing (force shoot override active)
+ *   DEFENSIVE      = Pulsing amber/gold (brake mode active)
+ *   MATCH END      = Victory gold/team color sparkle celebration
+ * 
+ * PROGRESSIVE CHASE: A dot races along the strip with a growing tail.
+ * As urgency increases (0→1), the tail grows from ~5 LEDs to the full strip,
+ * speed ramps from 0.4 to 2.0 strip/sec, and tail floor brightness rises.
+ * At max urgency the strip is effectively solid color. Used for all TELEOP
+ * states (active shift, waiting, endgame) with different colors and urgency
+ * sources to create a unified visual language.
  */
 public class LEDSubsystem extends SubsystemBase {
     
@@ -83,6 +92,12 @@ public class LEDSubsystem extends SubsystemBase {
     private boolean hasNotifiedEStop = false;
     private boolean hasNotifiedEndgame = false;
     
+    // Game data announcement
+    private boolean announcementActive = false;
+    private double announcementStartTime = 0;
+    private boolean announcementWeGoFirst = false;
+    private static final double ANNOUNCEMENT_DURATION = 3.0; // seconds
+    
     // CAN frame deduplication
     private int lastSentR = -1, lastSentG = -1, lastSentB = -1;
     
@@ -96,15 +111,16 @@ public class LEDSubsystem extends SubsystemBase {
     
     /**
      * LED states for robot operation phases.
+     * TELEOP handles endgame internally via GamePhase — no separate ENDGAME state needed.
      */
     public enum LEDState {
-        BOOT_WARMUP,    // Team colors animation while CANdle warms up
-        DISABLED,       // Scrolling orange/blue blocks (clean, pits)
-        AUTO,           // Red/blue half-and-half cycling
-        TELEOP,         // Alliance color flow (accelerates as shift ends)
-        ENDGAME,        // Red/blue fast cycle (like transition but urgent)
-        MATCH_END,      // Victory celebration
-        BROWNOUT        // Dim amber
+        BOOT_WARMUP,    // Team colors aurora while CANdle warms up
+        DISABLED,       // Scrolling orange/blue blocks (pits / pre-match)
+        AUTO,           // Red/blue half-and-half cycling (2 Hz)
+        TELEOP,         // Progressive chase — color and urgency vary by shift/endgame
+        ENDGAME,        // (Unused — endgame handled inside TELEOP via GamePhase.END_GAME)
+        MATCH_END,      // Victory gold/team color sparkle celebration
+        BROWNOUT        // Dim amber flicker
     }
     
     /**
@@ -112,13 +128,14 @@ public class LEDSubsystem extends SubsystemBase {
      * Higher-priority actions override lower ones in the pattern dispatch.
      */
     public enum ActionState {
-        IDLE,       // No special action — show base state pattern
-        FIRING,     // Actively feeding balls — fast white strobe
-        SHOOTING,   // Ready to shoot (spun up + aimed) — solid bright GREEN
-        SPOOLING,   // Spinning up — orange breathing
-        INTAKING,   // Running intake — solid yellow-green
-        ESTOP,      // Emergency stop — red scanner sweep (dramatic, robot disabled)
-        BROWNOUT    // Low voltage — amber flicker
+        IDLE,        // No special action — show base state pattern
+        FIRING,      // Actively feeding balls — fast white strobe
+        SHOOTING,    // Ready to shoot (spun up + aimed) — solid bright GREEN
+        SPOOLING,    // Spinning up — orange breathing
+        INTAKING,    // Running intake — solid yellow-green
+        DEFENSIVE,   // Defensive brake mode — pulsing amber/gold
+        FORCE_SHOOT, // Force shoot enabled — purple breathing
+        BROWNOUT     // Low voltage — amber flicker
     }
     
     // =========================================================================
@@ -285,14 +302,6 @@ public class LEDSubsystem extends SubsystemBase {
         setSolidColor(isOn ? color : Constants.LEDs.OFF);
     }
     
-    /**
-     * Two-color alternating strobe at given Hz.
-     */
-    private void setTwoColorStrobe(int[] color1, int[] color2, double hz) {
-        boolean showFirst = ((int)(Timer.getFPGATimestamp() * hz) % 2) == 0;
-        setSolidColor(showFirst ? color1 : color2);
-    }
-    
     // =========================================================================
     // PATTERN: AUTO / TRANSITION — Red/Blue half-and-half cycling
     // =========================================================================
@@ -457,58 +466,81 @@ public class LEDSubsystem extends SubsystemBase {
     }
     
     // =========================================================================
-    // PATTERN: E-STOP — Dramatic red scanner + pulse (robot is disabled)
+    // PATTERN: E-STOP — EXCESSIVE dramatic red scanner + strobe + pulse
     // =========================================================================
     
     /**
-     * Dramatic e-stop pattern. Since the robot is disabled anyway, we can make
-     * this look cool: a red scanner/larson sweep with a pulsing background.
-     * Clearly communicates "something is wrong" while looking intentional.
+     * Over-the-top e-stop pattern. Red scanner sweep with a fast strobe overlay,
+     * pulsing background, and alternating red/white flashes on the onboard LEDs.
+     * This should scream "SOMETHING IS VERY WRONG" from across the field.
      */
     private void setEStopPattern() {
         double currentTime = Timer.getFPGATimestamp();
         int stripStart = Constants.LEDs.STRIP_START;
         int stripCount = Constants.LEDs.STRIP_COUNT;
         int[] red = Constants.LEDs.ESTOP_COLOR;
+        int[] white = Constants.LEDs.WHITE;
+        int[] hotCore = Constants.LEDs.ESTOP_CORE;
         
-        // Background: slow dim red pulse so it never looks "off"
-        double bgPulse = 0.05 + 0.10 * ((Math.sin(currentTime * 3.0) + 1) / 2);
+        // Fast strobe overlay — entire strip flashes red/white at 8 Hz
+        boolean strobeOn = ((int)(currentTime * 8.0) % 2) == 0;
+        
+        // Background: aggressive red pulse (never fully off)
+        double bgPulse = 0.10 + 0.25 * ((Math.sin(currentTime * 5.0) + 1) / 2);
         int[] dimRed = scaleColor(red, bgPulse);
         
-        // Scanner position: bounces back and forth at ~1.5 Hz
-        double scanPhase = (currentTime * 1.5) % 1.0;
-        double scanPos = scanPhase < 0.5 ? (scanPhase * 2.0) : (1.0 - (scanPhase - 0.5) * 2.0);
-        double headIndex = scanPos * (stripCount - 1);
-        int scanWidth = Math.max(3, stripCount / 8); // ~12% of strip
+        // Scanner: TWO heads bouncing in opposite directions at ~2 Hz
+        double scanPhase1 = (currentTime * 2.0) % 1.0;
+        double scanPos1 = scanPhase1 < 0.5 ? (scanPhase1 * 2.0) : (1.0 - (scanPhase1 - 0.5) * 2.0);
+        double scanPhase2 = ((currentTime * 2.0) + 0.5) % 1.0;
+        double scanPos2 = scanPhase2 < 0.5 ? (scanPhase2 * 2.0) : (1.0 - (scanPhase2 - 0.5) * 2.0);
+        double head1 = scanPos1 * (stripCount - 1);
+        double head2 = scanPos2 * (stripCount - 1);
+        int scanWidth = Math.max(4, stripCount / 6);
         
         clearBuffer();
         
-        // Onboard LEDs: pulsing red
+        // Onboard LEDs: alternating red/white rapid flash (different Hz than strip)
+        boolean onboardFlash = ((int)(currentTime * 12.0) % 2) == 0;
         for (int i = 0; i < Constants.LEDs.ONBOARD_LED_COUNT && i < ledCount; i++) {
-            double onboardPulse = 0.3 + 0.7 * ((Math.sin(currentTime * 4.0) + 1) / 2);
-            int[] c = scaleColor(red, onboardPulse);
+            // Even LEDs flash opposite to odd LEDs for chaotic look
+            boolean thisOn = (i % 2 == 0) ? onboardFlash : !onboardFlash;
+            int[] c = thisOn ? red : white;
             ledBuffer[i][0] = (int)(c[0] * masterBrightness);
             ledBuffer[i][1] = (int)(c[1] * masterBrightness);
             ledBuffer[i][2] = (int)(c[2] * masterBrightness);
         }
         
-        // Strip: scanner with glow
+        // Strip: dual scanner with glow + strobe overlay
         for (int i = 0; i < stripCount; i++) {
-            double dist = Math.abs(i - headIndex);
+            double dist1 = Math.abs(i - head1);
+            double dist2 = Math.abs(i - head2);
+            double minDist = Math.min(dist1, dist2);
+            
             double brightness;
-            if (dist <= 1.0) {
+            if (minDist <= 1.0) {
                 brightness = 1.0; // Scanner head — full bright
-            } else if (dist <= scanWidth) {
-                double falloff = 1.0 - (dist / scanWidth);
-                brightness = falloff * falloff; // Quadratic glow tail
+            } else if (minDist <= scanWidth) {
+                double falloff = 1.0 - (minDist / scanWidth);
+                brightness = falloff * falloff;
             } else {
                 brightness = 0.0;
             }
             
-            if (brightness > 0.01) {
+            if (brightness > 0.5) {
+                // Scanner head area — hot white-red core with strobe
+                int[] headColor = strobeOn ? white : hotCore;
+                setLED(stripStart + i, scaleColor(headColor, brightness));
+            } else if (brightness > 0.01) {
+                // Scanner glow tail
                 setLED(stripStart + i, scaleColor(red, brightness));
             } else {
-                setLED(stripStart + i, dimRed);
+                // Background with strobe overlay
+                if (strobeOn) {
+                    setLED(stripStart + i, scaleColor(red, bgPulse * 1.5));
+                } else {
+                    setLED(stripStart + i, dimRed);
+                }
             }
         }
         
@@ -516,123 +548,224 @@ public class LEDSubsystem extends SubsystemBase {
     }
     
     // =========================================================================
-    // PATTERN: HEAD BACK WARNING — Breathing white/alliance blend
+    // PATTERN: GAME DATA ANNOUNCEMENT — "WE KNOW WHO GOES FIRST!"
     // =========================================================================
     
     /**
-     * Breathing blend between alliance color and white.
-     * Simple "get to position" visual cue.
-     */
-    private void setHeadBackWarning() {
-        double currentTime = Timer.getFPGATimestamp();
-        double phase = (currentTime % 1.0) / 1.0;
-        double brightness = (Math.sin(phase * Math.PI * 2) + 1) / 2;
-        int[] color = lerpColor(allianceColor, Constants.LEDs.WHITE, brightness);
-        setSolidColor(scaleColor(color, 0.5 + 0.5 * brightness));
-    }
-    
-    // =========================================================================
-    // PATTERN: GREEN LIGHT PRE-SHIFT — Fast cyan/white strobe
-    // =========================================================================
-    
-    private void setGreenLightPreShift() {
-        setTwoColorStrobe(Constants.LEDs.CYAN, Constants.LEDs.WHITE, 10.0);
-    }
-    
-    // =========================================================================
-    // PATTERN: TELEOP FLOW — Accelerating comet that speeds up as shift ends
-    // =========================================================================
-    
-    /**
-     * Flowing comet pattern in the active alliance color. Speed increases as the
-     * shift progresses, creating a visual sense of urgency.
+     * Excessive announcement when game data arrives. The robot might know
+     * before the drivers do — make it UNMISSABLE.
      * 
-     * @param shiftProgress 0.0 = shift just started (slow sweep), 1.0 = about to end (fast).
-     *                      If negative, uses a relaxed default speed (no FMS data).
+     * WE GO FIRST:  Rapid alliance-color explosion — scanner + strobe + pulse,
+     *               building to a solid flash. "LET'S GOOO!"
+     * THEY GO FIRST: Other alliance color rapid flash that fades into our
+     *                alliance color breathing. "We're second — get ready."
+     * 
+     * @param elapsed  Seconds since announcement started (0 → ANNOUNCEMENT_DURATION)
+     * @param weGoFirst  True if our alliance scores first
      */
-    private void setTeleopFlowPattern(double shiftProgress) {
+    private void setGameDataAnnouncement(double elapsed, boolean weGoFirst) {
         double currentTime = Timer.getFPGATimestamp();
         int stripStart = Constants.LEDs.STRIP_START;
         int stripCount = Constants.LEDs.STRIP_COUNT;
         
-        int[] color = getTeleopDisplayColor();
+        // Progress through the announcement (0→1)
+        double progress = Math.min(1.0, elapsed / ANNOUNCEMENT_DURATION);
         
-        // Speed ramps from slow to fast as shift progresses.
-        // sweepHz = full sweeps per second. Starts at 0.3 (3.3s per sweep), ends at 3.0 (0.33s).
-        double sweepHz;
-        if (shiftProgress < 0) {
-            // No FMS data — use a gentle default flow
-            sweepHz = 0.4;
-        } else {
-            // Exponential ramp feels more natural than linear: slow start, rapid finish
-            // progress 0.0 → 0.3 Hz, progress 1.0 → 3.0 Hz
-            sweepHz = 0.3 + 2.7 * shiftProgress * shiftProgress;
-        }
-        
-        // Position of comet head along the strip [0, 1), bouncing back and forth
-        double rawPhase = (currentTime * sweepHz) % 1.0;
-        // Triangle wave: 0→1→0 for smooth bounce
-        double cometPos = rawPhase < 0.5 ? (rawPhase * 2.0) : (1.0 - (rawPhase - 0.5) * 2.0);
-        
-        // Comet parameters
-        int cometLength = Math.max(4, stripCount / 5); // ~20% of strip is lit
-        double headIndex = cometPos * (stripCount - 1);
-        
-        // Dim background: 8% of alliance color so it's never fully dark
-        int[] dimBg = scaleColor(color, 0.08);
+        // Which color to celebrate with
+        int[] primaryColor = weGoFirst ? allianceColor : getOtherAllianceColor();
+        int[] secondaryColor = weGoFirst ? Constants.LEDs.WHITE : allianceColor;
         
         clearBuffer();
         
-        // Onboard LEDs: solid dim alliance color
-        for (int i = 0; i < Constants.LEDs.ONBOARD_LED_COUNT && i < ledCount; i++) {
-            ledBuffer[i][0] = (int)(dimBg[0] * masterBrightness);
-            ledBuffer[i][1] = (int)(dimBg[1] * masterBrightness);
-            ledBuffer[i][2] = (int)(dimBg[2] * masterBrightness);
-        }
-        
-        // Strip: comet with tail fade
-        for (int i = 0; i < stripCount; i++) {
-            double dist = Math.abs(i - headIndex);
-            double brightness;
-            if (dist <= 1.0) {
-                // Comet head — full brightness
-                brightness = 1.0;
-            } else if (dist <= cometLength) {
-                // Tail — fades out with distance from head
-                double tailFactor = 1.0 - (dist / cometLength);
-                brightness = tailFactor * tailFactor; // Quadratic falloff for nice tail shape
-            } else {
-                // Background
-                brightness = 0.0;
-            }
+        if (weGoFirst) {
+            // === WE GO FIRST — FULL CELEBRATION ===
             
-            // Blend between dim bg and full color
-            if (brightness > 0.01) {
-                int[] pixel = lerpColor(dimBg, color, brightness);
-                setLED(stripStart + i, pixel);
+            // Phase 1 (0-0.5): Rapid strobe between alliance color and white
+            // Phase 2 (0.5-0.8): Scanner explosion outward from center
+            // Phase 3 (0.8-1.0): Solid alliance color pulsing bright
+            
+            if (progress < 0.5) {
+                // RAPID STROBE — 12Hz alliance/white alternating
+                double strobeHz = 12.0;
+                boolean showPrimary = ((int)(currentTime * strobeHz * 2) % 2) == 0;
+                
+                // Onboard: opposite phase for extra chaos
+                for (int i = 0; i < Constants.LEDs.ONBOARD_LED_COUNT && i < ledCount; i++) {
+                    int[] c = ((i % 2 == 0) == showPrimary) ? primaryColor : secondaryColor;
+                    ledBuffer[i][0] = (int)(c[0] * masterBrightness);
+                    ledBuffer[i][1] = (int)(c[1] * masterBrightness);
+                    ledBuffer[i][2] = (int)(c[2] * masterBrightness);
+                }
+                
+                // Strip: alternating blocks that shift
+                int blockSize = 3;
+                int shift = (int)(currentTime * 30) % (blockSize * 2);
+                for (int i = 0; i < stripCount; i++) {
+                    boolean isPrimary = ((i + shift) / blockSize) % 2 == 0;
+                    int[] c = isPrimary ? primaryColor : secondaryColor;
+                    setLED(stripStart + i, c);
+                }
+            } else if (progress < 0.8) {
+                // SCANNER EXPLOSION — two heads racing outward from center
+                double phaseProgress = (progress - 0.5) / 0.3; // 0→1 within this phase
+                double center = stripCount / 2.0;
+                double reach = phaseProgress * (stripCount / 2.0); // How far from center
+                int glowWidth = 4;
+                
+                // Background: dim pulsing alliance color
+                double bgPulse = 0.1 + 0.15 * ((Math.sin(currentTime * 8.0) + 1) / 2);
+                
+                for (int i = 0; i < stripCount; i++) {
+                    double distFromCenter = Math.abs(i - center);
+                    double distFromHead = Math.abs(distFromCenter - reach);
+                    
+                    if (distFromHead < 1.0) {
+                        // Scanner head — bright white
+                        setLED(stripStart + i, secondaryColor);
+                    } else if (distFromHead < glowWidth) {
+                        // Glow tail
+                        double falloff = 1.0 - (distFromHead / glowWidth);
+                        setLED(stripStart + i, scaleColor(primaryColor, falloff * falloff));
+                    } else if (distFromCenter < reach) {
+                        // Filled area behind scanner — alliance color
+                        setLED(stripStart + i, scaleColor(primaryColor, 0.6));
+                    } else {
+                        // Not yet reached — dim background
+                        setLED(stripStart + i, scaleColor(primaryColor, bgPulse));
+                    }
+                }
+                
+                // Onboard: solid alliance color
+                for (int i = 0; i < Constants.LEDs.ONBOARD_LED_COUNT && i < ledCount; i++) {
+                    ledBuffer[i][0] = (int)(primaryColor[0] * masterBrightness);
+                    ledBuffer[i][1] = (int)(primaryColor[1] * masterBrightness);
+                    ledBuffer[i][2] = (int)(primaryColor[2] * masterBrightness);
+                }
             } else {
-                setLED(stripStart + i, dimBg);
+                // TRIUMPHANT SOLID — bright alliance color with slow power pulse
+                double brightness = 0.8 + 0.2 * ((Math.sin(currentTime * 3.0) + 1) / 2);
+                int[] c = scaleColor(primaryColor, brightness);
+                
+                for (int i = 0; i < ledCount; i++) {
+                    ledBuffer[i][0] = (int)(c[0] * masterBrightness);
+                    ledBuffer[i][1] = (int)(c[1] * masterBrightness);
+                    ledBuffer[i][2] = (int)(c[2] * masterBrightness);
+                }
+            }
+        } else {
+            // === THEY GO FIRST — Acknowledge then prepare ===
+            
+            // Phase 1 (0-0.4): Their color rapid flash (acknowledging)
+            // Phase 2 (0.4-1.0): Fade from their color to our color breathing
+            
+            if (progress < 0.4) {
+                // Their color rapid strobe — 8Hz
+                double strobeHz = 8.0;
+                boolean isOn = ((int)(currentTime * strobeHz * 2) % 2) == 0;
+                int[] c = isOn ? primaryColor : Constants.LEDs.OFF;
+                for (int i = 0; i < ledCount; i++) {
+                    ledBuffer[i][0] = (int)(c[0] * masterBrightness);
+                    ledBuffer[i][1] = (int)(c[1] * masterBrightness);
+                    ledBuffer[i][2] = (int)(c[2] * masterBrightness);
+                }
+            } else {
+                // Crossfade from their color to ours with breathing
+                double fadeProgress = (progress - 0.4) / 0.6; // 0→1
+                int[] blended = lerpColor(primaryColor, secondaryColor, fadeProgress);
+                double breath = 0.5 + 0.5 * ((Math.sin(currentTime * 2.0) + 1) / 2);
+                int[] c = scaleColor(blended, breath);
+                for (int i = 0; i < ledCount; i++) {
+                    ledBuffer[i][0] = (int)(c[0] * masterBrightness);
+                    ledBuffer[i][1] = (int)(c[1] * masterBrightness);
+                    ledBuffer[i][2] = (int)(c[2] * masterBrightness);
+                }
             }
         }
         
         pushBuffer();
     }
     
+    /** Returns the other alliance's color. */
+    private int[] getOtherAllianceColor() {
+        // If we're blue, other is red, and vice versa
+        if (allianceColor == Constants.LEDs.BLUE_ALLIANCE) {
+            return Constants.LEDs.RED_ALLIANCE;
+        }
+        return Constants.LEDs.BLUE_ALLIANCE;
+    }
+    
     // =========================================================================
-    // TELEOP DISPLAY COLOR
+    // PATTERN: PROGRESSIVE CHASE — Dot(s) racing along the strip, speed ramps up
     // =========================================================================
     
     /**
-     * Gets the color to display during teleop:
-     * - If we know which alliance is currently active from FMS, show THAT color
-     * - Otherwise fall back to our own alliance color
+     * A colored dot chases along the strip with a fading tail. As urgency
+     * increases, the tail grows LONGER — eventually filling the entire strip
+     * at max urgency (solid color). Speed also increases but stays readable.
+     * 
+     * @param color    RGB color of the chase dot
+     * @param urgency  0.0 = relaxed (short tail, slow), 1.0 = maximum (full strip, fast).
+     *                 Values outside [0,1] are clamped.
      */
-    private int[] getTeleopDisplayColor() {
-        Alliance active = gameState.getCurrentlyActiveAlliance();
-        if (active != null) {
-            return (active == Alliance.Red) ? Constants.LEDs.RED_ALLIANCE : Constants.LEDs.BLUE_ALLIANCE;
+    private void setProgressiveChase(int[] color, double urgency) {
+        urgency = Math.max(0.0, Math.min(1.0, urgency));
+        
+        int stripStart = Constants.LEDs.STRIP_START;
+        int stripCount = Constants.LEDs.STRIP_COUNT;
+        
+        // Speed: moderate ramp so the chase stays readable even at high urgency.
+        // Slow (urgency 0) = ~0.4 strip/sec → Fast (urgency 1) = ~2 strip/sec
+        double stripsPerSec = 0.4 + 1.6 * urgency;
+        double ledsPerSec = stripsPerSec * stripCount;
+        
+        // Tail length GROWS with urgency — the strip "fills up" as time runs out.
+        // urgency 0.0 → ~5 LEDs (small dot), urgency 1.0 → full strip (solid)
+        int tailLen = (int)(5 + (stripCount - 5) * urgency * urgency);
+        tailLen = Math.min(stripCount, Math.max(3, tailLen));
+        
+        // Head position: continuously advancing, wraps around
+        double headPos = (Timer.getFPGATimestamp() * ledsPerSec) % stripCount;
+        
+        clearBuffer();
+        
+        // Onboard LEDs: brightness scales with urgency
+        double onboardBright = 0.10 + 0.90 * urgency;
+        int[] onboardColor = scaleColor(color, onboardBright);
+        for (int i = 0; i < Constants.LEDs.ONBOARD_LED_COUNT && i < ledCount; i++) {
+            ledBuffer[i][0] = (int)(onboardColor[0] * masterBrightness);
+            ledBuffer[i][1] = (int)(onboardColor[1] * masterBrightness);
+            ledBuffer[i][2] = (int)(onboardColor[2] * masterBrightness);
         }
-        return allianceColor;
+        
+        // Strip: chase dot with growing tail
+        for (int i = 0; i < stripCount; i++) {
+            // Distance behind the head (wrapping)
+            double distBehind = headPos - i;
+            if (distBehind < 0) distBehind += stripCount;
+            
+            double brightness;
+            if (distBehind < 1.0) {
+                brightness = 1.0; // Head pixel — full bright
+            } else if (distBehind < tailLen) {
+                // Tail: smooth fade from head (1.0) to tip (dim but visible)
+                double t = 1.0 - ((distBehind - 1.0) / (tailLen - 1.0));
+                // At high urgency the tail floor rises (less fade, more solid)
+                double tailFloor = 0.3 * urgency * urgency;
+                brightness = tailFloor + (1.0 - tailFloor) * t * t;
+            } else {
+                brightness = 0.0; // Dark
+            }
+            
+            if (brightness > 0.01) {
+                int[] c = scaleColor(color, brightness);
+                int idx = stripStart + i;
+                ledBuffer[idx][0] = (int)(c[0] * masterBrightness);
+                ledBuffer[idx][1] = (int)(c[1] * masterBrightness);
+                ledBuffer[idx][2] = (int)(c[2] * masterBrightness);
+            }
+        }
+        
+        pushBuffer();
     }
     
     // =========================================================================
@@ -643,13 +776,16 @@ public class LEDSubsystem extends SubsystemBase {
      * Updates LED pattern based on current state and action.
      * 
      * Priority order (highest first):
-     *  1. Brownout (safety)
-     *  2. E-Stop (safety)
-     *  3. Firing (active scoring feedback)
-     *  4. Ready to Shoot (green = pull trigger)
-     *  5. Spooling (orange breathing = warming up)
-     *  6. Intaking (solid yellow-green)
-     *  7. Match phase patterns (auto cycle, teleop, endgame, etc.)
+     *  1.  Brownout (safety)
+     *  2.  E-Stop (FMS/DS level — excessive pattern)
+     *  3.  Game Data Announcement (who goes first — 3s one-shot)
+     *  4.  Firing (active scoring feedback — white strobe)
+     *  5.  Ready to Shoot (green = pull trigger)
+     *  6.  Spooling (orange breathing = warming up)
+     *  7.  Intaking (solid yellow-green)
+     *  8.  Force Shoot (purple breathing)
+     *  9.  Defensive Brake (pulsing amber/gold)
+     *  10. Match phase patterns (boot, disabled, auto, teleop chase, endgame, victory)
      */
     private void updateLEDPattern() {
         double timeSinceStateStart = Timer.getFPGATimestamp() - stateStartTime;
@@ -663,21 +799,32 @@ public class LEDSubsystem extends SubsystemBase {
             return;
         }
         
-        // === PRIORITY 2: E-STOP (safety — robot is disabled, look dramatic) ===
-        if (isEStopped || currentAction == ActionState.ESTOP) {
-            currentPatternName = "E-STOP";
+        // === PRIORITY 2: REAL E-STOP (FMS/DS level) — EXCESSIVE dramatic pattern ===
+        if (isEStopped) {
+            currentPatternName = "E-STOP!!!";
             setEStopPattern();
             return;
         }
         
-        // === PRIORITY 3: FIRING — balls are actively being fed ===
+        // === PRIORITY 3: GAME DATA ANNOUNCEMENT — robot knows who goes first! ===
+        if (announcementActive) {
+            double elapsed = Timer.getFPGATimestamp() - announcementStartTime;
+            if (elapsed < ANNOUNCEMENT_DURATION) {
+                currentPatternName = announcementWeGoFirst ? "WE GO FIRST!!!" : "They go first...";
+                setGameDataAnnouncement(elapsed, announcementWeGoFirst);
+                return;
+            }
+            announcementActive = false; // Announcement finished
+        }
+        
+        // === PRIORITY 4: FIRING — balls are actively being fed ===
         if (currentAction == ActionState.FIRING) {
             currentPatternName = "FIRING!";
             setStrobe(Constants.LEDs.WHITE, 15.0);
             return;
         }
         
-        // === PRIORITY 4: READY TO SHOOT — solid GREEN ===
+        // === PRIORITY 5: READY TO SHOOT — solid GREEN ===
         // This is the critical "you can pull the trigger now" indicator.
         // Set by RobotContainer when shooter.isReady() during LT spool.
         if (currentAction == ActionState.SHOOTING) {
@@ -686,21 +833,35 @@ public class LEDSubsystem extends SubsystemBase {
             return;
         }
         
-        // === PRIORITY 5: SPOOLING — orange breathing ===
+        // === PRIORITY 6: SPOOLING — orange breathing ===
         if (currentAction == ActionState.SPOOLING) {
             currentPatternName = "Spooling Up";
             setBreathing(Constants.LEDs.SPOOLING_COLOR, 1.0);
             return;
         }
         
-        // === PRIORITY 6: INTAKING — solid yellow-green ===
+        // === PRIORITY 7: INTAKING — solid yellow-green ===
         if (currentAction == ActionState.INTAKING) {
             currentPatternName = "Intaking";
             setSolidColor(Constants.LEDs.INTAKING_COLOR);
             return;
         }
         
-        // === PRIORITY 7: Match phase patterns ===
+        // === PRIORITY 8: FORCE SHOOT — purple breathing ===
+        if (currentAction == ActionState.FORCE_SHOOT) {
+            currentPatternName = "Force Shoot";
+            setBreathing(Constants.LEDs.AIMING_COLOR, 1.5);
+            return;
+        }
+        
+        // === PRIORITY 9: DEFENSIVE — pulsing amber/gold ===
+        if (currentAction == ActionState.DEFENSIVE) {
+            currentPatternName = "Defensive Brake";
+            setBreathing(Constants.LEDs.TEAM_GOLD, 0.8);
+            return;
+        }
+        
+        // === PRIORITY 10: Match phase patterns ===
         switch (currentState) {
             case BOOT_WARMUP:
                 currentPatternName = "Boot Warmup";
@@ -725,38 +886,72 @@ public class LEDSubsystem extends SubsystemBase {
                 break;
                 
             case TELEOP:
-                // Endgame (last 30 seconds) — fast red/blue cycle like transition but urgent
+                // No FMS timing (practice mode) — show a gentle chase with no urgency ramp
+                if (matchTime < 0) {
+                    currentPatternName = "Teleop (Practice)";
+                    setProgressiveChase(allianceColor, 0.15);
+                    break;
+                }
+                
+                // Endgame (last 30 seconds) — starts urgent, ends at max
+                // Urgency 0.5→1.0 so the chase tail is already half-full entering endgame
                 if (phase == GamePhase.END_GAME) {
-                    currentPatternName = "ENDGAME!";
-                    setRedBlueCyclePattern(5.0);
+                    double endgameUrgency = (matchTime > 0)
+                        ? 0.5 + 0.5 * (1.0 - matchTime / 30.0)
+                        : 1.0;
+                    currentPatternName = String.format("ENDGAME (%.0fs, urg=%.2f)", matchTime, endgameUrgency);
+                    setProgressiveChase(allianceColor, endgameUrgency);
                     break;
                 }
                 
-                // Endgame countdown warnings (5 seconds before endgame)
-                if (matchTime > 0) {
-                    double timeUntilEndgame = matchTime - 30.0;
-                    if (timeUntilEndgame > 0 && timeUntilEndgame <= 5.0) {
-                        currentPatternName = "Endgame Warning";
-                        setTwoColorStrobe(allianceColor, Constants.LEDs.WHITE, 4.0);
-                        break;
+                // --- Normal shift-based teleop ---
+                // Two states: we're active (scoring), or we're waiting.
+                // Transition period folds into wait time.
+                
+                if (gameState.isOurAllianceActive() && phase != GamePhase.TRANSITION) {
+                    // OUR SHIFT — alliance color chase fills up as our time runs out
+                    double timeLeft = gameState.getTimeRemainingActive(); // 25→0
+                    double activeUrgency = 1.0 - Math.min(1.0, timeLeft / 25.0); // 0→1
+                    
+                    // Last shift before endgame: boost urgency so it flows into endgame
+                    if (matchTime > 0 && matchTime <= 55.0) {
+                        // We're in SHIFT_4 territory — make urgency floor higher
+                        double endgameApproach = 1.0 - ((matchTime - 30.0) / 25.0);
+                        activeUrgency = Math.max(activeUrgency, endgameApproach * 0.5);
                     }
+                    
+                    currentPatternName = String.format("Active (%.0fs left, urg=%.2f)", timeLeft, activeUrgency);
+                    setProgressiveChase(allianceColor, activeUrgency);
+                } else {
+                    // WAITING for our shift (includes TRANSITION phase)
+                    double secsUntil = gameState.getSecondsUntilOurNextShift();
+                    
+                    // During TRANSITION, secsUntil might be 0 (both considered active).
+                    // Fold transition into wait time.
+                    if (phase == GamePhase.TRANSITION) {
+                        secsUntil = Math.max(secsUntil, matchTime - 130.0 + 5.0);
+                        if (secsUntil < 0) secsUntil = 5.0;
+                    }
+                    
+                    // Urgency based on actual wait time (max wait is ~25s for one shift)
+                    double waitUrgency = 1.0 - Math.min(1.0, secsUntil / 25.0); // 0→1
+                    
+                    // Color: other alliance color when far, blends to ours in last 5s
+                    int[] waitColor;
+                    Alliance active = gameState.getCurrentlyActiveAlliance();
+                    int[] otherColor = (active != null)
+                        ? ((active == Alliance.Red) ? Constants.LEDs.RED_ALLIANCE : Constants.LEDs.BLUE_ALLIANCE)
+                        : allianceColor;
+                    if (secsUntil <= 5.0) {
+                        double blend = 1.0 - (secsUntil / 5.0);
+                        waitColor = lerpColor(otherColor, allianceColor, blend);
+                    } else {
+                        waitColor = otherColor;
+                    }
+                    
+                    currentPatternName = String.format("Waiting (%.0fs, urg=%.2f)", secsUntil, waitUrgency);
+                    setProgressiveChase(waitColor, waitUrgency);
                 }
-                
-                // Shift timing warnings (only when FMS provides timing data)
-                if (gameState.isHeadBackWarning()) {
-                    currentPatternName = "Head Back!";
-                    setHeadBackWarning();
-                    break;
-                }
-                if (gameState.isGreenLightPreShift()) {
-                    currentPatternName = "GREEN LIGHT - GO!";
-                    setGreenLightPreShift();
-                    break;
-                }
-                
-                // Normal teleop: flowing comet that speeds up as shift ends
-                currentPatternName = "Teleop (Flow)";
-                setTeleopFlowPattern(gameState.getCurrentShiftProgress());
                 break;
                 
             case ENDGAME:
@@ -816,9 +1011,27 @@ public class LEDSubsystem extends SubsystemBase {
         // --- Check E-stop ---
         isEStopped = DriverStation.isEStopped();
         
+        // --- Check for game data announcement ---
+        if (gameState.didJustReceiveGameMessage() && !announcementActive) {
+            announcementActive = true;
+            announcementStartTime = Timer.getFPGATimestamp();
+            announcementWeGoFirst = gameState.doWeGoFirst();
+            
+            // Send Elastic notification
+            String who = announcementWeGoFirst ? "WE GO FIRST!" : "They go first.";
+            Alliance first = gameState.getFirstActiveAlliance();
+            String detail = (first == Alliance.Blue ? "Blue" : "Red") + " alliance scores first.";
+            Elastic.sendNotification(new Elastic.Notification()
+                .withLevel(announcementWeGoFirst ? NotificationLevel.INFO : NotificationLevel.WARNING)
+                .withTitle(who)
+                .withDescription(detail)
+                .withDisplaySeconds(5.0));
+        }
+        
         // --- Throttled pattern update (~10Hz) ---
+        // Announcement runs at full 50Hz for crisp strobes
         ledUpdateCounter++;
-        if (ledUpdateCounter >= LED_UPDATE_DIVISOR) {
+        if (announcementActive || ledUpdateCounter >= LED_UPDATE_DIVISOR) {
             ledUpdateCounter = 0;
             updateLEDPattern();
         }

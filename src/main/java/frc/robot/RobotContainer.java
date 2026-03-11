@@ -74,8 +74,8 @@ public class RobotContainer {
 
     // State
     private boolean useRobotCentric = false;
-    /** Persistent E-stop flag. When true, all motor outputs are suppressed until cleared. */
-    private boolean eStopActive = false;
+    /** Whether defensive brake mode is active. Applies X-brake unless driver is commanding sticks. */
+    private boolean defensiveMode = false;
     private final SendableChooser<Command> autoChooser;
 
     /** Whether vision has seeded the gyro heading at least once since boot. */
@@ -215,8 +215,8 @@ public class RobotContainer {
      *              - Deploys intake so ball is ready to feed on LB press
      * RB:          Intake deploy (hold) / retract (release)
      * LB:          Auto-shoot + auto-aim + jiggle (hold to shoot)
-     * A:           E-stop all motors
-     * B:           Force shoot toggle
+     * A:           Defensive brake mode toggle (X-brake unless driving)
+     * B:           Force shoot toggle (with LED feedback)
      * X:           Shuttle mode toggle
      * Y:           Reset gyro
      * START:       Reset game state
@@ -300,18 +300,30 @@ public class RobotContainer {
                             }));
         }
 
-        // A: E-stop all motors (persistent until mode change)
+        // A: Defensive brake mode toggle (X-brake unless driver drives)
         driver.a().onTrue(Commands.runOnce(() -> {
-            eStopActive = true;
-            stopAllMotors();
-            if (leds != null) leds.setAction(LEDSubsystem.ActionState.ESTOP);
-            notify("E-STOP ACTIVE");
+            defensiveMode = !defensiveMode;
+            if (leds != null) {
+                if (defensiveMode) {
+                    leds.setAction(LEDSubsystem.ActionState.DEFENSIVE);
+                } else {
+                    leds.clearAction();
+                }
+            }
+            notify(defensiveMode ? "Defensive Mode ON" : "Defensive Mode OFF");
         }));
 
-        // B: Force shoot toggle
+        // B: Force shoot toggle (with LED feedback)
         driver.b().onTrue(Commands.runOnce(() -> {
             boolean on = !gameState.isForceShootEnabled();
             gameState.setForceShootEnabled(on);
+            if (leds != null) {
+                if (on) {
+                    leds.setAction(LEDSubsystem.ActionState.FORCE_SHOOT);
+                } else {
+                    leds.clearAction();
+                }
+            }
             notify(on ? "Force Shoot ON" : "Force Shoot OFF");
         }));
 
@@ -374,8 +386,14 @@ public class RobotContainer {
         // Translation (left stick) and slow mode (RT) always work regardless of auto-aim.
         if (drivetrain != null) {
             drivetrain.setDefaultCommand(drivetrain.applyRequest(() -> {
-                // SAFETY: Do not drive while disabled or E-stopped; send idle/brake request
-                if (DriverStation.isDisabled() || eStopActive) {
+                // SAFETY: Do not drive while disabled; send brake request
+                if (DriverStation.isDisabled()) {
+                    return brake;
+                }
+
+                // DEFENSIVE MODE: X-brake unless driver is commanding sticks
+                if (defensiveMode && !isDriverCommanding()
+                        && Math.abs(driver.getRightX()) < Constants.Driver.STICK_DEADBAND) {
                     return brake;
                 }
 
@@ -414,8 +432,8 @@ public class RobotContainer {
         if (shooter != null) {
             SmartDashboard.putNumber("Shooter/IdleRPM", Constants.Shooter.DEFAULT_IDLE_RPM);
             shooter.setDefaultCommand(Commands.run(() -> {
-                // SAFETY: Do not spin shooter while disabled or E-stopped
-                if (DriverStation.isDisabled() || eStopActive) {
+                // SAFETY: Do not spin shooter while disabled
+                if (DriverStation.isDisabled()) {
                     shooter.stop();
                     return;
                 }
@@ -559,18 +577,16 @@ public class RobotContainer {
 
     public Command getAutonomousCommand() { return autoChooser.getSelected(); }
     public LEDSubsystem getLEDs() { return leds; }
-    /** Returns true when the driver E-stop is active. */
-    public boolean isEStopActive() { return eStopActive; }
 
-    /** Clear the E-stop flag. Called on mode transitions (auto/teleop init). */
-    public void clearEStop() {
-        if (eStopActive) {
-            eStopActive = false;
-            notify("E-Stop Cleared");
+    /** Clear defensive mode on mode transitions. */
+    public void clearDefensiveMode() {
+        if (defensiveMode) {
+            defensiveMode = false;
+            if (leds != null) leds.clearAction();
         }
     }
 
-    /** Stop all motors - called from Robot.disabledInit() and E-stop. */
+    /** Stop all motors — called from Robot.disabledInit() for safety. */
     public void stopAllMotors() {
         if (drivetrain != null) drivetrain.setControl(brake);
         if (shooter != null)    shooter.stop();
@@ -628,9 +644,8 @@ public class RobotContainer {
      *   - Deadband zeroes output for tiny errors to prevent micro-jitter
      *   - Output is clamped to MAX_ANGULAR_SPEED_RAD
      * 
-     * Uses AIM_DIRECTION to flip the sign if the Pigeon mount compensation
-     * isn't working correctly. If the robot rotates AWAY from the target,
-     * flip AIM_DIRECTION to -1.0 in Constants.
+     * Uses AIM_DIRECTION for manual rotation sign. The auto-aim P/D output
+     * is negated to drive the error toward zero (robot rotates toward target).
      */
     private double aimOmega(double errorDeg) {
         // Deadband: zero output when error is tiny to prevent micro-oscillation
@@ -664,7 +679,7 @@ public class RobotContainer {
         double dTerm = errorRate * Constants.Driver.AIM_HEADING_KD;
         previousAimErrorRad = errorRad;
 
-        double omega = (pTerm + dTerm) *-1.0 ;
+        double omega = (pTerm + dTerm) * -1.0;
 
         // Clamp to max rotation speed so large errors don't command unsafe rates
         double maxOmega = Constants.Driver.MAX_ANGULAR_SPEED_RAD;

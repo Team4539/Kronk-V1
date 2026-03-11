@@ -39,6 +39,7 @@ public class GameStateManager {
     private Alliance robotAlliance = Alliance.Blue;
     private Alliance firstActiveAlliance = null;
     private boolean receivedGameMessage = false;
+    private boolean justReceivedGameMessage = false;
     private TargetMode currentTargetMode = TargetMode.HUB;
     private GamePhase currentPhase = GamePhase.PRE_MATCH;
     private boolean forceShootEnabled = false;
@@ -54,6 +55,7 @@ public class GameStateManager {
     
     /** Update with shuttle zone info for auto-switching. */
     public void update(boolean robotInShuttleZone) {
+        justReceivedGameMessage = false; // Clear each cycle; set by updateFirstActiveAlliance()
         updateAllianceColor();
         updateFirstActiveAlliance();
         updateGamePhase();
@@ -84,9 +86,11 @@ public class GameStateManager {
             if (c == 'B') {
                 firstActiveAlliance = Alliance.Blue;
                 receivedGameMessage = true;
+                justReceivedGameMessage = true;
             } else if (c == 'R') {
                 firstActiveAlliance = Alliance.Red;
                 receivedGameMessage = true;
+                justReceivedGameMessage = true;
             }
         }
     }
@@ -263,18 +267,27 @@ public class GameStateManager {
     public boolean isShuttleModeManualOverride() { return shuttleModeManualOverride; }
     public boolean isMatchActive() { return currentPhase != GamePhase.PRE_MATCH && currentPhase != GamePhase.POST_MATCH; }
     public boolean hasReceivedGameMessage() { return receivedGameMessage; }
+    public boolean didJustReceiveGameMessage() { return justReceivedGameMessage; }
     public Alliance getFirstActiveAlliance() { return firstActiveAlliance; }
+    
+    /** Returns true if our alliance goes first in the shift order. */
+    public boolean doWeGoFirst() {
+        return receivedGameMessage && firstActiveAlliance == robotAlliance;
+    }
     
     /** Seconds remaining in the current active shift. 0 if not active. */
     public double getTimeRemainingActive() {
         if (!isOurAllianceActive()) return 0;
         double t = DriverStation.getMatchTime();
-        boolean weAreFirst = (robotAlliance == firstActiveAlliance);
+        // Each shift ends at the following matchTime boundaries:
+        //   SHIFT_1 ends at 105, SHIFT_2 at 80, SHIFT_3 at 55, SHIFT_4 at 30
+        // First alliance is active in SHIFT_1/3, second in SHIFT_2/4.
+        // The guard above ensures we only reach our own shift's case.
         switch (currentPhase) {
-            case SHIFT_1: return weAreFirst ? Math.max(0, t - 105) : Math.max(0, t - 80);
-            case SHIFT_2: return weAreFirst ? Math.max(0, t - 80)  : Math.max(0, t - 55);
-            case SHIFT_3: return weAreFirst ? Math.max(0, t - 55)  : Math.max(0, t - 30);
-            case SHIFT_4: return weAreFirst ? Math.max(0, t - 30)  : Math.max(0, t);
+            case SHIFT_1: return Math.max(0, t - 105); // First alliance active
+            case SHIFT_2: return Math.max(0, t - 80);  // Second alliance active
+            case SHIFT_3: return Math.max(0, t - 55);  // First alliance active
+            case SHIFT_4: return Math.max(0, t - 30);  // Second alliance active
             case END_GAME: return Math.max(0, t);
             default: return 0;
         }
@@ -299,6 +312,7 @@ public class GameStateManager {
     
     public void reset() {
         receivedGameMessage = false;
+        justReceivedGameMessage = false;
         firstActiveAlliance = null;
         forceShootEnabled = false;
         shuttleMode = false;
