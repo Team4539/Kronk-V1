@@ -79,8 +79,9 @@ public class Robot extends TimedRobot {
 
   @Override
   public void autonomousInit() {
-    // Clear defensive mode on mode transition
+    // Clear defensive mode and shuttle override on mode transition
     m_robotContainer.clearDefensiveMode();
+    GameStateManager.getInstance().clearShuttleModeOverride();
     
     m_autonomousCommand = m_robotContainer.getAutonomousCommand();
     setLEDState(LEDState.AUTO);
@@ -99,8 +100,9 @@ public class Robot extends TimedRobot {
 
   @Override
   public void teleopInit() {
-    // Clear defensive mode on mode transition
+    // Clear defensive mode and shuttle override on mode transition
     m_robotContainer.clearDefensiveMode();
+    GameStateManager.getInstance().clearShuttleModeOverride();
     
     if (m_autonomousCommand != null) {
       m_autonomousCommand.cancel();

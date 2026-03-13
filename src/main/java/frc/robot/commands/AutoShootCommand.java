@@ -53,6 +53,7 @@ public class AutoShootCommand extends Command {
     private boolean hasNotifiedHeadBack = false;
     private boolean hasNotifiedGreenLight = false;
     private boolean wasFiring = false;
+    private int telemetryCounter = 0;
     
     // CONSTRUCTORS
     
@@ -77,7 +78,7 @@ public class AutoShootCommand extends Command {
         this.gameState = GameStateManager.getInstance();
         this.shootingCalc = ShootingCalculator.getInstance();
         
-        addRequirements(shooter);
+        addRequirements(shooter, vision);
         if (trigger != null) {
             addRequirements(trigger);
         }
@@ -112,6 +113,17 @@ public class AutoShootCommand extends Command {
         
         if (!vision.hasPoseEstimate()) {
             SmartDashboard.putString("AutoShoot/Status", "No Pose - Cannot Shoot");
+            
+            // Notify driver of vision loss
+            if (telemetryCounter % 50 == 0) { // Limit notification frequency
+                Elastic.sendNotification(new Elastic.Notification()
+                    .withLevel(NotificationLevel.ERROR)
+                    .withTitle("AIM ERROR")
+                    .withDescription("No Vision Target!")
+                    .withDisplaySeconds(1.0));
+            }
+            
+            telemetryCounter++; // Increment counter even when failing early
             shooter.stop();
             stopTrigger();
             updateLEDState();
@@ -162,6 +174,7 @@ public class AutoShootCommand extends Command {
         String status = determineStatus();
         SmartDashboard.putString("AutoShoot/Status", status);
         publishTelemetry();
+        telemetryCounter++;
     }
     
     private void updateNotifications() {
@@ -222,7 +235,10 @@ public class AutoShootCommand extends Command {
     private void updateLEDState() {
         if (leds == null) return;
         
-        if (wasFiring) {
+        if (!vision.hasPoseEstimate()) {
+            // Signal error when vision is lost while trying to shoot
+            leds.setAction(ActionState.BROWNOUT); // Recycled "Amber Flicker" as Warning/Error
+        } else if (wasFiring) {
             leds.setAction(ActionState.FIRING);
         } else if (isReadyToFire()) {
             // Shooter at speed + robot lined up + alliance active = green light
@@ -287,7 +303,7 @@ public class AutoShootCommand extends Command {
     }
     
     public boolean isReadyToFire() {
-        return shooterReady  &&
+        return shooterReady && linedUp &&
                (allianceActive || gameState.isForceShootEnabled() || gameState.isGreenLightPreShift());
     }
     

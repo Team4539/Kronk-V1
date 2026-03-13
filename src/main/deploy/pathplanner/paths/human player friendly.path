@@ -139,12 +139,6 @@
       "endWaypointRelativePos": null,
       "command": null
     },
-    {
-      "name": "",
-      "waypointRelativePos": 0.8584247915104949,
-      "endWaypointRelativePos": null,
-      "command": null
-    }
   ],
   "globalConstraints": {
     "maxVelocity": 3.0,
@@ -159,7 +153,7 @@
     "rotation": 26.80578293161252
   },
   "reversed": false,
-  "folder": "Human player friendlyt",
+  "folder": "Human Player Friendly",
   "idealStartingState": {
     "velocity": 0,
     "rotation": -179.11562653991618

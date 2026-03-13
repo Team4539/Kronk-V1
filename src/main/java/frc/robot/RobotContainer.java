@@ -80,6 +80,12 @@ public class RobotContainer {
 
     /** Whether vision has seeded the gyro heading at least once since boot. */
     private boolean hasSeededHeadingFromVision = false;
+    
+    /** Debug counter to track updateVisionPose() calls */
+    private int visionUpdateCounter = 0;
+    
+    /** Counter for shuttle zone logging to avoid spam */
+    private int shuttleZoneLogCounter = 0;
 
     // =========================================================================
     // CONSTRUCTOR
@@ -178,7 +184,8 @@ public class RobotContainer {
         // Uses robot-relative angleToTarget with simple P controller for rotation rate.
         if (drivetrain != null) {
             NamedCommands.registerCommand("aimAtPose",
-                    drivetrain.applyRequest(() -> {
+                    Commands.runOnce(() -> resetAimController())
+                    .andThen(drivetrain.applyRequest(() -> {
                         double errorDeg = shootingCalc.getAngleToTarget();
                         double omega = aimOmega(errorDeg);
                         return aimFieldCentric
@@ -187,7 +194,7 @@ public class RobotContainer {
                                 .withRotationalRate(omega);
                     }).until(() -> Math.abs(shootingCalc.getAngleToTarget())
                                     < Constants.Driver.AIM_TOLERANCE_DEG)
-                     .withTimeout(1.5));
+                     .withTimeout(1.5)));
         }
 
         NamedCommands.registerCommand("wait0.5", Commands.waitSeconds(0.5));
@@ -234,9 +241,10 @@ public class RobotContainer {
             Command spoolCmd = Commands.run(() -> {
                 shooter.setTargetRPM(shootingCalc.getTargetRPM());
                 if (leds != null) {
-                    // Show GREEN when shooter is at speed (ready to fire!)
-                    // Show ORANGE breathing while still spooling up
-                    if (shooter.isReady()) {
+                    // Show GREEN when shooter is at speed AND robot is aimed (ready to fire!)
+                    // Show ORANGE breathing while still spooling up or aiming
+                    boolean aimed = Math.abs(shootingCalc.getAngleToTarget()) < Constants.Driver.AIM_TOLERANCE_DEG;
+                    if (shooter.isReady() && aimed) {
                         leds.setAction(LEDSubsystem.ActionState.SHOOTING);
                     } else {
                         leds.setAction(LEDSubsystem.ActionState.SPOOLING);
@@ -258,7 +266,7 @@ public class RobotContainer {
         if (shooter != null && vision != null) {
             Command shootCmd = new AutoShootCommand(shooter, vision, leds, trigger, drivetrain);
             
-            Command fullCmd = shootCmd;
+            Command fullCmd = Commands.runOnce(() -> resetAimController()).andThen(shootCmd);
             if (intake != null) {
                 fullCmd = fullCmd.alongWith(new IntakeJiggleCommand(intake));
             }
@@ -404,6 +412,10 @@ public class RobotContainer {
 
                 // On-the-fly auto-aim: LT held → auto-rotate toward target
                 boolean autoAim = driver.getLeftTriggerAxis() > 0.5;
+                if (autoAim && !wasAutoAiming) {
+                    resetAimController();
+                }
+                wasAutoAiming = autoAim;
                 if (autoAim) {
                     // BRAKE LOCK: When shooter is spun up and robot is aimed at the target,
                     // lock wheels in X-pattern to resist defense — unless driver is driving.
@@ -490,6 +502,11 @@ public class RobotContainer {
     // =========================================================================
 
     public void updateVisionPose() {
+        visionUpdateCounter++;
+        
+        // Log that updateVisionPose is being called every 250 cycles (5 seconds)
+        
+        
         calibration.update();
 
         // Update shooting calculator with current pose
@@ -563,12 +580,33 @@ public class RobotContainer {
     }
 
     private boolean isInShuttleZone() {
-        if (drivetrain == null) return false;
+        if (drivetrain == null) {
+            System.out.println("[RobotContainer] WARNING: Drivetrain is null, cannot check shuttle zone");
+            return false;
+        }
+        
         double x = drivetrain.getState().Pose.getX();
         double boundary = Constants.Field.AUTO_SHUTTLE_BOUNDARY_X;
         boolean isBlue = DriverStation.getAlliance().orElse(DriverStation.Alliance.Blue)
                 == DriverStation.Alliance.Blue;
-        return isBlue ? x > boundary : x < (Constants.Field.FIELD_LENGTH_METERS - boundary);
+        
+        boolean inZone = isBlue ? x > boundary : x < (Constants.Field.FIELD_LENGTH_METERS - boundary);
+        
+        // Log shuttle zone detection every 50 cycles (1 second) to avoid spam
+        shuttleZoneLogCounter++;
+        if (shuttleZoneLogCounter >= 50) {
+            shuttleZoneLogCounter = 0;
+            System.out.println("[RobotContainer] Shuttle Zone Check: " +
+                             "x=" + String.format("%.2f", x) +
+                             ", boundary=" + String.format("%.2f", boundary) +
+                             ", alliance=" + (isBlue ? "BLUE" : "RED") +
+                             ", inZone=" + inZone +
+                             ", autoEnabled=" + Constants.Field.AUTO_SHUTTLE_ENABLED +
+                             ", shuttleMode=" + gameState.isShuttleMode() +
+                             ", manualOverride=" + gameState.isShuttleModeManualOverride());
+        }
+        
+        return inZone;
     }
 
     // =========================================================================
@@ -633,6 +671,13 @@ public class RobotContainer {
 
     /** Previous aim error in radians — used for D term to damp oscillation */
     private double previousAimErrorRad = 0.0;
+    /** Track whether auto-aim was active last cycle to reset D-term on entry */
+    private boolean wasAutoAiming = false;
+
+    /** Reset the PD controller state to avoid D-term spikes when switching aim commands */
+    public void resetAimController() {
+        previousAimErrorRad = 0.0;
+    }
 
     /**
      * Computes the auto-aim rotational rate (rad/s) from a heading error (degrees).
@@ -679,7 +724,7 @@ public class RobotContainer {
         double dTerm = errorRate * Constants.Driver.AIM_HEADING_KD;
         previousAimErrorRad = errorRad;
 
-        double omega = (pTerm + dTerm) * -1.0;
+        double omega = (pTerm + dTerm);
 
         // Clamp to max rotation speed so large errors don't command unsafe rates
         double maxOmega = Constants.Driver.MAX_ANGULAR_SPEED_RAD;

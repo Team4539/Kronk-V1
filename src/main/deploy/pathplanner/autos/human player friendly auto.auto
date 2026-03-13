@@ -21,6 +21,6 @@
     }
   },
   "resetOdom": true,
-  "folder": null,
+  "folder": "Human Player Friendly",
   "choreoAuto": false
 }

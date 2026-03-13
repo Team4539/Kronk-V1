@@ -47,7 +47,12 @@ public class GameStateManager {
     private boolean shuttleModeManualOverride = false;
     private boolean inShuttleZone = false;
     
-    private GameStateManager() {}
+    private GameStateManager() {
+        System.out.println("[GameState] GameStateManager initialized");
+        System.out.println("[GameState] AUTO_SHUTTLE_ENABLED: " + Constants.Field.AUTO_SHUTTLE_ENABLED);
+        System.out.println("[GameState] AUTO_SHUTTLE_BOUNDARY_X: " + Constants.Field.AUTO_SHUTTLE_BOUNDARY_X);
+        System.out.println("[GameState] FIELD_LENGTH_METERS: " + Constants.Field.FIELD_LENGTH_METERS);
+    }
     
     // ========================================================================
     // UPDATE (call every cycle from RobotContainer)
@@ -83,11 +88,11 @@ public class GameStateManager {
         String gameData = DriverStation.getGameSpecificMessage();
         if (gameData != null && gameData.length() > 0) {
             char c = gameData.charAt(0);
-            if (c == 'B') {
+            if (c == 'R') {
                 firstActiveAlliance = Alliance.Blue;
                 receivedGameMessage = true;
                 justReceivedGameMessage = true;
-            } else if (c == 'R') {
+            } else if (c == 'B') {
                 firstActiveAlliance = Alliance.Red;
                 receivedGameMessage = true;
                 justReceivedGameMessage = true;
@@ -130,14 +135,37 @@ public class GameStateManager {
     }
     
     private void updateAutoShuttleMode(boolean robotInShuttleZone) {
+        boolean wasInShuttleZone = this.inShuttleZone;
+        boolean wasShuttleMode = this.shuttleMode;
+        
         this.inShuttleZone = robotInShuttleZone;
         
-        if (!Constants.Field.AUTO_SHUTTLE_ENABLED || shuttleModeManualOverride) return;
+        if (!Constants.Field.AUTO_SHUTTLE_ENABLED) {
+            if (wasShuttleMode) {
+                System.out.println("[GameState] Auto-shuttle DISABLED in constants - not switching modes");
+            }
+            return;
+        }
+        
+        if (shuttleModeManualOverride) {
+            if (wasInShuttleZone != robotInShuttleZone) {
+                System.out.println("[GameState] Manual shuttle override active - ignoring zone change (inZone=" + robotInShuttleZone + ")");
+            }
+            return;
+        }
         
         if (robotInShuttleZone && !shuttleMode) {
             shuttleMode = true;
+            System.out.println("[GameState] *** AUTO-SHUTTLE ON *** Robot entered shuttle zone");
         } else if (!robotInShuttleZone && shuttleMode) {
             shuttleMode = false;
+            System.out.println("[GameState] *** AUTO-SHUTTLE OFF *** Robot left shuttle zone");
+        }
+        
+        // Log zone changes even if shuttle mode doesn't change
+        if (wasInShuttleZone != robotInShuttleZone) {
+            System.out.println("[GameState] Shuttle zone change: " + wasInShuttleZone + " -> " + robotInShuttleZone + 
+                             " (shuttleMode=" + shuttleMode + ", manualOverride=" + shuttleModeManualOverride + ")");
         }
     }
     
@@ -199,11 +227,12 @@ public class GameStateManager {
         }
     }
     
-    /** True when 5-3 seconds before our shift. Drivers should head to scoring position. */
+    /** True when 3-10 seconds before our shift. Drivers should head to scoring position. */
     public boolean isHeadBackWarning() {
         if (isOurAllianceActive()) return false;
         double s = getSecondsUntilOurNextShift();
-        return s > 3.0 && s <= 5.0;
+        // Warn earlier (10s) as requested
+        return s > 3.0 && s <= 10.0;
     }
     
     /** True when 3-0 seconds before our shift. Pre-aim and pre-spool! */
@@ -298,12 +327,20 @@ public class GameStateManager {
     // ========================================================================
     
     public void setShuttleMode(boolean enabled) {
+        boolean wasEnabled = shuttleMode;
+        boolean wasOverride = shuttleModeManualOverride;
+        
         shuttleMode = enabled;
         shuttleModeManualOverride = true;
+        
+        System.out.println("[GameState] Manual shuttle mode set: " + wasEnabled + " -> " + enabled + 
+                         " (override: " + wasOverride + " -> true)");
     }
     
     public void clearShuttleModeOverride() {
+        boolean wasOverride = shuttleModeManualOverride;
         shuttleModeManualOverride = false;
+        System.out.println("[GameState] Shuttle mode manual override cleared (was: " + wasOverride + ")");
     }
     
     public void setForceShootEnabled(boolean enabled) {

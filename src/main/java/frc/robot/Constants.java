@@ -100,9 +100,9 @@ public final class Constants {
     public static final double SHOOTER_EXIT_HEIGHT_METERS = 0.50;
     
     /** Idle RPM when not actively spooling. Keeps flywheel warm for faster spin-up. */
-    public static final double DEFAULT_IDLE_RPM = 500.0;
+    public static final double DEFAULT_IDLE_RPM = 2250;
     /** Fallback RPM used when vision/pose is unavailable and driver manually ranges shots. */
-    public static final double FALLBACK_RPM = 6000.0;
+    public static final double FALLBACK_RPM = 2250;
     
     /** Free speed of the motor in rotations per second (Kraken X60 ~100 rps) */
     public static final double MOTOR_FREE_SPEED_RPS = 100.0;
@@ -140,6 +140,15 @@ public final class Constants {
     public static final double IDLE_SPEED_RPM = 2250;
     /** Shoot RPM — full speed reverse to feed balls into shooter (negative = reverse) */
     public static final double SHOOT_SPEED_RPM = -3000.0;
+    
+    // --- Stall detection & auto-reverse ---
+    // If the trigger is commanded to spin but actual RPM stays near 0 for
+    // STALL_TIME_SECONDS, it reverses at full speed for STALL_REVERSE_TIME_SECONDS
+    // to clear a jam, then resumes the commanded direction.
+    public static final double STALL_RPM_THRESHOLD = 30.0;         // Below this = not spinning
+    public static final double STALL_TIME_SECONDS = 0.5;           // How long at 0 RPM before stall confirmed
+    public static final double STALL_REVERSE_TIME_SECONDS = 0.6;   // How long to reverse to clear jam
+    public static final double STALL_REVERSE_RPS = 100.0;          // Full speed reverse (positive = spit back)
   }
 
   public static final class Intake {
@@ -154,10 +163,10 @@ public final class Constants {
     // Pivot limits
     public static final double MIN_PIVOT_ANGLE_DEG = 95.4;  // cancoder got moved old value 59.7
     public static final double MAX_PIVOT_ANGLE_DEG = 202.7;
-    public static final double RETRACTED_ANGLE_DEG = 63.7;
-    public static final double DEPLOYED_ANGLE_DEG = 208.7;  // Must be <= MAX_PIVOT_ANGLE_DEG
-    public static final double IDLE_ANGLE_DEG =  60.0;
-    public static final double HALF_SHOOT_ANGLE_DEG = 90.0;
+    public static final double RETRACTED_ANGLE_DEG = 99.4;   // Updated for CANCoder reposition (+35.7°)
+    public static final double DEPLOYED_ANGLE_DEG = 202.7;   // Must be <= MAX_PIVOT_ANGLE_DEG
+    public static final double IDLE_ANGLE_DEG = 95.7;        // Updated for CANCoder reposition (+35.7°)
+    public static final double HALF_SHOOT_ANGLE_DEG = 125.7; // Updated for CANCoder reposition (+35.7°)
     // Tolerance for "at target" check (degrees)
     public static final double PIVOT_TOLERANCE_DEG = 2.0;
     
@@ -165,7 +174,7 @@ public final class Constants {
     // Jiggle: oscillate pivot while shooting to force balls into the shooter.
     // Sweeps from near-retracted to near-deployed with rollers spinning inward.
     public static final double JIGGLE_CYCLE_SECONDS = 0.35;  // Full cycle time (aggressive pump action)
-    public static final double JIGGLE_MIN_ANGLE_DEG = 65.0;  // Near retracted — where balls feed
+    public static final double JIGGLE_MIN_ANGLE_DEG = 100.7;  // Near retracted — where balls feed (updated for CANCoder reposition)
     public static final double JIGGLE_MAX_ANGLE_DEG = 150.0; // Near deployed — pushes balls back down
     public static final double JIGGLE_ROLLER_RPM = 6000.0;   // Rollers spin inward to force-feed balls
 
@@ -201,7 +210,7 @@ public final class Constants {
     /** Pitch in degrees (+ = tilted up from horizontal) — slightly up */
     public static final double FRONT_CAMERA_PITCH_DEG = 5.0;
     /** Yaw in degrees (0 = facing forward) */
-    public static final double FRONT_CAMERA_YAW_DEG = 180;
+    public static final double FRONT_CAMERA_YAW_DEG = 0;
     
     // Vision measurement trust (standard deviations for pose estimator)
     // Lower = trust vision more, Higher = trust odometry more
@@ -232,7 +241,7 @@ public final class Constants {
     /** When error is within this zone (degrees), KP ramps down for a smooth approach */
     public static final double AIM_SLOW_ZONE_DEG = 0.0;
     /** Angle tolerance in degrees — "aimed" when error is within this */
-    public static final double AIM_TOLERANCE_DEG = .25;
+    public static final double AIM_TOLERANCE_DEG = 1;
     /** 
      * Sign multiplier for auto-aim rotation direction.
      * +1.0 = normal (positive angleToTarget → CCW rotation)

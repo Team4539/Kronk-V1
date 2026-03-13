@@ -109,6 +109,42 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     /** Swerve request to apply during robot-centric path following */
     private final SwerveRequest.ApplyRobotSpeeds m_pathApplyRobotSpeeds = new SwerveRequest.ApplyRobotSpeeds();
 
+    // -----------------------------
+    // PathPlanner frame debug tools
+    // -----------------------------
+    /**
+     * If auto looks mirrored (drives consistently backwards/sideways) while teleop is fine,
+     * this is almost always a sign/frame mismatch between PathPlanner robot-relative speeds and
+     * the drivetrain's expected robot-relative frame.
+     *
+     * These toggles let us correct that quickly WITHOUT affecting teleop.
+     */
+    private static final String kPPFlipVxKey = "Debug/PathPlanner/FlipVx";
+    private static final String kPPFlipVyKey = "Debug/PathPlanner/FlipVy";
+    private static final String kPPSwapXYKey = "Debug/PathPlanner/SwapVxVy";
+    private static final String kPPLogKey = "Debug/PathPlanner/LogCommands";
+
+    private static edu.wpi.first.math.kinematics.ChassisSpeeds transformPathplannerSpeeds(
+            edu.wpi.first.math.kinematics.ChassisSpeeds in) {
+        boolean flipVx = SmartDashboard.getBoolean(kPPFlipVxKey, false);
+        boolean flipVy = SmartDashboard.getBoolean(kPPFlipVyKey, false);
+        boolean swap = SmartDashboard.getBoolean(kPPSwapXYKey, false);
+
+        double vx = in.vxMetersPerSecond;
+        double vy = in.vyMetersPerSecond;
+        double omega = in.omegaRadiansPerSecond;
+
+        if (swap) {
+            double tmp = vx;
+            vx = vy;
+            vy = tmp;
+        }
+        if (flipVx) vx = -vx;
+        if (flipVy) vy = -vy;
+
+        return new edu.wpi.first.math.kinematics.ChassisSpeeds(vx, vy, omega);
+    }
+
     /* Swerve requests to apply during SysId characterization */
     private final SwerveRequest.SysIdSwerveTranslation m_translationCharacterization = new SwerveRequest.SysIdSwerveTranslation();
     private final SwerveRequest.SysIdSwerveSteerGains m_steerCharacterization = new SwerveRequest.SysIdSwerveSteerGains();
@@ -194,6 +230,13 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         if (Utils.isSimulation()) {
             startSimThread();
         }
+
+        // Initialize PathPlanner debug toggles (safe defaults)
+        SmartDashboard.setDefaultBoolean(kPPFlipVxKey, false);
+        SmartDashboard.setDefaultBoolean(kPPFlipVyKey, false);
+        SmartDashboard.setDefaultBoolean(kPPSwapXYKey, false);
+        SmartDashboard.setDefaultBoolean(kPPLogKey, false);
+
         configureAutoBuilder();
     }
 
@@ -219,6 +262,12 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         if (Utils.isSimulation()) {
             startSimThread();
         }
+
+        SmartDashboard.setDefaultBoolean(kPPFlipVxKey, false);
+        SmartDashboard.setDefaultBoolean(kPPFlipVyKey, false);
+        SmartDashboard.setDefaultBoolean(kPPSwapXYKey, false);
+        SmartDashboard.setDefaultBoolean(kPPLogKey, false);
+
         configureAutoBuilder();
     }
 
@@ -252,6 +301,12 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         if (Utils.isSimulation()) {
             startSimThread();
         }
+
+        SmartDashboard.setDefaultBoolean(kPPFlipVxKey, false);
+        SmartDashboard.setDefaultBoolean(kPPFlipVyKey, false);
+        SmartDashboard.setDefaultBoolean(kPPSwapXYKey, false);
+        SmartDashboard.setDefaultBoolean(kPPLogKey, false);
+
         configureAutoBuilder();
     }
 
@@ -261,19 +316,30 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             AutoBuilder.configure(
                 () -> getState().Pose,   // Supplier of current robot pose
                 this::resetPose,         // Consumer for seeding pose against auto
-                () -> getState().Speeds, // Supplier of current robot speeds
+                // IMPORTANT: PathPlanner requires ROBOT-RELATIVE chassis speeds here
+                () -> getState().Speeds,
                 // Consumer of ChassisSpeeds and feedforwards to drive the robot
-                (speeds, feedforwards) -> setControl(
-                    m_pathApplyRobotSpeeds.withSpeeds(speeds)
+                (speeds, feedforwards) -> {
+                    var transformed = transformPathplannerSpeeds(speeds);
+                    
+                    if (SmartDashboard.getBoolean(kPPLogKey, false)) {
+                        SmartDashboard.putNumber("Debug/PathPlanner/cmdVx", transformed.vxMetersPerSecond);
+                        SmartDashboard.putNumber("Debug/PathPlanner/cmdVy", transformed.vyMetersPerSecond);
+                        SmartDashboard.putNumber("Debug/PathPlanner/cmdOmega", transformed.omegaRadiansPerSecond);
+                        SmartDashboard.putNumber("Debug/PathPlanner/gyroDeg", getState().Pose.getRotation().getDegrees());
+                    }
+
+                    setControl(
+                        m_pathApplyRobotSpeeds.withSpeeds(transformed)
                         .withWheelForceFeedforwardsX(feedforwards.robotRelativeForcesXNewtons())
                         .withWheelForceFeedforwardsY(feedforwards.robotRelativeForcesYNewtons())
-                ),
+                    );
+                },
                 new PPHolonomicDriveController(
-                    // PID constants for translation
-                    new PIDConstants(10, 0, 0),
-                    // PID constants for rotation
-                    // D term damps oscillation — pure P (7,0,0) caused jiggly rotation
-                    new PIDConstants(7, 0, 0.5)
+                    // PID constants for translation - REDUCED from 10 to 5 to prevent oscillation
+                    new PIDConstants(5.0, 0, 0),
+                    // PID constants for rotation - REDUCED from 7 to 5, D=0 for safer tuning
+                    new PIDConstants(5.0, 0, 0.0)
                 ),
                 config,
                 // Flip path for Red alliance (paths are drawn for Blue alliance origin)
@@ -443,10 +509,9 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         }
         
         // Convert robot-relative angle to field angle.
-        // angleToTarget includes a 180° offset because the shooter fires out the back,
-        // so we subtract 180° here to get the true field angle toward the target for drawing.
+        // Shooter fires from the front, so no 180° offset needed.
         double robotHeadingDeg = robotPose.getRotation().getDegrees();
-        double fieldAngleDeg = robotHeadingDeg + angleToTarget - 180.0;
+        double fieldAngleDeg = robotHeadingDeg + angleToTarget;
         double fieldAngleRad = Math.toRadians(fieldAngleDeg);
         
         // Calculate the computed target point

@@ -7,13 +7,13 @@
         {
           "type": "path",
           "data": {
-            "pathName": "Center shoot"
+            "pathName": "Right"
           }
         }
       ]
     }
   },
   "resetOdom": true,
-  "folder": "Center",
+  "folder": "Right",
   "choreoAuto": false
 }

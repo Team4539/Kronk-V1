@@ -36,7 +36,7 @@ public class ShootingCalculator {
     // --- Cached output values ---
     
     /** Angle from robot to target (degrees, -180 to +180, 0 = forward) */
-    private double angleToTarget = 0.0;
+    private double angleToTarget = 0;
     
     /** Target shooter motor RPM */
     private double targetRPM = 0.0;
@@ -118,11 +118,10 @@ public class ShootingCalculator {
         double fieldAngle = Math.toDegrees(Math.atan2(dy, dx));
 
         // --- 3. Convert field angle to robot-relative angle ---
-        // The shooter fires out the BACK of the robot, so we need the robot's
-        // rear facing the target. Adding 180° flips the aim direction so auto-aim
-        // rotates the back toward the target instead of the front.
+        // The shooter fires out the FRONT of the robot, so we aim the front
+        // directly at the target. No 180° offset needed.
         double robotHeading = robotPose.getRotation().getDegrees();
-        angleToTarget = normalizeAngle(fieldAngle - robotHeading + 180.0);
+        angleToTarget = normalizeAngle(fieldAngle - robotHeading);
 
         // --- 4. Interpolate shooter RPM from distance-based calibration table ---
         // In calibration mode, skip interpolation — use only the manual RPM offset

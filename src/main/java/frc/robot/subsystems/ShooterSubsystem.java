@@ -195,7 +195,7 @@ public class ShooterSubsystem extends SubsystemBase {
             double error = Math.abs(actualRPM - targetRPS * 60.0);
             isSpunUp = error < RPM_READY_TOLERANCE;
         } else {
-            isSpunUp = true;
+            isSpunUp = false;  // Not commanding velocity = not ready to shoot
         }
         
         // === TELEMETRY ===
