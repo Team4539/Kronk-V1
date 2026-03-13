@@ -75,7 +75,7 @@ public class TunerConstants {
      * Leave this null to apply no mount-pose correction (matches the working reference project).
      * If you truly mounted the Pigeon 180° off, set kPigeonMountPoseYawDeg to 180.
      */
-    private static final double kPigeonMountPoseYawDeg = 0;
+    private static final double kPigeonMountPoseYawDeg = 180;
 
     private static final Pigeon2Configuration pigeonConfigs = (kPigeonMountPoseYawDeg == 0)
         ? null
