@@ -100,6 +100,13 @@ public class AutoShootCommand extends Command {
 
     @Override
     public void execute() {
+        // Always update state first so LEDs and notifications have current data
+        currentTargetMode = gameState.getTargetMode();
+        allianceActive = gameState.isOurAllianceActive();
+        shooterReady = shooter.isReady();
+        linedUp = Math.abs(shootingCalc.getAngleToTarget()) < Constants.Driver.AIM_TOLERANCE_DEG;
+        distanceToTarget = shootingCalc.getDistance();
+
         if (!gameState.isAutoAimEnabled()) {
             SmartDashboard.putString("AutoShoot/Status", "AUTO-AIM DISABLED");
             shooter.stop();
@@ -107,38 +114,36 @@ public class AutoShootCommand extends Command {
             publishTelemetry();
             return;
         }
-        
-        currentTargetMode = gameState.getTargetMode();
-        allianceActive = gameState.isOurAllianceActive();
-        
+
         if (!vision.hasPoseEstimate()) {
             SmartDashboard.putString("AutoShoot/Status", "No Pose - Cannot Shoot");
-            
+
             // Notify driver of vision loss
-            if (telemetryCounter % 50 == 0) { // Limit notification frequency
+            if (telemetryCounter % 50 == 0) {
                 Elastic.sendNotification(new Elastic.Notification()
                     .withLevel(NotificationLevel.ERROR)
                     .withTitle("AIM ERROR")
                     .withDescription("No Vision Target!")
                     .withDisplaySeconds(1.0));
             }
-            
-            telemetryCounter++; // Increment counter even when failing early
+
+            telemetryCounter++;
             shooter.stop();
             stopTrigger();
             updateLEDState();
             publishTelemetry();
             return;
         }
-        
-        // Handle disabled mode (alliance inactive)
+
+        // Handle disabled mode (alliance inactive, no green light, no force shoot)
         if (currentTargetMode == TargetMode.DISABLED && !gameState.isGreenLightPreShift() && !gameState.isForceShootEnabled()) {
-            SmartDashboard.putString("AutoShoot/Status", "ALLIANCE INACTIVE - Waiting");
-            if (gameState.isHeadBackWarning()) {
-                SmartDashboard.putString("AutoShoot/Status", "HEAD BACK - Shift in " + 
-                    String.format("%.1f", gameState.getSecondsUntilOurNextShift()) + "s");
-                setShooterRPM(); // Pre-spool during head-back
+            if (gameState.isSpoolWarning() || gameState.isHeadBackWarning()) {
+                // Pre-spool during the 1-10s before our shift
+                SmartDashboard.putString("AutoShoot/Status",
+                    String.format("SHIFT IN %.0fs - Spooling", gameState.getSecondsUntilOurNextShift()));
+                setShooterRPM();
             } else {
+                SmartDashboard.putString("AutoShoot/Status", "ALLIANCE INACTIVE - Waiting");
                 shooter.stop();
                 stopTrigger();
             }
@@ -146,17 +151,10 @@ public class AutoShootCommand extends Command {
             publishTelemetry();
             return;
         }
-        
+
         // Set shooter RPM from calculator
         setShooterRPM();
-        distanceToTarget = shootingCalc.getDistance();
-        
-        // Check shooter ready status
-        shooterReady = shooter.isReady();
-        
-        // Check if robot is aimed at the target
-        linedUp = Math.abs(shootingCalc.getAngleToTarget()) < Constants.Driver.AIM_TOLERANCE_DEG;
-        
+
         // Control trigger motor - feed balls when shooter is spun up and alliance is active
         boolean firing = isReadyToFire();
         if (firing) {
@@ -167,10 +165,10 @@ public class AutoShootCommand extends Command {
             idleTrigger();
         }
         wasFiring = firing;
-        
+
         updateLEDState();
         updateNotifications();
-        
+
         String status = determineStatus();
         SmartDashboard.putString("AutoShoot/Status", status);
         publishTelemetry();
@@ -212,20 +210,22 @@ public class AutoShootCommand extends Command {
             Elastic.sendNotification(new Elastic.Notification()
                 .withLevel(NotificationLevel.WARNING)
                 .withTitle("<- HEAD BACK!")
-                .withDescription(String.format("Our shift starts in %.0fs - get in position", 
+                .withDescription(String.format("Our shift starts in %.0fs - get in position",
                     gameState.getSecondsUntilOurNextShift()))
                 .withDisplaySeconds(2.0));
         } else if (!gameState.isHeadBackWarning()) {
             hasNotifiedHeadBack = false;
         }
-        
+
         if (gameState.isGreenLightPreShift() && !hasNotifiedGreenLight) {
             hasNotifiedGreenLight = true;
+            String desc = gameState.isShootNowWarning()
+                    ? "FIRE! Shift starts in 1 second!"
+                    : String.format("Spool up! Shift in %.0fs", gameState.getSecondsUntilOurNextShift());
             Elastic.sendNotification(new Elastic.Notification()
                 .withLevel(NotificationLevel.INFO)
                 .withTitle("GREEN LIGHT!")
-                .withDescription("Cleared to shoot! Shift starts in " + 
-                    String.format("%.0fs", gameState.getSecondsUntilOurNextShift()))
+                .withDescription(desc)
                 .withDisplaySeconds(2.0));
         } else if (!gameState.isGreenLightPreShift()) {
             hasNotifiedGreenLight = false;
@@ -234,19 +234,19 @@ public class AutoShootCommand extends Command {
     
     private void updateLEDState() {
         if (leds == null) return;
-        
+
         if (!vision.hasPoseEstimate()) {
             // Signal error when vision is lost while trying to shoot
-            leds.setAction(ActionState.BROWNOUT); // Recycled "Amber Flicker" as Warning/Error
-        } else if (wasFiring) {
-            leds.setAction(ActionState.FIRING);
+            leds.setAction(ActionState.BROWNOUT);
         } else if (isReadyToFire()) {
-            // Shooter at speed + robot lined up + alliance active = green light
+            // Trigger is actively feeding balls
+            leds.setAction(ActionState.FIRING);
+        } else if (shooterReady && linedUp) {
+            // Shooter at speed + robot aimed but can't fire yet (alliance inactive)
+            // This is the "SHOOT NOW" green indicator the driver needs to see
             leds.setAction(ActionState.SHOOTING);
-        } else if (shooterReady && !linedUp) {
-            // Shooter at speed but robot not aimed yet — keep spooling indicator
-            leds.setAction(ActionState.SPOOLING);
         } else {
+            // Still spinning up or not aimed yet
             leds.setAction(ActionState.SPOOLING);
         }
     }

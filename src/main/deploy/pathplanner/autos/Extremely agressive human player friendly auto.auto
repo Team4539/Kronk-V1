@@ -11,7 +11,7 @@
               {
                 "type": "path",
                 "data": {
-                  "pathName": "LEFT Go to center"
+                  "pathName": "human player friendly auto 1"
                 }
               }
             ]
@@ -24,7 +24,7 @@
               {
                 "type": "path",
                 "data": {
-                  "pathName": "LEFT come back and shoot"
+                  "pathName": "human player friendly auto shoot"
                 }
               }
             ]
@@ -35,37 +35,18 @@
           "data": {
             "commands": [
               {
-                "type": "path",
+                "type": "named",
                 "data": {
-                  "pathName": "Left to the depot after shoot"
+                  "name": "autoShoot"
                 }
               }
             ]
-          }
-        },
-        {
-          "type": "race",
-          "data": {
-            "commands": [
-              {
-                "type": "path",
-                "data": {
-                  "pathName": "Left from depot to Shoot"
-                }
-              }
-            ]
-          }
-        },
-        {
-          "type": "race",
-          "data": {
-            "commands": []
           }
         }
       ]
     }
   },
   "resetOdom": true,
-  "folder": "Left",
+  "folder": "Human Player Friendly",
   "choreoAuto": false
 }

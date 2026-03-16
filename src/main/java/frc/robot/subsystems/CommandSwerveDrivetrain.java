@@ -109,6 +109,23 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     /** Swerve request to apply during robot-centric path following */
     private final SwerveRequest.ApplyRobotSpeeds m_pathApplyRobotSpeeds = new SwerveRequest.ApplyRobotSpeeds();
 
+    /**
+     * Optional rotation override for PathPlanner paths.
+     * When non-null, the supplied value (rad/s) replaces PathPlanner's rotation output
+     * while translation continues normally. Used for shoot-on-the-move during auto.
+     */
+    private volatile Supplier<Double> m_rotationOverride = null;
+
+    /** Set a rotation override — PathPlanner keeps translation, this controls rotation. */
+    public void setRotationOverride(Supplier<Double> omegaSupplier) {
+        m_rotationOverride = omegaSupplier;
+    }
+
+    /** Clear the rotation override — PathPlanner resumes full control. */
+    public void clearRotationOverride() {
+        m_rotationOverride = null;
+    }
+
     // -----------------------------
     // PathPlanner frame debug tools
     // -----------------------------
@@ -321,7 +338,20 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
                 // Consumer of ChassisSpeeds and feedforwards to drive the robot
                 (speeds, feedforwards) -> {
                     var transformed = transformPathplannerSpeeds(speeds);
-                    
+
+                    // Rotation override: if active, replace PathPlanner's omega
+                    // with auto-aim while keeping translation untouched.
+                    Supplier<Double> rotOverride = m_rotationOverride;
+                    if (rotOverride != null) {
+                        // The override supplies field-relative omega (rad/s).
+                        // PathPlanner speeds are robot-relative, but omega is the same
+                        // in both frames (rotation rate doesn't depend on heading).
+                        transformed = new edu.wpi.first.math.kinematics.ChassisSpeeds(
+                                transformed.vxMetersPerSecond,
+                                transformed.vyMetersPerSecond,
+                                rotOverride.get());
+                    }
+
                     if (SmartDashboard.getBoolean(kPPLogKey, false)) {
                         SmartDashboard.putNumber("Debug/PathPlanner/cmdVx", transformed.vxMetersPerSecond);
                         SmartDashboard.putNumber("Debug/PathPlanner/cmdVy", transformed.vyMetersPerSecond);

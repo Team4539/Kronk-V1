@@ -3,70 +3,70 @@
   "waypoints": [
     {
       "anchor": {
-        "x": 6.12338192119933,
-        "y": 4.63653779414662
+        "x": 1.3390361947073073,
+        "y": 1.4033457345022282
       },
       "prevControl": null,
       "nextControl": {
-        "x": 6.151981473438108,
-        "y": 5.2338162307156955
+        "x": 2.8038498936941876,
+        "y": 1.0463885298479751
       },
       "isLocked": false,
-      "linkedName": "end of left pickup more balls"
+      "linkedName": "right end of shoot"
     },
     {
       "anchor": {
-        "x": 6.12338192119933,
-        "y": 7.4674801525316745
+        "x": 3.7355579746944816,
+        "y": 0.6139455532020248
       },
       "prevControl": {
-        "x": 6.365570993221398,
-        "y": 7.52948380881975
+        "x": 3.475982299052495,
+        "y": 0.7149453079868375
       },
       "nextControl": {
-        "x": 5.756419873154254,
-        "y": 7.373532938036044
+        "x": 3.9685428696447342,
+        "y": 0.523292154341201
       },
       "isLocked": false,
       "linkedName": null
     },
     {
       "anchor": {
-        "x": 1.8415591651514958,
-        "y": 7.365195626041345
+        "x": 6.728571759076186,
+        "y": 0.7554040774493149
       },
       "prevControl": {
-        "x": 1.8863886914306627,
-        "y": 7.61114341231637
+        "x": 6.568251253584741,
+        "y": 0.5513373812823226
       },
       "nextControl": {
-        "x": 1.7967296388723288,
-        "y": 7.119247839766319
+        "x": 7.443248455022991,
+        "y": 1.6650925276094752
       },
       "isLocked": false,
       "linkedName": null
     },
     {
       "anchor": {
-        "x": 1.5548359486447931,
-        "y": 5.865820256776035
+        "x": 6.475452995837575,
+        "y": 2.7839515363666374
       },
       "prevControl": {
-        "x": 1.2942873316052148,
-        "y": 5.84556389785466
+        "x": 6.592299774812146,
+        "y": 2.562938346164632
       },
       "nextControl": null,
       "isLocked": false,
-      "linkedName": "end of left come back and shoot"
+      "linkedName": "end of right come back to center"
     }
   ],
   "rotationTargets": [
     {
-      "waypointRelativePos": 1.0052784774003016,
+      "waypointRelativePos": 0.9828311317845397,
       "rotationDegrees": 0.0
     },
     {
-      "waypointRelativePos": 1.85027928902061,
+      "waypointRelativePos": 1.5036881296258229,
       "rotationDegrees": 0.0
     }
   ],
@@ -74,13 +74,13 @@
   "pointTowardsZones": [],
   "eventMarkers": [
     {
-      "name": "spinUpShooter",
-      "waypointRelativePos": 1.4769871100238787,
-      "endWaypointRelativePos": 3.0,
+      "name": "deployIntake",
+      "waypointRelativePos": 0,
+      "endWaypointRelativePos": 2.0,
       "command": {
         "type": "named",
         "data": {
-          "name": "spinUpShooter"
+          "name": "deployIntake"
         }
       }
     }
@@ -95,13 +95,13 @@
   },
   "goalEndState": {
     "velocity": 0,
-    "rotation": -46.005086005254334
+    "rotation": 98.18871563583728
   },
   "reversed": false,
-  "folder": "Left",
+  "folder": "Right",
   "idealStartingState": {
     "velocity": 0,
-    "rotation": -90.0
+    "rotation": 41.87700712067942
   },
   "useDefaultConstraints": true
 }

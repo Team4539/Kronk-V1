@@ -3,47 +3,35 @@
   "waypoints": [
     {
       "anchor": {
-        "x": 0.7216182573218095,
-        "y": 6.721001079960874
+        "x": 0.41305404179532845,
+        "y": 0.5865701938682877
       },
       "prevControl": null,
       "nextControl": {
-        "x": 0.9466854422592521,
-        "y": 6.854801615196661
+        "x": 1.4130540417953283,
+        "y": 0.5865701938682877
       },
       "isLocked": false,
-      "linkedName": "end of left to the depot"
+      "linkedName": "end of human player friendly auto 1"
     },
     {
       "anchor": {
-        "x": 1.5548359486447931,
-        "y": 5.865820256776035
+        "x": 1.6016244731033056,
+        "y": 2.245441907246907
       },
       "prevControl": {
-        "x": 0.7662702479290272,
-        "y": 6.0859232665976215
+        "x": 1.4289263432486015,
+        "y": 1.6753434974268862
       },
       "nextControl": null,
       "isLocked": false,
-      "linkedName": "end of left come back and shoot"
+      "linkedName": null
     }
   ],
   "rotationTargets": [],
   "constraintZones": [],
   "pointTowardsZones": [],
-  "eventMarkers": [
-    {
-      "name": "movingShoot",
-      "waypointRelativePos": 0,
-      "endWaypointRelativePos": 1.0,
-      "command": {
-        "type": "named",
-        "data": {
-          "name": "movingShoot"
-        }
-      }
-    }
-  ],
+  "eventMarkers": [],
   "globalConstraints": {
     "maxVelocity": 3.8,
     "maxAcceleration": 4.5,
@@ -54,13 +42,13 @@
   },
   "goalEndState": {
     "velocity": 0,
-    "rotation": -46.005086005254334
+    "rotation": 37.98457977822321
   },
   "reversed": false,
-  "folder": "Left",
+  "folder": "Human Player Friendly",
   "idealStartingState": {
     "velocity": 0,
-    "rotation": -105.8003182158223
+    "rotation": 0.0
   },
   "useDefaultConstraints": true
 }

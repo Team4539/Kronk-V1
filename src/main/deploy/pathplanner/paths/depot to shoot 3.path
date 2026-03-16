@@ -3,48 +3,43 @@
   "waypoints": [
     {
       "anchor": {
-        "x": 1.5548359486447931,
-        "y": 5.865820256776035
+        "x": 0.6055908853235388,
+        "y": 6.701255518953564
       },
       "prevControl": null,
       "nextControl": {
-        "x": 0.9594959674507058,
-        "y": 6.073960562235987
+        "x": 1.6608769072147838,
+        "y": 5.777936348831445
       },
       "isLocked": false,
-      "linkedName": "end of left come back and shoot"
+      "linkedName": "end of center to depot 3"
     },
     {
       "anchor": {
-        "x": 0.7216182573218095,
-        "y": 6.721001079960874
+        "x": 1.7230385164051354,
+        "y": 4.895420827389444
       },
       "prevControl": {
-        "x": 0.9707572236579445,
-        "y": 6.79621641494298
+        "x": 1.3098721104337456,
+        "y": 5.618974241290175
       },
       "nextControl": null,
       "isLocked": false,
-      "linkedName": "end of left to the depot"
+      "linkedName": "end of center shoot 1"
     }
   ],
-  "rotationTargets": [
-    {
-      "waypointRelativePos": 0.2,
-      "rotationDegrees": 180.0
-    }
-  ],
+  "rotationTargets": [],
   "constraintZones": [],
   "pointTowardsZones": [],
   "eventMarkers": [
     {
-      "name": "deployIntake",
+      "name": "spinUpShooter",
       "waypointRelativePos": 0,
       "endWaypointRelativePos": 1.0,
       "command": {
         "type": "named",
         "data": {
-          "name": "deployIntake"
+          "name": "spinUpShooter"
         }
       }
     }
@@ -59,13 +54,13 @@
   },
   "goalEndState": {
     "velocity": 0,
-    "rotation": -105.8003182158223
+    "rotation": -32.735226272107596
   },
   "reversed": false,
-  "folder": "Left",
+  "folder": "Center",
   "idealStartingState": {
     "velocity": 0,
-    "rotation": -46.005086005254334
+    "rotation": -103.597574298379
   },
   "useDefaultConstraints": true
 }

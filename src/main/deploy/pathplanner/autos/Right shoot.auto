@@ -17,9 +17,15 @@
           }
         },
         {
-          "type": "named",
+          "type": "path",
           "data": {
-            "name": "autoShoot"
+            "pathName": "right go back to center"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "Right come back again"
           }
         }
       ]

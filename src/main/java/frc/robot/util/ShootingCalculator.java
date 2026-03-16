@@ -34,18 +34,23 @@ public class ShootingCalculator {
     private static ShootingCalculator instance;
 
     // --- Cached output values ---
-    
+
     /** Angle from robot to target (degrees, -180 to +180, 0 = forward) */
     private double angleToTarget = 0;
-    
+
     /** Target shooter motor RPM */
     private double targetRPM = 0.0;
-    
+
     /** Distance from robot to target (meters) */
     private double distance = 0.0;
-    
+
     /** Whether we're aiming at trench (true) or hub (false) */
     private boolean aimingAtTrench = false;
+
+    /** Virtual (lead-compensated) target position for shoot-on-the-move */
+    private Translation2d virtualTarget = new Translation2d();
+    /** Estimated ball flight time in seconds */
+    private double flightTimeSeconds = 0.0;
 
     // --- References ---
     
@@ -86,7 +91,14 @@ public class ShootingCalculator {
     /**
      * Recalculate the shooting solution for the fixed shooter.
      * Call this every 20ms cycle from RobotContainer.updateVisionPose().
-     * 
+     *
+     * When shoot-on-the-move is enabled, the calculator compensates for the
+     * robot's field-relative velocity by computing a "virtual target":
+     *   1. Estimate ball flight time from distance and ball exit speed
+     *   2. Virtual target = real target - (robot_velocity * flight_time)
+     *   3. Aim angle and RPM are computed relative to the virtual target
+     * This makes the ball land on the real target even while driving.
+     *
      * @param robotPose     Current robot pose on the field
      * @param chassisSpeeds Current robot velocity (robot-relative)
      * @param targetMode    Current target mode (HUB, TRENCH, or DISABLED)
@@ -94,11 +106,12 @@ public class ShootingCalculator {
      */
     public void update(Pose2d robotPose, ChassisSpeeds chassisSpeeds,
                        TargetMode targetMode, double rpmOffset) {
-        
+
         if (targetMode == TargetMode.DISABLED) {
             angleToTarget = 0.0;
             targetRPM = 0.0;
             distance = 0.0;
+            flightTimeSeconds = 0.0;
             return;
         }
 
@@ -106,24 +119,87 @@ public class ShootingCalculator {
         Alliance alliance = DriverStation.getAlliance().orElse(Alliance.Blue);
         boolean isBlue = (alliance == Alliance.Blue);
 
-        // --- 1. Get target position ---
+        // --- 1. Get actual target position ---
         Translation2d targetPos = getTargetPosition(isBlue, aimingAtTrench);
 
-        // --- 2. Calculate distance and angle to target ---
+        // --- 2. Compute static distance (used as seed for flight time) ---
         double robotX = robotPose.getX();
         double robotY = robotPose.getY();
         double dx = targetPos.getX() - robotX;
         double dy = targetPos.getY() - robotY;
         distance = Math.sqrt(dx * dx + dy * dy);
-        double fieldAngle = Math.toDegrees(Math.atan2(dy, dx));
 
-        // --- 3. Convert field angle to robot-relative angle ---
+        // --- 3. Shoot-on-the-move: compute virtual (lead) target ---
+        Translation2d aimTarget = targetPos;
+
+        if (Constants.Shooter.SHOOT_ON_MOVE_ENABLED && chassisSpeeds != null) {
+            // Convert robot-relative speeds to field-relative
+            double headingRad = robotPose.getRotation().getRadians();
+            double cos = Math.cos(headingRad);
+            double sin = Math.sin(headingRad);
+            double fieldVx = chassisSpeeds.vxMetersPerSecond * cos
+                           - chassisSpeeds.vyMetersPerSecond * sin;
+            double fieldVy = chassisSpeeds.vxMetersPerSecond * sin
+                           + chassisSpeeds.vyMetersPerSecond * cos;
+
+            double robotSpeed = Math.sqrt(fieldVx * fieldVx + fieldVy * fieldVy);
+
+            // Only compensate if robot is actually moving (>0.1 m/s)
+            if (robotSpeed > 0.1) {
+                // Iteratively refine flight time and virtual target
+                double estDist = distance;
+                double exitAngleRad = Math.toRadians(Constants.Shooter.SHOOTER_EXIT_ANGLE_DEG);
+                double cosExit = Math.cos(exitAngleRad);
+                Translation2d leadTarget = targetPos;
+
+                for (int i = 0; i < Constants.Shooter.FLIGHT_TIME_ITERATIONS; i++) {
+                    // Estimate ball horizontal speed from RPM at this distance
+                    double estRPM = calibrationMode ? rpmOffset
+                            : interpolateRPM(estDist, Constants.Shooter.SHOOTING_CALIBRATION);
+                    double wheelSurfaceSpeed = estRPM * 2.0 * Math.PI
+                            * Constants.Shooter.WHEEL_RADIUS_METERS / 60.0;
+                    double ballHorizontalSpeed = wheelSurfaceSpeed
+                            * Constants.Shooter.BALL_SPEED_EFFICIENCY * cosExit;
+
+                    // Flight time = distance / horizontal ball speed
+                    if (ballHorizontalSpeed < 1.0) ballHorizontalSpeed = 1.0; // prevent div/0
+                    flightTimeSeconds = estDist / ballHorizontalSpeed;
+
+                    // Virtual target: offset by negative robot velocity * flight time
+                    double compensationFactor = Constants.Shooter.MOVE_COMPENSATION_FACTOR;
+                    leadTarget = new Translation2d(
+                            targetPos.getX() - fieldVx * flightTimeSeconds * compensationFactor,
+                            targetPos.getY() - fieldVy * flightTimeSeconds * compensationFactor);
+
+                    // Recompute distance to the virtual target for next iteration
+                    double ldx = leadTarget.getX() - robotX;
+                    double ldy = leadTarget.getY() - robotY;
+                    estDist = Math.sqrt(ldx * ldx + ldy * ldy);
+                }
+
+                aimTarget = leadTarget;
+                // Update distance to the virtual target for RPM interpolation
+                double ldx = aimTarget.getX() - robotX;
+                double ldy = aimTarget.getY() - robotY;
+                distance = Math.sqrt(ldx * ldx + ldy * ldy);
+            } else {
+                flightTimeSeconds = 0.0;
+            }
+        }
+
+        virtualTarget = aimTarget;
+
+        // --- 4. Calculate angle to (virtual) target ---
+        double aimDx = aimTarget.getX() - robotX;
+        double aimDy = aimTarget.getY() - robotY;
+        double fieldAngle = Math.toDegrees(Math.atan2(aimDy, aimDx));
+
         // The shooter fires out the FRONT of the robot, so we aim the front
         // directly at the target. No 180° offset needed.
         double robotHeading = robotPose.getRotation().getDegrees();
         angleToTarget = normalizeAngle(fieldAngle - robotHeading);
 
-        // --- 4. Interpolate shooter RPM from distance-based calibration table ---
+        // --- 5. Interpolate shooter RPM from distance-based calibration table ---
         // In calibration mode, skip interpolation — use only the manual RPM offset
         // so the CalibrationManager slider directly controls the shooter.
         if (calibrationMode) {
@@ -134,7 +210,7 @@ public class ShootingCalculator {
         double maxRPM = Constants.Shooter.MOTOR_FREE_SPEED_RPS * 60.0;
         targetRPM = clamp(targetRPM, 0, maxRPM);
 
-        // --- 5. Publish telemetry ---
+        // --- 6. Publish telemetry ---
         publishTelemetry();
     }
 
@@ -229,6 +305,12 @@ public class ShootingCalculator {
     /** Whether currently aiming at trench vs hub. */
     public boolean isAimingAtTrench() { return aimingAtTrench; }
 
+    /** Estimated ball flight time (seconds). 0 when stationary. */
+    public double getFlightTimeSeconds() { return flightTimeSeconds; }
+
+    /** Virtual target position after shoot-on-the-move compensation. */
+    public Translation2d getVirtualTarget() { return virtualTarget; }
+
     /** Whether calibration mode is active. */
     public boolean isCalibrationMode() { return calibrationMode; }
     
@@ -258,6 +340,9 @@ public class ShootingCalculator {
         SmartDashboard.putNumber("Shooting/Distance", distance);
         SmartDashboard.putNumber("Shooting/RPM", targetRPM);
         SmartDashboard.putNumber("Shooting/AngleToTarget", angleToTarget);
+        SmartDashboard.putNumber("Shooting/FlightTime", flightTimeSeconds);
+        SmartDashboard.putNumber("Shooting/VirtualTargetX", virtualTarget.getX());
+        SmartDashboard.putNumber("Shooting/VirtualTargetY", virtualTarget.getY());
 
         Alliance alliance = DriverStation.getAlliance().orElse(Alliance.Blue);
         boolean isBlue = (alliance == Alliance.Blue);

@@ -8,6 +8,7 @@ import com.pathplanner.lib.auto.NamedCommands;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.GenericHID;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -81,11 +82,12 @@ public class RobotContainer {
     /** Whether vision has seeded the gyro heading at least once since boot. */
     private boolean hasSeededHeadingFromVision = false;
     
-    /** Debug counter to track updateVisionPose() calls */
-    private int visionUpdateCounter = 0;
-    
     /** Counter for shuttle zone logging to avoid spam */
     private int shuttleZoneLogCounter = 0;
+
+    /** Last auto validation warning key to avoid spamming identical notifications */
+    private String lastAutoWarning = "";
+    private int autoValidationCounter = 0;
 
     // =========================================================================
     // CONSTRUCTOR
@@ -194,9 +196,120 @@ public class RobotContainer {
                      .withTimeout(1.5)));
         }
 
+        // movingShoot: Shoot while PathPlanner keeps driving.
+        // Hijacks only rotation (auto-aim) via drivetrain rotation override,
+        // spools shooter, feeds trigger, then clears the override.
+        // Does NOT require the drivetrain subsystem so PathPlanner keeps running.
+        if (shooter != null && drivetrain != null) {
+            NamedCommands.registerCommand("movingShoot",
+                    Commands.runOnce(() -> {
+                        resetAimController();
+                        drivetrain.setRotationOverride(
+                                () -> aimOmega(shootingCalc.getAngleToTarget()));
+                    }).andThen(
+                        // Spool shooter to target RPM and wait until ready + aimed
+                        Commands.run(() -> shooter.setTargetRPM(shootingCalc.getTargetRPM()), shooter)
+                                .until(() -> shooter.isReady()
+                                        && Math.abs(shootingCalc.getAngleToTarget())
+                                                < Constants.Driver.AIM_TOLERANCE_DEG)
+                                .withTimeout(2.0)
+                    ).andThen(
+                        // Feed the shot
+                        trigger != null
+                                ? Commands.startEnd(() -> trigger.setShoot(), () -> trigger.stop(), trigger)
+                                        .withTimeout(0.5)
+                                : Commands.none()
+                    ).finallyDo(() -> {
+                        drivetrain.clearRotationOverride();
+                        if (shooter != null) shooter.stop();
+                    }));
+        }
+
         NamedCommands.registerCommand("wait0.5", Commands.waitSeconds(0.5));
         NamedCommands.registerCommand("wait1.0", Commands.waitSeconds(1.0));
         NamedCommands.registerCommand("wait2.0", Commands.waitSeconds(2.0));
+
+        // === COMBINED AUTO COMMANDS ===
+
+        // spoolAndIntake: Spool shooter to target RPM + deploy intake at the same time.
+        // Use while driving to a game piece — shooter is warm by the time you pick up.
+        // Runs until interrupted (pair with path or timeout).
+        if (shooter != null && intake != null) {
+            NamedCommands.registerCommand("spoolAndIntake",
+                    Commands.run(() -> shooter.setTargetRPM(shootingCalc.getTargetRPM()), shooter)
+                            .alongWith(new DeployIntakeCommand(intake)));
+        }
+
+        // aimAndShoot: Rotate to face target, then auto-shoot once aimed + spun up.
+        // Ends after feeding for 1 second (one ball cycle). Good for single-ball autos.
+        if (shooter != null && vision != null && drivetrain != null) {
+            NamedCommands.registerCommand("aimAndShoot",
+                    buildAutoShootCmd(5.0));
+        }
+
+        // shootAndRetract: Feed a shot then retract intake. Clean end to a scoring cycle.
+        if (trigger != null) {
+            Command shootRetract = Commands.startEnd(
+                    () -> trigger.setShoot(),
+                    () -> trigger.stop(),
+                    trigger);
+            if (intake != null) {
+                shootRetract = shootRetract.alongWith(new IntakeJiggleCommand(intake))
+                        .withTimeout(1.0)
+                        .andThen(Commands.runOnce(() -> intake.stopAndRetract()));
+            } else {
+                shootRetract = shootRetract.withTimeout(1.0);
+            }
+            NamedCommands.registerCommand("shootAndRetract", shootRetract);
+        }
+
+        // forceShootOn / forceShootOff: Bypass alliance timing during auto.
+        // Use at start of auto to guarantee shooting works regardless of FMS timing.
+        NamedCommands.registerCommand("forceShootOn",
+                Commands.runOnce(() -> gameState.setForceShootEnabled(true)));
+        NamedCommands.registerCommand("forceShootOff",
+                Commands.runOnce(() -> gameState.setForceShootEnabled(false)));
+
+        // waitForShooterReady: Blocks until shooter is within RPM tolerance.
+        // Insert between spinUpShooter and feedShot to avoid shooting before ready.
+        if (shooter != null) {
+            NamedCommands.registerCommand("waitForShooterReady",
+                    Commands.waitUntil(() -> shooter.isReady()).withTimeout(2.0));
+        }
+
+        // waitForAimed: Blocks until robot is aimed at target (within tolerance).
+        // Use after aimAtPose if you want to gate on aim before feeding.
+        NamedCommands.registerCommand("waitForAimed",
+                Commands.waitUntil(() -> Math.abs(shootingCalc.getAngleToTarget())
+                        < Constants.Driver.AIM_TOLERANCE_DEG).withTimeout(2.0));
+
+        // spoolToHub / spoolToTrench: Pre-spool shooter while driving toward target.
+        // Runs until interrupted — use alongside a path.
+        if (shooter != null) {
+            NamedCommands.registerCommand("spoolToHub",
+                    Commands.run(() -> shooter.setTargetRPM(shootingCalc.getTargetRPM()), shooter));
+            NamedCommands.registerCommand("spoolToTrench",
+                    Commands.runOnce(() -> gameState.setShuttleMode(true))
+                            .andThen(Commands.run(() -> shooter.setTargetRPM(
+                                    shootingCalc.getTargetRPM()), shooter)));
+        }
+
+        // intakeAndDrive: Deploy intake with rollers spinning — use alongside a path
+        // to pick up game pieces while driving. Runs until interrupted.
+        if (intake != null) {
+            NamedCommands.registerCommand("intakeAndDrive",
+                    new DeployIntakeCommand(intake));
+        }
+
+        // fullCycle: Aim + shoot + retract in one command. The "do everything" button.
+        // Aims the robot, spools shooter, feeds when ready, then retracts intake.
+        if (shooter != null && vision != null && drivetrain != null) {
+            NamedCommands.registerCommand("fullCycle",
+                    buildAutoShootCmd(4.0)
+                            .andThen(Commands.runOnce(() -> {
+                                if (intake != null) intake.stopAndRetract();
+                            })));
+        }
     }
 
     // =========================================================================
@@ -273,13 +386,13 @@ public class RobotContainer {
                 Command aimCmd = drivetrain.applyRequest(() -> {
                     // Brake lock while shooting if ready + aimed + not trying to drive
                     boolean aimed = Math.abs(shootingCalc.getAngleToTarget()) < Constants.Driver.AIM_TOLERANCE_DEG;
-                    if (shooter.isReady() &&  !isDriverCommanding()) {
+                    if (shooter.isReady() && aimed && !isDriverCommanding()) {
                         return brake;
                     }
                     double slow = driver.getRightTriggerAxis() > 0.3
                             ? Constants.Driver.SLOW_MODE_MULTIPLIER : 1.0;
-                    double vx = driver.getLeftY() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
-                    double vy = driver.getLeftX() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
+                    double vx = -driver.getLeftY() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
+                    double vy = -driver.getLeftX() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
                     double omega = aimOmega(shootingCalc.getAngleToTarget());
                     return aimFieldCentric
                             .withVelocityX(vx)
@@ -499,11 +612,9 @@ public class RobotContainer {
     // =========================================================================
 
     public void updateVisionPose() {
-        visionUpdateCounter++;
-        
-        // Log that updateVisionPose is being called every 250 cycles (5 seconds)
-        
-        
+
+        updateRumble();
+
         calibration.update();
 
         // Update shooting calculator with current pose
@@ -753,5 +864,102 @@ public class RobotContainer {
                 .withLevel(NotificationLevel.INFO)
                 .withTitle(title)
                 .withDisplaySeconds(1.5));
+    }
+
+    // =========================================================================
+    // RUMBLE FEEDBACK
+    // =========================================================================
+
+    /**
+     * Drives Xbox controller rumble based on game state:
+     *   LEFT rumble  = shooting readiness (aiming + shooter at RPM)
+     *   RIGHT rumble = shift timing warnings (get ready / go now)
+     *   BOTH         = shift is NOW — shoot immediately!
+     */
+    private void updateRumble() {
+        if (DriverStation.isDisabled()) {
+            driver.getHID().setRumble(GenericHID.RumbleType.kBothRumble, 0);
+            return;
+        }
+
+        double leftRumble = 0;
+        double rightRumble = 0;
+
+        // --- Shift change warnings (right rumble → both at peak) ---
+        if (gameState.isShootNowWarning()) {
+            // SHOOT NOW — heavy both-sides rumble
+            leftRumble = 1.0;
+            rightRumble = 1.0;
+        } else if (gameState.isSpoolWarning()) {
+            // Shift coming in 1-5 sec — moderate right rumble
+            rightRumble = 0.4;
+        } else if (gameState.isHeadBackWarning()) {
+            // 5-10 sec out — light nudge
+            rightRumble = 0.15;
+        }
+
+        // --- Ready to fire (left rumble, only when driver is aiming) ---
+        boolean aiming = driver.getLeftTriggerAxis() > 0.5
+                      || driver.leftBumper().getAsBoolean();
+        boolean aimed = Math.abs(shootingCalc.getAngleToTarget())
+                      < Constants.Driver.AIM_TOLERANCE_DEG;
+        boolean shooterReady = shooter != null && shooter.isReady();
+
+        if (aiming && aimed && shooterReady) {
+            // Locked on + spun up → FIRE!
+            leftRumble = Math.max(leftRumble, 0.6);
+        } else if (aiming && shooterReady) {
+            // Spun up but still rotating → almost there
+            leftRumble = Math.max(leftRumble, 0.15);
+        }
+
+        driver.getHID().setRumble(GenericHID.RumbleType.kLeftRumble, leftRumble);
+        driver.getHID().setRumble(GenericHID.RumbleType.kRightRumble, rightRumble);
+    }
+
+    // =========================================================================
+    // AUTO SELECTOR VALIDATION (call from disabledPeriodic)
+    // =========================================================================
+
+    /**
+     * Checks whether an auto routine is selected. If not, hammers the drive
+     * team with an Elastic ERROR notification + angry LED strobe so they
+     * can't possibly queue without picking one.
+     */
+    public void validateAutoSelection() {
+        autoValidationCounter++;
+        if (autoValidationCounter < 250) return; // Check every ~5 seconds
+        autoValidationCounter = 0;
+
+        Command selected = autoChooser.getSelected();
+        String autoName = selected != null ? selected.getName() : "";
+
+        if (selected == null || autoName.isEmpty() || autoName.equals("InstantCommand")) {
+            if (!lastAutoWarning.equals("NO_AUTO")) {
+                lastAutoWarning = "NO_AUTO";
+                SmartDashboard.putBoolean("Auto/Valid", false);
+                SmartDashboard.putString("Auto/Warning", "NO AUTO SELECTED");
+            }
+            // Re-send Elastic notification every 5 seconds so it's always visible
+            Elastic.sendNotification(new Elastic.Notification()
+                    .withLevel(NotificationLevel.ERROR)
+                    .withTitle("NO AUTO SELECTED")
+                    .withDescription("Pick an auto routine NOW!")
+                    .withWidth(500)
+                    .withHeight(300)
+                    .withDisplaySeconds(6));
+            // Angry LED strobe
+            if (leds != null) leds.setAction(LEDSubsystem.ActionState.NO_AUTO);
+        } else {
+            if (!lastAutoWarning.isEmpty()) {
+                lastAutoWarning = "";
+                SmartDashboard.putBoolean("Auto/Valid", true);
+                SmartDashboard.putString("Auto/Warning", "");
+                // Clear the LED warning
+                if (leds != null && leds.getAction() == LEDSubsystem.ActionState.NO_AUTO) {
+                    leds.clearAction();
+                }
+            }
+        }
     }
 }

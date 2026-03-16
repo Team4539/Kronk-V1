@@ -74,7 +74,7 @@ public class ShooterSubsystem extends SubsystemBase {
         return isHealthy;
     }
 
-    public Boolean isHealthy() {
+    public boolean isHealthy() {
         return isHealthy;
     }
 

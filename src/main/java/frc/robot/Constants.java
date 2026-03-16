@@ -129,8 +129,23 @@ public final class Constants {
     //
     public static final List<double[]> SHOOTING_CALIBRATION = new ArrayList<>() {{
       add(new double[]{0.60, 2250}); add(new double[]{3.01, 3175}); add(new double[]{5.31, 4175});
-      
+
     }};
+
+    // --- Shoot-on-the-move compensation ---
+    /** Master enable for shoot-on-the-move velocity compensation */
+    public static final boolean SHOOT_ON_MOVE_ENABLED = true;
+    /** Fixed exit angle of the shooter above horizontal (degrees) */
+    public static final double SHOOTER_EXIT_ANGLE_DEG = 15;
+    /** Ratio of ball exit speed to flywheel surface speed (0-1, tune empirically) change this value mostly, overshoot = need lower undershoot = need higher */
+    public static final double BALL_SPEED_EFFICIENCY = 0.7;
+    /** Number of iterations for flight-time convergence (2-3 is plenty) */
+    public static final int FLIGHT_TIME_ITERATIONS = 2;
+    /**
+     * Scaling factor for how much velocity compensation to apply (0.0-1.0+).
+     * 1.0 = full physics-based compensation. Start lower and tune up.
+     */
+    public static final double MOVE_COMPENSATION_FACTOR = 1.0;
   }
 
   public static final class Trigger {

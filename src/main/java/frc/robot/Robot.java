@@ -75,7 +75,9 @@ public class Robot extends TimedRobot {
   }
 
   @Override
-  public void disabledPeriodic() {}
+  public void disabledPeriodic() {
+    m_robotContainer.validateAutoSelection();
+  }
 
   @Override
   public void autonomousInit() {

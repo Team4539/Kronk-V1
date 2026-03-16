@@ -147,8 +147,11 @@ public class GameStateManager {
             return;
         }
 
-        // During autonomous, never auto-switch based on zone — only named commands (manual override) can enable shuttle
+        // During autonomous, only allow shuttle mode if explicitly enabled by named command
         if (edu.wpi.first.wpilibj.DriverStation.isAutonomous()) {
+            if (!shuttleModeManualOverride) {
+                shuttleMode = false;
+            }
             return;
         }
 
@@ -232,19 +235,32 @@ public class GameStateManager {
         }
     }
     
-    /** True when 3-10 seconds before our shift. Drivers should head to scoring position. */
+    /** True when 5-10 seconds before our shift. Drivers should head to scoring position. */
     public boolean isHeadBackWarning() {
         if (isOurAllianceActive()) return false;
         double s = getSecondsUntilOurNextShift();
-        // Warn earlier (10s) as requested
-        return s > 3.0 && s <= 10.0;
+        return s > 5.0 && s <= 10.0;
     }
-    
-    /** True when 3-0 seconds before our shift. Pre-aim and pre-spool! */
+
+    /** True when 1-5 seconds before our shift. Start spooling the shooter! */
+    public boolean isSpoolWarning() {
+        if (isOurAllianceActive()) return false;
+        double s = getSecondsUntilOurNextShift();
+        return s > 1.0 && s <= 5.0;
+    }
+
+    /** True when 0-1 second before our shift. Start shooting! */
+    public boolean isShootNowWarning() {
+        if (isOurAllianceActive()) return false;
+        double s = getSecondsUntilOurNextShift();
+        return s > 0.0 && s <= 1.0;
+    }
+
+    /** True when 0-5 seconds before our shift. Pre-aim and pre-spool! */
     public boolean isGreenLightPreShift() {
         if (isOurAllianceActive()) return false;
         double s = getSecondsUntilOurNextShift();
-        return s > 0.0 && s <= 3.0;
+        return s > 0.0 && s <= 5.0;
     }
     
     /** Can we shoot right now? */
@@ -372,6 +388,8 @@ public class GameStateManager {
         SmartDashboard.putString("Match/Status", currentPhase.name());
         SmartDashboard.putBoolean("Match/ShootUnlocked", canShoot());
         SmartDashboard.putBoolean("Match/HeadBack", isHeadBackWarning());
+        SmartDashboard.putBoolean("Match/SpoolWarning", isSpoolWarning());
+        SmartDashboard.putBoolean("Match/ShootNow", isShootNowWarning());
         SmartDashboard.putBoolean("Match/GreenLight", isGreenLightPreShift());
         SmartDashboard.putString("Match/Target", currentTargetMode.name());
         SmartDashboard.putBoolean("Match/ForceShoot", forceShootEnabled);

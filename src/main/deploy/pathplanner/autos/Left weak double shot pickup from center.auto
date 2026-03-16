@@ -13,12 +13,6 @@
                 "data": {
                   "pathName": "LEFT Go to center"
                 }
-              },
-              {
-                "type": "named",
-                "data": {
-                  "name": "deployIntake"
-                }
               }
             ]
           }
@@ -31,12 +25,6 @@
                 "type": "path",
                 "data": {
                   "pathName": "LEFT come back and shoot"
-                }
-              },
-              {
-                "type": "named",
-                "data": {
-                  "name": "deployIntake"
                 }
               }
             ]

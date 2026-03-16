@@ -100,10 +100,25 @@ public class LEDSubsystem extends SubsystemBase {
     
     // CAN frame deduplication
     private int lastSentR = -1, lastSentG = -1, lastSentB = -1;
-    
+
     // LED update throttle: 10Hz
     private int ledUpdateCounter = 0;
-    private static final int LED_UPDATE_DIVISOR = 5;
+    private static final int LED_UPDATE_DIVISOR = 2;
+
+    // Shift timing warning flash system
+    private double warningFlashStart = -1;
+    private int[] warningFlashColor = null;
+    private String warningFlashName = null;
+    private static final double WARNING_FLASH_DURATION = 0.75; // seconds
+
+    // One-shot tracking for shift timing warnings (reset when alliance becomes active)
+    private boolean hasFlashedShift10s = false;
+    private boolean hasFlashedShift5s = false;
+    private boolean hasFlashedShift1s = false;
+
+    // One-shot tracking for endgame countdown warnings
+    private boolean hasFlashedEndgame10s = false;
+    private boolean hasFlashedEndgame5s = false;
     
     // =========================================================================
     // ENUMS
@@ -135,6 +150,7 @@ public class LEDSubsystem extends SubsystemBase {
         INTAKING,    // Running intake — solid yellow-green
         DEFENSIVE,   // Defensive brake mode — pulsing amber/gold
         FORCE_SHOOT, // Force shoot enabled — purple breathing
+        NO_AUTO,     // No auto selected — angry red/orange strobe
         BROWNOUT     // Low voltage — amber flicker
     }
     
@@ -263,10 +279,15 @@ public class LEDSubsystem extends SubsystemBase {
     }
     
     private int[] scaleColor(int[] color, double factor) {
+        factor = Math.max(0.0, factor);
+        // Gamma correction (gamma 1.8) for perceptually linear brightness fading.
+        // Without this, LED fades look "washed out" at high values and "pop" at low values.
+        // Only applied below 1.0; values above 1.0 pass through for intentional overdrive.
+        double gFactor = factor <= 1.0 ? Math.pow(factor, 1.8) : factor;
         return new int[] {
-            Math.min(255, Math.max(0, (int)(color[0] * factor))),
-            Math.min(255, Math.max(0, (int)(color[1] * factor))),
-            Math.min(255, Math.max(0, (int)(color[2] * factor)))
+            Math.min(255, Math.max(0, (int)(color[0] * gFactor))),
+            Math.min(255, Math.max(0, (int)(color[1] * gFactor))),
+            Math.min(255, Math.max(0, (int)(color[2] * gFactor)))
         };
     }
     
@@ -289,8 +310,19 @@ public class LEDSubsystem extends SubsystemBase {
      */
     private void setBreathing(int[] color, double cycleSeconds) {
         double phase = (Timer.getFPGATimestamp() % cycleSeconds) / cycleSeconds;
-        double brightness = (Math.sin(phase * Math.PI * 2) + 1) / 2;
-        brightness = 0.15 + 0.85 * brightness; // Floor at 15% so it never fully darkens
+        // Organic asymmetric curve: quick rise (25%), slow fall (50%), rest pause (25%)
+        // Mimics real breathing — inhale is faster than exhale, with a pause between breaths
+        double brightness;
+        if (phase < 0.25) {
+            double t = phase / 0.25;
+            brightness = t * t * (3 - 2 * t); // smoothstep rise
+        } else if (phase < 0.75) {
+            double t = (phase - 0.25) / 0.5;
+            brightness = 1.0 - t * t * (3 - 2 * t); // smoothstep fall (slower)
+        } else {
+            brightness = 0.0; // rest pause between breaths
+        }
+        brightness = 0.12 + 0.88 * brightness; // Floor at 12% so LEDs never fully darken
         setSolidColor(scaleColor(color, brightness));
     }
     
@@ -366,30 +398,29 @@ public class LEDSubsystem extends SubsystemBase {
         // Fade zone: 2 LEDs between blocks for a clean transition
         int fadeZone = 2;
         int fullBlock = blockSize + fadeZone; // one color block + its fade
-        
-        // Scroll offset: moves smoothly along the strip
-        double scrollSpeed = 4.0; // LEDs per second
-        double scrollOffset = currentTime * scrollSpeed;
-        
+
+        // Scroll offset: gently accelerates/decelerates for organic feel
+        double baseSpeed = 4.0; // LEDs per second
+        double speedVariation = 0.3 * Math.sin(currentTime * 0.4); // subtle speed wobble
+        double scrollOffset = currentTime * (baseSpeed + speedVariation);
+
         // Gentle global breathing so it's not static
         double breath = 0.6 + 0.4 * ((Math.sin(currentTime * 0.8) + 1.0) / 2.0);
-        
+
         clearBuffer();
-        
-        // Onboard LEDs: alternating solid orange/blue, no blending
+
+        // Onboard LEDs: alternating solid orange/blue with breathing via scaleColor
         for (int i = 0; i < onboard && i < ledCount; i++) {
             int[] color = (i < onboard / 2) ? orange : blue;
-            ledBuffer[i][0] = (int)(color[0] * breath * masterBrightness);
-            ledBuffer[i][1] = (int)(color[1] * breath * masterBrightness);
-            ledBuffer[i][2] = (int)(color[2] * breath * masterBrightness);
+            setLED(i, scaleColor(color, breath));
         }
-        
-        // Strip: scrolling blocks with short fade transitions
+
+        // Strip: scrolling blocks with per-LED noise shimmer for organic life
         for (int i = 0; i < stripCount; i++) {
             // Where does this LED fall in the repeating block pattern?
             double pos = (i + scrollOffset) % (fullBlock * 2);
             if (pos < 0) pos += fullBlock * 2;
-            
+
             int[] color;
             if (pos < blockSize) {
                 // Solid orange block
@@ -406,8 +437,10 @@ public class LEDSubsystem extends SubsystemBase {
                 double t = (pos - blockSize - fadeZone - blockSize) / fadeZone;
                 color = lerpColor(blue, orange, t);
             }
-            
-            setLED(stripStart + i, scaleColor(color, breath));
+
+            // Per-LED shimmer: subtle noise-based brightness variation
+            double shimmer = 0.85 + 0.15 * noise1D(i * 0.5 + currentTime * 1.2);
+            setLED(stripStart + i, scaleColor(color, breath * shimmer));
         }
         
         pushBuffer();
@@ -737,27 +770,44 @@ public class LEDSubsystem extends SubsystemBase {
             ledBuffer[i][2] = (int)(onboardColor[2] * masterBrightness);
         }
         
-        // Strip: chase dot with growing tail
+        // Strip: chase comet with leading glow and smooth tail
         for (int i = 0; i < stripCount; i++) {
             // Distance behind the head (wrapping)
             double distBehind = headPos - i;
             if (distBehind < 0) distBehind += stripCount;
-            
+
+            // Distance ahead of head (for leading glow)
+            double distAhead = stripCount - distBehind;
+            if (distAhead > stripCount / 2.0) distAhead = stripCount; // only count forward
+
             double brightness;
+            boolean isHead = false;
+
             if (distBehind < 1.0) {
                 brightness = 1.0; // Head pixel — full bright
+                isHead = true;
             } else if (distBehind < tailLen) {
-                // Tail: smooth fade from head (1.0) to tip (dim but visible)
+                // Tail: smoothstep fade (more natural than quadratic)
                 double t = 1.0 - ((distBehind - 1.0) / (tailLen - 1.0));
-                // At high urgency the tail floor rises (less fade, more solid)
                 double tailFloor = 0.3 * urgency * urgency;
-                brightness = tailFloor + (1.0 - tailFloor) * t * t;
+                double smooth = t * t * (3 - 2 * t); // smoothstep
+                brightness = tailFloor + (1.0 - tailFloor) * smooth;
+            } else if (distAhead > 0 && distAhead <= 3.0) {
+                // Leading glow: soft light ahead of the comet head
+                double glowFade = 1.0 - distAhead / 3.0;
+                brightness = 0.25 * glowFade * glowFade;
             } else {
                 brightness = 0.0; // Dark
             }
-            
+
             if (brightness > 0.01) {
-                int[] c = scaleColor(color, brightness);
+                int[] c;
+                if (isHead) {
+                    // Comet head tinted toward warm white for a "hot" leading edge
+                    c = lerpColor(color, Constants.LEDs.WARM_WHITE, 0.2);
+                } else {
+                    c = scaleColor(color, brightness);
+                }
                 int idx = stripStart + i;
                 ledBuffer[idx][0] = (int)(c[0] * masterBrightness);
                 ledBuffer[idx][1] = (int)(c[1] * masterBrightness);
@@ -805,7 +855,20 @@ public class LEDSubsystem extends SubsystemBase {
             setEStopPattern();
             return;
         }
-        
+
+        // === PRIORITY 2.5: SHIFT/ENDGAME WARNING FLASH — brief override ===
+        // These 0.75s flashes override all action states so the driver
+        // never misses the 10s/5s/1s shift cues or endgame countdown.
+        if (warningFlashColor != null) {
+            double elapsed = Timer.getFPGATimestamp() - warningFlashStart;
+            if (elapsed < WARNING_FLASH_DURATION) {
+                currentPatternName = warningFlashName;
+                setStrobe(warningFlashColor, 10.0);
+                return;
+            }
+            warningFlashColor = null; // Flash finished
+        }
+
         // === PRIORITY 3: GAME DATA ANNOUNCEMENT — robot knows who goes first! ===
         if (announcementActive) {
             double elapsed = Timer.getFPGATimestamp() - announcementStartTime;
@@ -824,12 +887,13 @@ public class LEDSubsystem extends SubsystemBase {
             return;
         }
         
-        // === PRIORITY 5: READY TO SHOOT — solid GREEN ===
+        // === PRIORITY 5: READY TO SHOOT — vivid GREEN with subtle life pulse ===
         // This is the critical "you can pull the trigger now" indicator.
         // Set by RobotContainer when shooter.isReady() during LT spool.
         if (currentAction == ActionState.SHOOTING) {
             currentPatternName = "READY - SHOOT!";
-            setSolidColor(Constants.LEDs.SHOOTING_COLOR);
+            double pulse = 0.88 + 0.12 * Math.sin(Timer.getFPGATimestamp() * 6.0);
+            setSolidColor(scaleColor(Constants.LEDs.SHOOTING_COLOR, pulse));
             return;
         }
         
@@ -840,10 +904,11 @@ public class LEDSubsystem extends SubsystemBase {
             return;
         }
         
-        // === PRIORITY 7: INTAKING — solid yellow-green ===
+        // === PRIORITY 7: INTAKING — yellow-green with subtle life pulse ===
         if (currentAction == ActionState.INTAKING) {
             currentPatternName = "Intaking";
-            setSolidColor(Constants.LEDs.INTAKING_COLOR);
+            double pulse = 0.93 + 0.07 * Math.sin(Timer.getFPGATimestamp() * 5.0);
+            setSolidColor(scaleColor(Constants.LEDs.INTAKING_COLOR, pulse));
             return;
         }
         
@@ -861,7 +926,15 @@ public class LEDSubsystem extends SubsystemBase {
             return;
         }
         
-        // === PRIORITY 10: Match phase patterns ===
+        // === PRIORITY 10: NO AUTO — angry red/orange strobe while disabled ===
+        if (currentAction == ActionState.NO_AUTO) {
+            currentPatternName = "NO AUTO!!!";
+            // Alternating red and orange at 4 Hz — impossible to miss
+            setStrobe(Constants.LEDs.NO_AUTO_COLOR, 4.0);
+            return;
+        }
+
+        // === PRIORITY 11: Match phase patterns ===
         switch (currentState) {
             case BOOT_WARMUP:
                 currentPatternName = "Boot Warmup";
@@ -975,9 +1048,87 @@ public class LEDSubsystem extends SubsystemBase {
     }
     
     // =========================================================================
+    // SHIFT & ENDGAME WARNING FLASH SYSTEM
+    // =========================================================================
+
+    /** Triggers a brief high-priority LED flash with an Elastic notification. */
+    private void triggerWarningFlash(String name, int[] color, String notification) {
+        warningFlashStart = Timer.getFPGATimestamp();
+        warningFlashColor = color;
+        warningFlashName = name;
+        if (notification != null) {
+            Elastic.sendNotification(new Elastic.Notification()
+                .withLevel(NotificationLevel.WARNING)
+                .withTitle(notification)
+                .withDisplaySeconds(1.5));
+        }
+    }
+
+    /**
+     * Checks for shift timing warnings (10s/5s/1s before our shift) and
+     * endgame countdown warnings (10s/5s remaining). Fires one-shot LED
+     * flashes that override all action states so the driver never misses them.
+     */
+    private void checkShiftAndEndgameWarnings() {
+        if (!DriverStation.isTeleop()) {
+            // Reset all flags outside teleop
+            hasFlashedShift10s = false;
+            hasFlashedShift5s = false;
+            hasFlashedShift1s = false;
+            hasFlashedEndgame10s = false;
+            hasFlashedEndgame5s = false;
+            return;
+        }
+
+        GamePhase phase = gameState.getGamePhase();
+
+        // --- Shift timing warnings (before our scoring window opens) ---
+        if (!gameState.isOurAllianceActive() && phase != GamePhase.END_GAME
+                && phase != GamePhase.TRANSITION) {
+            double secsUntil = gameState.getSecondsUntilOurNextShift();
+
+            if (secsUntil <= 10.0 && secsUntil > 9.0 && !hasFlashedShift10s) {
+                hasFlashedShift10s = true;
+                triggerWarningFlash("HEAD BACK 10s",
+                        Constants.LEDs.ENDGAME_WARNING_10SEC, "HEAD BACK! 10 seconds");
+            }
+            if (secsUntil <= 5.0 && secsUntil > 4.0 && !hasFlashedShift5s) {
+                hasFlashedShift5s = true;
+                triggerWarningFlash("SPOOL UP 5s",
+                        Constants.LEDs.ENDGAME_WARNING_5SEC, "START SPOOL! 5 seconds");
+            }
+            if (secsUntil <= 1.0 && secsUntil > 0.0 && !hasFlashedShift1s) {
+                hasFlashedShift1s = true;
+                triggerWarningFlash("SHOOT NOW 1s",
+                        Constants.LEDs.SHOOTING_COLOR, "SHOOT NOW! 1 second");
+            }
+        } else {
+            // Reset shift flags when our alliance is active (ready for next wait period)
+            hasFlashedShift10s = false;
+            hasFlashedShift5s = false;
+            hasFlashedShift1s = false;
+        }
+
+        // --- Endgame countdown warnings (visible even during actions) ---
+        if (phase == GamePhase.END_GAME) {
+            double matchTime = DriverStation.getMatchTime();
+            if (matchTime <= 10.0 && matchTime > 9.0 && !hasFlashedEndgame10s) {
+                hasFlashedEndgame10s = true;
+                triggerWarningFlash("ENDGAME 10s!",
+                        Constants.LEDs.ENDGAME_WARNING_10SEC, "10 SECONDS LEFT!");
+            }
+            if (matchTime <= 5.0 && matchTime > 4.0 && !hasFlashedEndgame5s) {
+                hasFlashedEndgame5s = true;
+                triggerWarningFlash("ENDGAME 5s!",
+                        Constants.LEDs.ENDGAME_WARNING_5SEC, "5 SECONDS LEFT!");
+            }
+        }
+    }
+
+    // =========================================================================
     // PERIODIC
     // =========================================================================
-    
+
     @Override
     public void periodic() {
         // --- CANdle boot gate ---
@@ -1010,7 +1161,10 @@ public class LEDSubsystem extends SubsystemBase {
         
         // --- Check E-stop ---
         isEStopped = DriverStation.isEStopped();
-        
+
+        // --- Check shift timing and endgame warnings ---
+        checkShiftAndEndgameWarnings();
+
         // --- Check for game data announcement ---
         if (gameState.didJustReceiveGameMessage() && !announcementActive) {
             announcementActive = true;
