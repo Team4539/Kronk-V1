@@ -3,37 +3,32 @@
   "waypoints": [
     {
       "anchor": {
-        "x": 1.7230385164051354,
-        "y": 4.895420827389444
+        "x": 0.7216182573218095,
+        "y": 6.721001079960874
       },
       "prevControl": null,
       "nextControl": {
-        "x": 2.5143194582177655,
-        "y": 4.911261807969285
+        "x": 0.9466854422592521,
+        "y": 6.854801615196661
       },
       "isLocked": false,
-      "linkedName": "end of center shoot 1"
+      "linkedName": "end of left to the depot"
     },
     {
       "anchor": {
-        "x": 0.506804564907275,
-        "y": 5.412967189728959
+        "x": 1.5548359486447931,
+        "y": 5.865820256776035
       },
       "prevControl": {
-        "x": 0.25689324066319763,
-        "y": 5.419625268623929
+        "x": 0.766270247929027,
+        "y": 6.0859232665976215
       },
       "nextControl": null,
       "isLocked": false,
-      "linkedName": "end of go back"
+      "linkedName": "end of left come back and shoot"
     }
   ],
-  "rotationTargets": [
-    {
-      "waypointRelativePos": 0.5,
-      "rotationDegrees": 180.0
-    }
-  ],
+  "rotationTargets": [],
   "constraintZones": [],
   "pointTowardsZones": [],
   "eventMarkers": [],
@@ -47,13 +42,13 @@
   },
   "goalEndState": {
     "velocity": 0,
-    "rotation": 101.73857120672233
+    "rotation": -46.005086005254334
   },
   "reversed": false,
-  "folder": "Center",
+  "folder": "Left",
   "idealStartingState": {
     "velocity": 0,
-    "rotation": -32.735226272107596
+    "rotation": -105.8003182158223
   },
   "useDefaultConstraints": true
 }
