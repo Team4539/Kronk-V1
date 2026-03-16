@@ -3,32 +3,37 @@
   "waypoints": [
     {
       "anchor": {
-        "x": 7.39052245959901,
-        "y": 5.551183765812923
+        "x": 1.7230385164051354,
+        "y": 4.895420827389444
       },
       "prevControl": null,
       "nextControl": {
-        "x": 7.467352663943642,
-        "y": 4.6774123392607025
+        "x": 2.5143194582177655,
+        "y": 4.911261807969285
       },
       "isLocked": false,
-      "linkedName": "end of spin init spin"
+      "linkedName": "end of center shoot 1"
     },
     {
       "anchor": {
-        "x": 8.024276730721457,
-        "y": 4.136574343631142
+        "x": 0.506804564907275,
+        "y": 5.412967189728959
       },
       "prevControl": {
-        "x": 7.871279865733364,
-        "y": 5.001067025703295
+        "x": 0.25689324066319763,
+        "y": 5.419625268623929
       },
       "nextControl": null,
       "isLocked": false,
-      "linkedName": "end of spin 1"
+      "linkedName": "end of go back"
     }
   ],
-  "rotationTargets": [],
+  "rotationTargets": [
+    {
+      "waypointRelativePos": 0.5,
+      "rotationDegrees": 180.0
+    }
+  ],
   "constraintZones": [],
   "pointTowardsZones": [],
   "eventMarkers": [],
@@ -41,14 +46,14 @@
     "unlimited": false
   },
   "goalEndState": {
-    "velocity": 3.0,
-    "rotation": 179.3689035367243
+    "velocity": 0,
+    "rotation": 101.73857120672231
   },
   "reversed": false,
-  "folder": "Spinny",
+  "folder": "Center",
   "idealStartingState": {
-    "velocity": 3.0,
-    "rotation": -14.088665373298795
+    "velocity": 0,
+    "rotation": -32.735226272107596
   },
   "useDefaultConstraints": true
 }

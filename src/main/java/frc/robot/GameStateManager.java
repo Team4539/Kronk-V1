@@ -146,7 +146,12 @@ public class GameStateManager {
             }
             return;
         }
-        
+
+        // During autonomous, never auto-switch based on zone — only named commands (manual override) can enable shuttle
+        if (edu.wpi.first.wpilibj.DriverStation.isAutonomous()) {
+            return;
+        }
+
         if (shuttleModeManualOverride) {
             if (wasInShuttleZone != robotInShuttleZone) {
                 System.out.println("[GameState] Manual shuttle override active - ignoring zone change (inZone=" + robotInShuttleZone + ")");

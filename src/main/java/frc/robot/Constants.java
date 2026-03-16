@@ -100,9 +100,9 @@ public final class Constants {
     public static final double SHOOTER_EXIT_HEIGHT_METERS = 0.50;
     
     /** Idle RPM when not actively spooling. Keeps flywheel warm for faster spin-up. */
-    public static final double DEFAULT_IDLE_RPM = 2250;
+    public static final double DEFAULT_IDLE_RPM = 2000;
     /** Fallback RPM used when vision/pose is unavailable and driver manually ranges shots. */
-    public static final double FALLBACK_RPM = 2250;
+    public static final double FALLBACK_RPM = 2000;
     
     /** Free speed of the motor in rotations per second (Kraken X60 ~100 rps) */
     public static final double MOTOR_FREE_SPEED_RPS = 100.0;
@@ -137,7 +137,7 @@ public final class Constants {
     public static final int MOTOR_ID = CANIds.TRIGGER_MOTOR;
     public static final boolean MOTOR_INVERTED = false;
     /** Idle RPM — slow feed to stage balls near the shooter */
-    public static final double IDLE_SPEED_RPM = 2250;
+    public static final double IDLE_SPEED_RPM = 2000;
     /** Shoot RPM — full speed reverse to feed balls into shooter (negative = reverse) */
     public static final double SHOOT_SPEED_RPM = -3000.0;
     

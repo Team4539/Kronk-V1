@@ -7,13 +7,13 @@
         {
           "type": "path",
           "data": {
-            "pathName": "LEFT Go to center"
+            "pathName": "Right go to center"
           }
         },
         {
           "type": "path",
           "data": {
-            "pathName": "LEFT come back and shoot"
+            "pathName": "Right come back"
           }
         },
         {
@@ -26,6 +26,6 @@
     }
   },
   "resetOdom": true,
-  "folder": "Left",
+  "folder": "Right",
   "choreoAuto": false
 }

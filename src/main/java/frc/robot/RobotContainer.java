@@ -130,14 +130,11 @@ public class RobotContainer {
     private void registerNamedCommands() {
         if (shooter != null && vision != null) {
             NamedCommands.registerCommand("autoShoot",
-                    new AutoShootCommand(shooter, vision, leds, trigger, drivetrain)
-                            .withTimeout(5.0));
+                    buildAutoShootCmd(20));
             NamedCommands.registerCommand("quickShoot",
-                    new AutoShootCommand(shooter, vision, leds, trigger, drivetrain)
-                            .withTimeout(1.5));
+                    buildAutoShootCmd(1.5));
             NamedCommands.registerCommand("TrainingShot",
-                    new AutoShootCommand(shooter, vision, leds, trigger, drivetrain)
-                            .withTimeout(2.5));
+                    buildAutoShootCmd(2.5));
         }
         if (shooter != null) {
             NamedCommands.registerCommand("spinUpShooter",
@@ -276,13 +273,13 @@ public class RobotContainer {
                 Command aimCmd = drivetrain.applyRequest(() -> {
                     // Brake lock while shooting if ready + aimed + not trying to drive
                     boolean aimed = Math.abs(shootingCalc.getAngleToTarget()) < Constants.Driver.AIM_TOLERANCE_DEG;
-                    if (shooter.isReady() && aimed && !isDriverCommanding()) {
+                    if (shooter.isReady() &&  !isDriverCommanding()) {
                         return brake;
                     }
                     double slow = driver.getRightTriggerAxis() > 0.3
                             ? Constants.Driver.SLOW_MODE_MULTIPLIER : 1.0;
-                    double vx = -driver.getLeftY() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
-                    double vy = -driver.getLeftX() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
+                    double vx = driver.getLeftY() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
+                    double vy = driver.getLeftX() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
                     double omega = aimOmega(shootingCalc.getAngleToTarget());
                     return aimFieldCentric
                             .withVelocityX(vx)
@@ -429,7 +426,7 @@ public class RobotContainer {
                             .withRotationalRate(omega);
                 }
 
-                double vr = driver.getRightX() * Constants.Driver.MAX_ANGULAR_SPEED_RAD * slow
+                double vr = -driver.getRightX() * Constants.Driver.MAX_ANGULAR_SPEED_RAD * slow
                           * Constants.Driver.AIM_DIRECTION;
                 if (useRobotCentric) {
                     return robotCentric.withVelocityX(vx).withVelocityY(vy).withRotationalRate(vr);
@@ -677,6 +674,26 @@ public class RobotContainer {
     /** Reset the PD controller state to avoid D-term spikes when switching aim commands */
     public void resetAimController() {
         previousAimErrorRad = 0.0;
+    }
+
+    /** Builds an auto-shoot named command that rotates to aim while shooting. */
+    private Command buildAutoShootCmd(double timeoutSeconds) {
+        Command shootCmd = new AutoShootCommand(shooter, vision, leds, trigger, drivetrain);
+        Command fullCmd = Commands.runOnce(() -> resetAimController()).andThen(shootCmd);
+        if (drivetrain != null) {
+            Command aimCmd = drivetrain.applyRequest(() -> {
+                double omega = aimOmega(shootingCalc.getAngleToTarget());
+                return aimFieldCentric
+                        .withVelocityX(0)
+                        .withVelocityY(0)
+                        .withRotationalRate(omega);
+            });
+            fullCmd = fullCmd.alongWith(aimCmd);
+        }
+        if (intake != null) {
+            fullCmd = fullCmd.alongWith(new IntakeJiggleCommand(intake));
+        }
+        return fullCmd.withTimeout(timeoutSeconds);
     }
 
     /**

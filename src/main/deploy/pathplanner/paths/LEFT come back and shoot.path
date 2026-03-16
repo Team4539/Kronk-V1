@@ -16,28 +16,44 @@
     },
     {
       "anchor": {
-        "x": 5.557249838600696,
-        "y": 7.423406104772863
+        "x": 5.697466666666667,
+        "y": 7.240922222222221
       },
       "prevControl": {
-        "x": 6.093221420391837,
-        "y": 7.393397472960459
+        "x": 6.233438248457808,
+        "y": 7.210913590409817
       },
       "nextControl": {
-        "x": 5.1025852552602,
-        "y": 7.4488624210089025
+        "x": 5.242802083326171,
+        "y": 7.266378538458261
       },
       "isLocked": false,
       "linkedName": null
     },
     {
       "anchor": {
-        "x": 1.9788855130907526,
-        "y": 7.4157518615185385
+        "x": 2.0043222222222226,
+        "y": 7.240922222222221
       },
       "prevControl": {
-        "x": 3.5244271254203694,
-        "y": 7.53218802277471
+        "x": 3.503094939093897,
+        "y": 7.63581030541998
+      },
+      "nextControl": {
+        "x": 1.670843271185678,
+        "y": 7.1530590910888465
+      },
+      "isLocked": false,
+      "linkedName": null
+    },
+    {
+      "anchor": {
+        "x": 1.5548359486447931,
+        "y": 5.865820256776035
+      },
+      "prevControl": {
+        "x": 0.9940899247029644,
+        "y": 6.582567978519201
       },
       "nextControl": null,
       "isLocked": false,
@@ -48,6 +64,10 @@
     {
       "waypointRelativePos": 0.5,
       "rotationDegrees": 0.0
+    },
+    {
+      "waypointRelativePos": 2.189124350259891,
+      "rotationDegrees": 0.0
     }
   ],
   "constraintZones": [],
@@ -55,15 +75,14 @@
   "eventMarkers": [
     {
       "name": "deployIntake",
-      "waypointRelativePos": 0.8650888045203878,
-      "endWaypointRelativePos": null,
-      "command": null
-    },
-    {
-      "name": "autoShoot",
-      "waypointRelativePos": 2.0,
-      "endWaypointRelativePos": null,
-      "command": null
+      "waypointRelativePos": 0.0,
+      "endWaypointRelativePos": 2.109686609686605,
+      "command": {
+        "type": "named",
+        "data": {
+          "name": "deployIntake"
+        }
+      }
     }
   ],
   "globalConstraints": {
@@ -76,7 +95,7 @@
   },
   "goalEndState": {
     "velocity": 0,
-    "rotation": 0.0
+    "rotation": -46.00508600525433
   },
   "reversed": false,
   "folder": "Left",
