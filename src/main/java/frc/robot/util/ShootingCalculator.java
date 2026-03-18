@@ -115,6 +115,17 @@ public class ShootingCalculator {
             return;
         }
 
+        // Guard against bad pose data (CAN glitch, uninitialized odometry)
+        if (robotPose == null
+                || Double.isNaN(robotPose.getX()) || Double.isNaN(robotPose.getY())
+                || Double.isInfinite(robotPose.getX()) || Double.isInfinite(robotPose.getY())) {
+            angleToTarget = 0.0;
+            targetRPM = Constants.Shooter.FALLBACK_RPM;
+            distance = 0.0;
+            flightTimeSeconds = 0.0;
+            return;
+        }
+
         aimingAtTrench = (targetMode == TargetMode.TRENCH || gameState.isShuttleMode());
         Alliance alliance = DriverStation.getAlliance().orElse(Alliance.Blue);
         boolean isBlue = (alliance == Alliance.Blue);
@@ -267,12 +278,14 @@ public class ShootingCalculator {
         }
 
         // Above the farthest calibration point — extrapolate from last two points
+        // Clamp to motor max RPM to prevent runaway extrapolation at long range
         int last = table.size() - 1;
         if (dist >= table.get(last)[0]) {
             double d0 = table.get(last - 1)[0], rpm0 = table.get(last - 1)[1];
             double d1 = table.get(last)[0],     rpm1 = table.get(last)[1];
             double slope = (rpm1 - rpm0) / (d1 - d0);
-            return Math.max(0, rpm1 + slope * (dist - d1));
+            double maxRPM = Constants.Shooter.MOTOR_FREE_SPEED_RPS * 60.0;
+            return Math.max(0, Math.min(maxRPM, rpm1 + slope * (dist - d1)));
         }
 
         // Find the two bracketing points and lerp

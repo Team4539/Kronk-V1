@@ -210,6 +210,11 @@ public class LEDSubsystem extends SubsystemBase {
     public ActionState getAction() { return currentAction; }
     public void clearAction() { currentAction = ActionState.IDLE; }
 
+    /** Check if the CANdle is responding on the CAN bus. */
+    public boolean checkHealth() {
+        return candle.isConnected();
+    }
+
     // =========================================================================
     // CORE LED OUTPUT METHODS
     // =========================================================================

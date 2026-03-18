@@ -29,6 +29,7 @@ import frc.robot.subsystems.LEDSubsystem;
 import frc.robot.subsystems.VisionSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.TriggerSubsystem;
+import frc.robot.util.CANHealthMonitor;
 import frc.robot.util.Elastic;
 import frc.robot.util.Elastic.NotificationLevel;
 import frc.robot.util.ShootingCalculator;
@@ -89,6 +90,14 @@ public class RobotContainer {
     private String lastAutoWarning = "";
     private int autoValidationCounter = 0;
 
+    /** Whether the drive team has pressed the Confirm Auto button */
+    private boolean autoConfirmed = false;
+    /** The auto name that was confirmed — if selection changes, un-confirm */
+    private String confirmedAutoName = "";
+
+    /** CAN bus health monitor for all devices */
+    private final CANHealthMonitor canHealth;
+
     // =========================================================================
     // CONSTRUCTOR
     // =========================================================================
@@ -103,6 +112,9 @@ public class RobotContainer {
         leds       = Constants.SubsystemEnabled.LEDS        ? new LEDSubsystem()                 : null;
 
         logSubsystemStatus();
+
+        // 1b. CAN health monitor (needs all subsystem refs)
+        canHealth = new CANHealthMonitor(drivetrain, shooter, trigger, intake, leds);
 
         // 2. Register PathPlanner named commands (must happen before autoChooser)
         registerNamedCommands();
@@ -577,6 +589,11 @@ public class RobotContainer {
     private void configureDashboard() {
         SmartDashboard.putData("Auto Chooser", autoChooser);
 
+        // Auto confirmation button (momentary — code resets to false after reading)
+        SmartDashboard.putBoolean("Auto/Confirm", false);
+        SmartDashboard.putBoolean("Auto/Confirmed", false);
+        SmartDashboard.putString("Auto/SelectedName", "");
+
         // Calibration commands for pit use
         if (shooter != null && vision != null) {
             SmartDashboard.putData("Tuning/Cal: Full Shooter",
@@ -614,11 +631,15 @@ public class RobotContainer {
     public void updateVisionPose() {
 
         updateRumble();
+        canHealth.update();
 
         calibration.update();
 
         // Update shooting calculator with current pose
         if (drivetrain != null) {
+            // Cache state once per cycle for consistency and to avoid redundant CAN reads
+            var driveState = drivetrain.getState();
+
             // In calibration mode, pass the absolute RPM slider value so
             // ShootingCalculator uses it directly (bypasses interpolation table).
             // In normal mode, pass the RPM offset added on top of interpolated RPM.
@@ -626,8 +647,8 @@ public class RobotContainer {
                     ? calibration.getShooterRPM()
                     : calibration.getRPMOffset();
             shootingCalc.update(
-                    drivetrain.getState().Pose,
-                    drivetrain.getState().Speeds,
+                    driveState.Pose,
+                    driveState.Speeds,
                     gameState.getTargetMode(),
                     rpmParam);
             calibration.setCurrentDistance(shootingCalc.getDistance());
@@ -635,16 +656,24 @@ public class RobotContainer {
 
         if (vision == null || drivetrain == null) return;
 
+        // Cache state for vision pipeline (may differ from above if drivetrain was null)
+        var driveStateVision = drivetrain.getState();
+
         // Feed drivetrain pose to vision for fallback
-        vision.setDrivetrainPose(drivetrain.getState().Pose);
+        vision.setDrivetrainPose(driveStateVision.Pose);
 
         // Feed gyro heading to vision pose estimator for better single-tag estimates.
-        double yawDegrees = drivetrain.getState().Pose.getRotation().getDegrees();
-        double yawRate = Math.toDegrees(drivetrain.getState().Speeds.omegaRadiansPerSecond);
+        double yawDegrees = driveStateVision.Pose.getRotation().getDegrees();
+        double yawRate = Math.toDegrees(driveStateVision.Speeds.omegaRadiansPerSecond);
         vision.setRobotOrientation(yawDegrees, yawRate, 0, 0, 0, 0);
 
-        // Auto-shuttle zone check
-        gameState.update(isInShuttleZone());
+        // Auto-shuttle zone check — only after vision has seeded heading,
+        // otherwise robot pose is (0,0) and zone detection is wrong
+        if (hasSeededHeadingFromVision) {
+            gameState.update(isInShuttleZone());
+        } else {
+            gameState.update();
+        }
 
         // --- Heading seeding (first time we get any vision pose) ---
         if (!hasSeededHeadingFromVision && vision.hasVisionPose()) {
@@ -821,6 +850,12 @@ public class RobotContainer {
      * is negated to drive the error toward zero (robot rotates toward target).
      */
     private double aimOmega(double errorDeg) {
+        // Guard against NaN/Infinity from bad vision data — safe fallback to no rotation
+        if (Double.isNaN(errorDeg) || Double.isInfinite(errorDeg)) {
+            previousAimErrorRad = 0.0;
+            return 0.0;
+        }
+
         // Deadband: zero output when error is tiny to prevent micro-oscillation
         if (Math.abs(errorDeg) < Constants.Driver.AIM_DEADBAND_DEG) {
             previousAimErrorRad = 0.0;
@@ -898,17 +933,18 @@ public class RobotContainer {
             rightRumble = 0.15;
         }
 
-        // --- Ready to fire (left rumble, only when driver is aiming) ---
+        // --- Ready to fire (left rumble, only when driver is aiming AND can score) ---
         boolean aiming = driver.getLeftTriggerAxis() > 0.5
                       || driver.leftBumper().getAsBoolean();
         boolean aimed = Math.abs(shootingCalc.getAngleToTarget())
                       < Constants.Driver.AIM_TOLERANCE_DEG;
         boolean shooterReady = shooter != null && shooter.isReady();
+        boolean canScore = gameState.canShoot();
 
-        if (aiming && aimed && shooterReady) {
-            // Locked on + spun up → FIRE!
+        if (aiming && aimed && shooterReady && canScore) {
+            // Locked on + spun up + allowed to score → FIRE!
             leftRumble = Math.max(leftRumble, 0.6);
-        } else if (aiming && shooterReady) {
+        } else if (aiming && shooterReady && canScore) {
             // Spun up but still rotating → almost there
             leftRumble = Math.max(leftRumble, 0.15);
         }
@@ -922,40 +958,67 @@ public class RobotContainer {
     // =========================================================================
 
     /**
-     * Checks whether an auto routine is selected. If not, hammers the drive
-     * team with an Elastic ERROR notification + angry LED strobe so they
-     * can't possibly queue without picking one.
+     * Auto selection validation with confirmation button.
+     *
+     * The drive team MUST press the "Confirm Auto" button on the dashboard
+     * before the warning clears. This prevents stale auto selections from
+     * Elastic persisting across reboots.
+     *
+     * - Any auto (including None/InstantCommand) can be confirmed
+     * - If the selection changes after confirmation, it un-confirms
+     * - "Auto/Confirm" is a momentary button — code resets it to false immediately
      */
     public void validateAutoSelection() {
+        // --- Read current selection ---
+        Command selected = autoChooser.getSelected();
+        String autoName = selected != null ? selected.getName() : "None";
+        if (autoName.isEmpty() || autoName.equals("InstantCommand")) autoName = "None";
+        SmartDashboard.putString("Auto/SelectedName", autoName);
+
+        // --- Momentary confirm button: read, act, reset ---
+        if (SmartDashboard.getBoolean("Auto/Confirm", false)) {
+            SmartDashboard.putBoolean("Auto/Confirm", false); // Reset immediately (momentary)
+            autoConfirmed = true;
+            confirmedAutoName = autoName;
+            System.out.println("[Auto] Confirmed: " + autoName);
+            Elastic.sendNotification(new Elastic.Notification()
+                    .withLevel(NotificationLevel.INFO)
+                    .withTitle("Auto Confirmed")
+                    .withDescription(autoName)
+                    .withDisplaySeconds(2.0));
+        }
+
+        // --- Un-confirm if selection changed ---
+        if (autoConfirmed && !autoName.equals(confirmedAutoName)) {
+            autoConfirmed = false;
+            System.out.println("[Auto] Selection changed (" + confirmedAutoName + " -> " + autoName + ") — re-confirm required");
+        }
+
+        SmartDashboard.putBoolean("Auto/Confirmed", autoConfirmed);
+        SmartDashboard.putBoolean("Auto/Valid", autoConfirmed);
+
+        // --- Warning logic (throttled to every ~5 seconds) ---
         autoValidationCounter++;
-        if (autoValidationCounter < 250) return; // Check every ~5 seconds
+        if (autoValidationCounter < 250) return;
         autoValidationCounter = 0;
 
-        Command selected = autoChooser.getSelected();
-        String autoName = selected != null ? selected.getName() : "";
-
-        if (selected == null || autoName.isEmpty() || autoName.equals("InstantCommand")) {
-            if (!lastAutoWarning.equals("NO_AUTO")) {
-                lastAutoWarning = "NO_AUTO";
-                SmartDashboard.putBoolean("Auto/Valid", false);
-                SmartDashboard.putString("Auto/Warning", "NO AUTO SELECTED");
+        if (!autoConfirmed) {
+            if (!lastAutoWarning.equals("UNCONFIRMED")) {
+                lastAutoWarning = "UNCONFIRMED";
+                SmartDashboard.putString("Auto/Warning", "CONFIRM AUTO!");
             }
-            // Re-send Elastic notification every 5 seconds so it's always visible
             Elastic.sendNotification(new Elastic.Notification()
                     .withLevel(NotificationLevel.ERROR)
-                    .withTitle("NO AUTO SELECTED")
-                    .withDescription("Pick an auto routine NOW!")
+                    .withTitle("AUTO NOT CONFIRMED")
+                    .withDescription("Selected: " + autoName + " — press Confirm!")
                     .withWidth(500)
                     .withHeight(300)
                     .withDisplaySeconds(6));
-            // Angry LED strobe
             if (leds != null) leds.setAction(LEDSubsystem.ActionState.NO_AUTO);
         } else {
             if (!lastAutoWarning.isEmpty()) {
                 lastAutoWarning = "";
-                SmartDashboard.putBoolean("Auto/Valid", true);
                 SmartDashboard.putString("Auto/Warning", "");
-                // Clear the LED warning
                 if (leds != null && leds.getAction() == LEDSubsystem.ActionState.NO_AUTO) {
                     leds.clearAction();
                 }

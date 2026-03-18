@@ -178,7 +178,7 @@
           },
           {
             "title": "Intake Deployed",
-            "x": 0.0,
+            "x": 1024.0,
             "y": 512.0,
             "width": 256.0,
             "height": 128.0,
@@ -223,6 +223,36 @@
               "data_type": "boolean",
               "true_color": 4294940672,
               "false_color": 4283215696,
+              "true_icon": "None",
+              "false_icon": "None"
+            }
+          },
+          {
+            "title": "Confirm",
+            "x": 0.0,
+            "y": 512.0,
+            "width": 128.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/SmartDashboard/Auto/Confirm",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "Confirmed",
+            "x": 128.0,
+            "y": 512.0,
+            "width": 128.0,
+            "height": 128.0,
+            "type": "Boolean Box",
+            "properties": {
+              "topic": "/SmartDashboard/Auto/Confirmed",
+              "period": 0.06,
+              "data_type": "boolean",
+              "true_color": 4283215696,
+              "false_color": 4294198070,
               "true_icon": "None",
               "false_icon": "None"
             }
@@ -1422,6 +1452,318 @@
                 "type": "Text Display",
                 "properties": {
                   "topic": "/SmartDashboard/Debug/Vision/RawPoseY",
+                  "period": 0.06,
+                  "data_type": "double",
+                  "show_submit_button": false
+                }
+              }
+            ]
+          }
+        ],
+        "containers": []
+      }
+    },
+    {
+      "name": "CAN Health",
+      "grid_layout": {
+        "layouts": [
+          {
+            "title": "System Status",
+            "x": 0.0,
+            "y": 0.0,
+            "width": 384.0,
+            "height": 256.0,
+            "type": "List Layout",
+            "properties": {
+              "label_position": "TOP"
+            },
+            "children": [
+              {
+                "title": "All CAN Devices Healthy",
+                "x": 0.0,
+                "y": 0.0,
+                "width": 384.0,
+                "height": 128.0,
+                "type": "Boolean Box",
+                "properties": {
+                  "topic": "/SmartDashboard/Match/CAN/AllHealthy",
+                  "period": 0.06,
+                  "data_type": "boolean",
+                  "true_color": 4283215696,
+                  "false_color": 4294198070,
+                  "true_icon": "None",
+                  "false_icon": "None"
+                }
+              }
+            ]
+          },
+          {
+            "title": "Drivetrain CAN",
+            "x": 0.0,
+            "y": 256.0,
+            "width": 384.0,
+            "height": 768.0,
+            "type": "List Layout",
+            "properties": {
+              "label_position": "TOP"
+            },
+            "children": [
+              {
+                "title": "Drivetrain Overall",
+                "x": 0.0,
+                "y": 0.0,
+                "width": 384.0,
+                "height": 128.0,
+                "type": "Boolean Box",
+                "properties": {
+                  "topic": "/SmartDashboard/Debug/CAN/Drivetrain",
+                  "period": 0.06,
+                  "data_type": "boolean",
+                  "true_color": 4283215696,
+                  "false_color": 4294198070,
+                  "true_icon": "None",
+                  "false_icon": "None"
+                }
+              },
+              {
+                "title": "FL Module (Drive 1 / Steer 2 / Enc 3)",
+                "x": 0.0,
+                "y": 0.0,
+                "width": 384.0,
+                "height": 128.0,
+                "type": "Boolean Box",
+                "properties": {
+                  "topic": "/SmartDashboard/Debug/CAN/Drive/FL",
+                  "period": 0.06,
+                  "data_type": "boolean",
+                  "true_color": 4283215696,
+                  "false_color": 4294198070,
+                  "true_icon": "None",
+                  "false_icon": "None"
+                }
+              },
+              {
+                "title": "FR Module (Drive 4 / Steer 5 / Enc 6)",
+                "x": 0.0,
+                "y": 0.0,
+                "width": 384.0,
+                "height": 128.0,
+                "type": "Boolean Box",
+                "properties": {
+                  "topic": "/SmartDashboard/Debug/CAN/Drive/FR",
+                  "period": 0.06,
+                  "data_type": "boolean",
+                  "true_color": 4283215696,
+                  "false_color": 4294198070,
+                  "true_icon": "None",
+                  "false_icon": "None"
+                }
+              },
+              {
+                "title": "BL Module (Drive 10 / Steer 11 / Enc 12)",
+                "x": 0.0,
+                "y": 0.0,
+                "width": 384.0,
+                "height": 128.0,
+                "type": "Boolean Box",
+                "properties": {
+                  "topic": "/SmartDashboard/Debug/CAN/Drive/BL",
+                  "period": 0.06,
+                  "data_type": "boolean",
+                  "true_color": 4283215696,
+                  "false_color": 4294198070,
+                  "true_icon": "None",
+                  "false_icon": "None"
+                }
+              },
+              {
+                "title": "BR Module (Drive 7 / Steer 8 / Enc 9)",
+                "x": 0.0,
+                "y": 0.0,
+                "width": 384.0,
+                "height": 128.0,
+                "type": "Boolean Box",
+                "properties": {
+                  "topic": "/SmartDashboard/Debug/CAN/Drive/BR",
+                  "period": 0.06,
+                  "data_type": "boolean",
+                  "true_color": 4283215696,
+                  "false_color": 4294198070,
+                  "true_icon": "None",
+                  "false_icon": "None"
+                }
+              },
+              {
+                "title": "Pigeon2 IMU (ID 14)",
+                "x": 0.0,
+                "y": 0.0,
+                "width": 384.0,
+                "height": 128.0,
+                "type": "Boolean Box",
+                "properties": {
+                  "topic": "/SmartDashboard/Debug/CAN/Drive/Pigeon",
+                  "period": 0.06,
+                  "data_type": "boolean",
+                  "true_color": 4283215696,
+                  "false_color": 4294198070,
+                  "true_icon": "None",
+                  "false_icon": "None"
+                }
+              }
+            ]
+          },
+          {
+            "title": "Mechanism CAN",
+            "x": 384.0,
+            "y": 0.0,
+            "width": 384.0,
+            "height": 768.0,
+            "type": "List Layout",
+            "properties": {
+              "label_position": "TOP"
+            },
+            "children": [
+              {
+                "title": "Shooter Motor (ID 20)",
+                "x": 0.0,
+                "y": 0.0,
+                "width": 384.0,
+                "height": 128.0,
+                "type": "Boolean Box",
+                "properties": {
+                  "topic": "/SmartDashboard/Debug/CAN/Shooter",
+                  "period": 0.06,
+                  "data_type": "boolean",
+                  "true_color": 4283215696,
+                  "false_color": 4294198070,
+                  "true_icon": "None",
+                  "false_icon": "None"
+                }
+              },
+              {
+                "title": "Trigger Motor (ID 23)",
+                "x": 0.0,
+                "y": 0.0,
+                "width": 384.0,
+                "height": 128.0,
+                "type": "Boolean Box",
+                "properties": {
+                  "topic": "/SmartDashboard/Debug/CAN/Trigger",
+                  "period": 0.06,
+                  "data_type": "boolean",
+                  "true_color": 4283215696,
+                  "false_color": 4294198070,
+                  "true_icon": "None",
+                  "false_icon": "None"
+                }
+              },
+              {
+                "title": "Intake (Pivot 25 / Roller 26 / Enc 28)",
+                "x": 0.0,
+                "y": 0.0,
+                "width": 384.0,
+                "height": 128.0,
+                "type": "Boolean Box",
+                "properties": {
+                  "topic": "/SmartDashboard/Debug/CAN/Intake",
+                  "period": 0.06,
+                  "data_type": "boolean",
+                  "true_color": 4283215696,
+                  "false_color": 4294198070,
+                  "true_icon": "None",
+                  "false_icon": "None"
+                }
+              },
+              {
+                "title": "CANdle LEDs (ID 30)",
+                "x": 0.0,
+                "y": 0.0,
+                "width": 384.0,
+                "height": 128.0,
+                "type": "Boolean Box",
+                "properties": {
+                  "topic": "/SmartDashboard/Debug/CAN/CANdle",
+                  "period": 0.06,
+                  "data_type": "boolean",
+                  "true_color": 4283215696,
+                  "false_color": 4294198070,
+                  "true_icon": "None",
+                  "false_icon": "None"
+                }
+              }
+            ]
+          },
+          {
+            "title": "Stall Status",
+            "x": 768.0,
+            "y": 0.0,
+            "width": 384.0,
+            "height": 512.0,
+            "type": "List Layout",
+            "properties": {
+              "label_position": "TOP"
+            },
+            "children": [
+              {
+                "title": "Shooter Stalled",
+                "x": 0.0,
+                "y": 0.0,
+                "width": 384.0,
+                "height": 128.0,
+                "type": "Boolean Box",
+                "properties": {
+                  "topic": "/SmartDashboard/Debug/Shooter/Stalled",
+                  "period": 0.06,
+                  "data_type": "boolean",
+                  "true_color": 4294198070,
+                  "false_color": 4283215696,
+                  "true_icon": "None",
+                  "false_icon": "None"
+                }
+              },
+              {
+                "title": "Trigger Stalled",
+                "x": 0.0,
+                "y": 0.0,
+                "width": 384.0,
+                "height": 128.0,
+                "type": "Boolean Box",
+                "properties": {
+                  "topic": "/SmartDashboard/Debug/Trigger/Stalled",
+                  "period": 0.06,
+                  "data_type": "boolean",
+                  "true_color": 4294198070,
+                  "false_color": 4283215696,
+                  "true_icon": "None",
+                  "false_icon": "None"
+                }
+              },
+              {
+                "title": "Shooter Ready",
+                "x": 0.0,
+                "y": 0.0,
+                "width": 384.0,
+                "height": 128.0,
+                "type": "Boolean Box",
+                "properties": {
+                  "topic": "/SmartDashboard/Match/Shooter/Ready",
+                  "period": 0.06,
+                  "data_type": "boolean",
+                  "true_color": 4283215696,
+                  "false_color": 4294198070,
+                  "true_icon": "None",
+                  "false_icon": "None"
+                }
+              },
+              {
+                "title": "Shooter Actual RPM",
+                "x": 0.0,
+                "y": 0.0,
+                "width": 384.0,
+                "height": 128.0,
+                "type": "Text Display",
+                "properties": {
+                  "topic": "/SmartDashboard/Match/Shooter/ActualRPM",
                   "period": 0.06,
                   "data_type": "double",
                   "show_submit_button": false
