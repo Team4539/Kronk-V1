@@ -46,7 +46,15 @@ public class GameStateManager {
     private boolean shuttleMode = false;
     private boolean shuttleModeManualOverride = false;
     private boolean inShuttleZone = false;
-    
+
+    // Edge detection for LED blips
+    private boolean gameDataLost = false;
+    private boolean justLostGameData = false;
+    private boolean justEnteredShuttleZone = false;
+    private boolean justBecameActive = false;
+    private boolean wasOurAllianceActive = false;
+    private boolean wasInShuttleZonePrev = false;
+
     private GameStateManager() {
         System.out.println("[GameState] GameStateManager initialized");
         System.out.println("[GameState] AUTO_SHUTTLE_ENABLED: " + Constants.Field.AUTO_SHUTTLE_ENABLED);
@@ -60,12 +68,34 @@ public class GameStateManager {
     
     /** Update with shuttle zone info for auto-switching. */
     public void update(boolean robotInShuttleZone) {
-        justReceivedGameMessage = false; // Clear each cycle; set by updateFirstActiveAlliance()
+        justReceivedGameMessage = false;
+        justLostGameData = false;
+        justEnteredShuttleZone = false;
+        justBecameActive = false;
+
+        boolean prevActive = wasOurAllianceActive;
+        boolean prevInZone = wasInShuttleZonePrev;
+
         updateAllianceColor();
         updateFirstActiveAlliance();
+        updateGameDataLost();
         updateGamePhase();
         updateAutoShuttleMode(robotInShuttleZone);
         updateTargetMode();
+
+        // Edge detection: our alliance just became active
+        boolean nowActive = isOurAllianceActive();
+        if (nowActive && !prevActive && receivedGameMessage) {
+            justBecameActive = true;
+        }
+        wasOurAllianceActive = nowActive;
+
+        // Edge detection: just entered shuttle zone
+        if (this.inShuttleZone && !prevInZone) {
+            justEnteredShuttleZone = true;
+        }
+        wasInShuttleZonePrev = this.inShuttleZone;
+
         publishTelemetry();
     }
     
@@ -83,23 +113,43 @@ public class GameStateManager {
     }
     
     private void updateFirstActiveAlliance() {
-        if (receivedGameMessage) return;
-        
         String gameData = DriverStation.getGameSpecificMessage();
         if (gameData != null && gameData.length() > 0) {
             char c = gameData.charAt(0);
+            Alliance newFirst = null;
             if (c == 'R') {
-                firstActiveAlliance = Alliance.Blue;
-                receivedGameMessage = true;
-                justReceivedGameMessage = true;
+                newFirst = Alliance.Blue;
             } else if (c == 'B') {
-                firstActiveAlliance = Alliance.Red;
+                newFirst = Alliance.Red;
+            }
+
+            if (newFirst != null && newFirst != firstActiveAlliance) {
+                if (receivedGameMessage) {
+                    System.out.println("[GameState] Game data UPDATED: first active changed from "
+                        + firstActiveAlliance + " to " + newFirst);
+                }
+                firstActiveAlliance = newFirst;
                 receivedGameMessage = true;
                 justReceivedGameMessage = true;
             }
         }
     }
     
+    private void updateGameDataLost() {
+        String gameData = DriverStation.getGameSpecificMessage();
+        boolean hasData = (gameData != null && gameData.length() > 0);
+
+        if (receivedGameMessage && !hasData && !gameDataLost) {
+            gameDataLost = true;
+            justLostGameData = true;
+            System.out.println("[GameState] *** GAME DATA LOST *** Message went empty after being received!");
+        }
+        if (hasData && gameDataLost) {
+            gameDataLost = false;
+            System.out.println("[GameState] Game data recovered");
+        }
+    }
+
     private void updateGamePhase() {
         if (DriverStation.isAutonomous()) {
             currentPhase = GamePhase.AUTO;
@@ -319,7 +369,11 @@ public class GameStateManager {
     public boolean hasReceivedGameMessage() { return receivedGameMessage; }
     public boolean didJustReceiveGameMessage() { return justReceivedGameMessage; }
     public Alliance getFirstActiveAlliance() { return firstActiveAlliance; }
-    
+    public boolean isGameDataLost() { return gameDataLost; }
+    public boolean didJustLoseGameData() { return justLostGameData; }
+    public boolean didJustEnterShuttleZone() { return justEnteredShuttleZone; }
+    public boolean didJustBecomeActive() { return justBecameActive; }
+
     /** Returns true if our alliance goes first in the shift order. */
     public boolean doWeGoFirst() {
         return receivedGameMessage && firstActiveAlliance == robotAlliance;
@@ -378,6 +432,12 @@ public class GameStateManager {
         inShuttleZone = false;
         currentPhase = GamePhase.PRE_MATCH;
         currentTargetMode = TargetMode.DISABLED;
+        gameDataLost = false;
+        justLostGameData = false;
+        justEnteredShuttleZone = false;
+        justBecameActive = false;
+        wasOurAllianceActive = false;
+        wasInShuttleZonePrev = false;
     }
     
     // ========================================================================
