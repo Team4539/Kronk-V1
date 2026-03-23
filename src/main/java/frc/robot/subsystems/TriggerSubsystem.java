@@ -179,7 +179,11 @@ public class TriggerSubsystem extends SubsystemBase {
     public boolean isShooting() {
         return isShooting;
     }
-    
+
+    public boolean isStalled() {
+        return stallState == StallState.REVERSING;
+    }
+
     /**
      * Get the current target speed in RPM.
      * @return Target speed in RPM

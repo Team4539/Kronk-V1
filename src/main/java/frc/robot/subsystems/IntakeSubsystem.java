@@ -112,7 +112,7 @@ public class IntakeSubsystem extends SubsystemBase {
         
         // Slot 1: RETRACT/IDLE — gentler PID to avoid overshooting through chain slop
         // Lower P reduces overshoot; moderate D damps oscillation without amplifying noise.
-        config.Slot1.kP = 35.0;   // Lower P — approach gently
+        config.Slot1.kP = 19.0;   // Lower P — approach gently
         config.Slot1.kI = 0.0;
         config.Slot1.kD = 0.5;    // Moderate D — enough to damp, not amplify chain noise
         config.Slot1.kS = 0.15;

@@ -105,7 +105,11 @@ public class ShooterSubsystem extends SubsystemBase {
     public boolean isReady() {
         return isSpunUp;
     }
-    
+
+    public boolean isStalled() {
+        return stallState == StallState.REVERSING;
+    }
+
     public double getPower() {
         return targetPower;
     }

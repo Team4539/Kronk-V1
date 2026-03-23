@@ -392,26 +392,46 @@ public class RobotContainer {
             if (intake != null) {
                 fullCmd = fullCmd.alongWith(new IntakeJiggleCommand(intake));
             }
-            // Auto-aim: rotate toward target while driver controls translation
-            // BRAKE LOCK: When shooter ready + aimed, lock wheels unless driver is driving
+            // Auto-aim + shoot-on-the-fly: latch the robot's movement direction
+            // when LB is first pressed, then drive at a fixed speed in that direction.
+            // This gives predictable velocity for shoot-on-the-move compensation.
             if (drivetrain != null) {
+                Command latchCmd = Commands.runOnce(() -> {
+                    var speeds = drivetrain.getState().Speeds;
+                    double speed = Math.hypot(speeds.vxMetersPerSecond, speeds.vyMetersPerSecond);
+                    if (speed > 0.1) {
+                        latchedDriveAngle = Math.atan2(speeds.vyMetersPerSecond, speeds.vxMetersPerSecond);
+                        shootOnFlyLatched = true;
+                    } else {
+                        shootOnFlyLatched = false;
+                    }
+                });
                 Command aimCmd = drivetrain.applyRequest(() -> {
                     // Brake lock while shooting if ready + aimed + not trying to drive
                     boolean aimed = Math.abs(shootingCalc.getAngleToTarget()) < Constants.Driver.AIM_TOLERANCE_DEG;
-                    if (shooter.isReady() && aimed && !isDriverCommanding()) {
+                    if (shooter.isReady() && aimed && !isDriverCommanding() && !shootOnFlyLatched) {
                         return brake;
                     }
-                    double slow = driver.getRightTriggerAxis() > 0.3
-                            ? Constants.Driver.SLOW_MODE_MULTIPLIER : 1.0;
-                    double vx = -driver.getLeftY() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
-                    double vy = -driver.getLeftX() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
+                    double vx, vy;
+                    if (shootOnFlyLatched) {
+                        // Drive at fixed speed in the latched direction
+                        double spd = Constants.Shooter.SHOOT_ON_FLY_SPEED_MPS;
+                        vx = Math.cos(latchedDriveAngle) * spd;
+                        vy = Math.sin(latchedDriveAngle) * spd;
+                    } else {
+                        // Not moving when LB pressed — let driver control translation
+                        double slow = driver.getRightTriggerAxis() > 0.3
+                                ? Constants.Driver.SLOW_MODE_MULTIPLIER : 1.0;
+                        vx = -driver.getLeftY() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
+                        vy = -driver.getLeftX() * Constants.Driver.MAX_DRIVE_SPEED_MPS * slow;
+                    }
                     double omega = aimOmega(shootingCalc.getAngleToTarget());
                     return aimFieldCentric
                             .withVelocityX(vx)
                             .withVelocityY(vy)
                             .withRotationalRate(omega);
                 });
-                fullCmd = fullCmd.alongWith(aimCmd);
+                fullCmd = fullCmd.alongWith(latchCmd.andThen(aimCmd).finallyDo(() -> shootOnFlyLatched = false));
             }
             driver.leftBumper().whileTrue(fullCmd);
         }
@@ -428,16 +448,32 @@ public class RobotContainer {
                                 intake.stopAndRetract();
                                 if (leds != null) leds.clearAction();
                             }));
+
+            // POV Left: Reverse intake (deploy + spit out, hold/release)
+            driver.a().whileTrue(
+                    Commands.startEnd(
+                            () -> {
+                                intake.deploy();
+                                intake.setRollerSpeed(Constants.Intake.OUTTAKE_SPEED_RPM);
+                            },
+                            () -> {
+                                intake.stopAndRetract();
+                            },
+                            intake)
+                            .alongWith(ledAction(LEDSubsystem.ActionState.REVERSE_INTAKE))
+                            .finallyDo(() -> {
+                                if (leds != null) leds.clearAction();
+                            }));
         }
 
         // A: Defensive brake mode toggle (X-brake unless driver drives)
-        driver.a().onTrue(Commands.runOnce(() -> {
+        driver.povDownLeft().onTrue(Commands.runOnce(() -> {
             defensiveMode = !defensiveMode;
             if (leds != null) {
                 if (defensiveMode) {
-                    leds.setAction(LEDSubsystem.ActionState.DEFENSIVE);
+                    leds.setMode(LEDSubsystem.ModeState.DEFENSIVE);
                 } else {
-                    leds.clearAction();
+                    leds.clearMode();
                 }
             }
             notify(defensiveMode ? "Defensive Mode ON" : "Defensive Mode OFF");
@@ -449,9 +485,9 @@ public class RobotContainer {
             gameState.setForceShootEnabled(on);
             if (leds != null) {
                 if (on) {
-                    leds.setAction(LEDSubsystem.ActionState.FORCE_SHOOT);
+                    leds.setMode(LEDSubsystem.ModeState.FORCE_SHOOT);
                 } else {
-                    leds.clearAction();
+                    leds.clearMode();
                 }
             }
             notify(on ? "Force Shoot ON" : "Force Shoot OFF");
@@ -671,6 +707,37 @@ public class RobotContainer {
         // otherwise robot pose is (0,0) and zone detection is wrong
         if (hasSeededHeadingFromVision) {
             gameState.update(isInShuttleZone());
+
+            // Zone-based LED modes — only during teleop, don't stomp manual modes
+            if (leds != null && DriverStation.isTeleopEnabled()) {
+                boolean inAllianceZone = isInAllianceZone();
+                boolean inOpposingZone = isInShuttleZone();
+
+                // Opposing zone → auto-defensive LED
+                if (inOpposingZone && !wasInOpposingZone) {
+                    if (leds.getMode() == LEDSubsystem.ModeState.NONE
+                            || leds.getMode() == LEDSubsystem.ModeState.ALLIANCE_ZONE) {
+                        leds.setMode(LEDSubsystem.ModeState.OPPOSING_ZONE);
+                    }
+                } else if (!inOpposingZone && wasInOpposingZone) {
+                    if (leds.getMode() == LEDSubsystem.ModeState.OPPOSING_ZONE) {
+                        leds.clearMode();
+                    }
+                }
+                wasInOpposingZone = inOpposingZone;
+
+                // Alliance zone → alliance color pulse (lower priority than opposing)
+                if (inAllianceZone && !wasInAllianceZone) {
+                    if (leds.getMode() == LEDSubsystem.ModeState.NONE) {
+                        leds.setMode(LEDSubsystem.ModeState.ALLIANCE_ZONE);
+                    }
+                } else if (!inAllianceZone && wasInAllianceZone) {
+                    if (leds.getMode() == LEDSubsystem.ModeState.ALLIANCE_ZONE) {
+                        leds.clearMode();
+                    }
+                }
+                wasInAllianceZone = inAllianceZone;
+            }
         } else {
             gameState.update();
         }
@@ -695,14 +762,21 @@ public class RobotContainer {
                                         seedPose.getRotation().getDegrees(),
                                         vision.getTargetCount())));
             } else {
-                // Single-tag: trust X/Y, keep gyro heading
+                // Single-tag: trust X/Y, use gyro heading for rotation
+                // Hard-reset pose so we snap to the correct field position immediately
+                edu.wpi.first.math.geometry.Pose2d corrected = new edu.wpi.first.math.geometry.Pose2d(
+                        seedPose.getX(), seedPose.getY(),
+                        drivetrain.getState().Pose.getRotation());
+                drivetrain.resetPose(corrected);
                 hasSeededHeadingFromVision = true;
                 vision.notifyHeadingSeeded();
-                System.out.println("[RobotContainer] Vision X/Y initialized (SingleTag, gyro heading kept): "
-                        + String.format("(%.2f, %.2f)", seedPose.getX(), seedPose.getY()));
+                System.out.println("[RobotContainer] Vision pose initialized (SingleTag, gyro heading): "
+                        + String.format("(%.2f, %.2f) @ %.1f\u00b0",
+                                seedPose.getX(), seedPose.getY(),
+                                corrected.getRotation().getDegrees()));
                 Elastic.sendNotification(
                         new Elastic.Notification(NotificationLevel.INFO,
-                                "Vision X/Y Initialized",
+                                "Vision Pose Initialized",
                                 String.format("SingleTag ID %d: (%.1f, %.1f) - heading from gyro",
                                         vision.getTargetId(),
                                         seedPose.getX(), seedPose.getY())));
@@ -713,6 +787,28 @@ public class RobotContainer {
         if (vision.hasFrontPose()) {
             fuseCamera(vision.getFrontPose(), vision.getFrontTimestamp(),
                        vision.isFrontMultiTag(), vision.getFrontTargetCount());
+        }
+
+        // --- Stall/jam LED warning — any motor reversing to clear a jam ---
+        if (leds != null && DriverStation.isEnabled()) {
+            boolean anyStall = (shooter != null && shooter.isStalled())
+                            || (trigger != null && trigger.isStalled());
+            if (anyStall) {
+                leds.setAction(LEDSubsystem.ActionState.STALL_JAM);
+            } else if (leds.getAction() == LEDSubsystem.ActionState.STALL_JAM) {
+                leds.clearAction();
+            }
+        }
+
+        // --- Vision-lost LED warning (teleop only, low priority) ---
+        if (leds != null && DriverStation.isTeleopEnabled() && hasSeededHeadingFromVision) {
+            if (!vision.hasVisionPose()) {
+                if (leds.getAction() == LEDSubsystem.ActionState.IDLE) {
+                    leds.setAction(LEDSubsystem.ActionState.VISION_LOST);
+                }
+            } else if (leds.getAction() == LEDSubsystem.ActionState.VISION_LOST) {
+                leds.clearAction();
+            }
         }
     }
 
@@ -746,6 +842,19 @@ public class RobotContainer {
         return inZone;
     }
 
+    private boolean wasInAllianceZone = false;
+    private boolean wasInOpposingZone = false;
+
+    private boolean isInAllianceZone() {
+        if (drivetrain == null) return false;
+        double x = drivetrain.getState().Pose.getX();
+        double boundary = Constants.Field.ALLIANCE_ZONE_BOUNDARY_X;
+        boolean isBlue = DriverStation.getAlliance().orElse(DriverStation.Alliance.Blue)
+                == DriverStation.Alliance.Blue;
+        // Alliance zone: blue = low X (near blue wall), red = high X (near red wall)
+        return isBlue ? x < boundary : x > (Constants.Field.FIELD_LENGTH_METERS - boundary);
+    }
+
     // =========================================================================
     // PUBLIC GETTERS (used by Robot.java)
     // =========================================================================
@@ -753,11 +862,12 @@ public class RobotContainer {
     public Command getAutonomousCommand() { return autoChooser.getSelected(); }
     public LEDSubsystem getLEDs() { return leds; }
 
-    /** Clear defensive mode on mode transitions. */
+    /** Clear defensive mode and persistent LED modes on mode transitions. */
     public void clearDefensiveMode() {
-        if (defensiveMode) {
-            defensiveMode = false;
-            if (leds != null) leds.clearAction();
+        defensiveMode = false;
+        if (leds != null) {
+            leds.clearAction();
+            leds.clearMode();
         }
     }
 
@@ -810,6 +920,11 @@ public class RobotContainer {
     private double previousAimErrorRad = 0.0;
     /** Track whether auto-aim was active last cycle to reset D-term on entry */
     private boolean wasAutoAiming = false;
+
+    /** Latched field-relative direction (radians) for shoot-on-the-fly */
+    private double latchedDriveAngle = 0.0;
+    /** Whether the shoot-on-the-fly direction has been latched this press */
+    private boolean shootOnFlyLatched = false;
 
     /** Reset the PD controller state to avoid D-term spikes when switching aim commands */
     public void resetAimController() {

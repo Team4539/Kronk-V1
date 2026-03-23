@@ -79,6 +79,8 @@ public final class Constants {
     public static final boolean OVERRIDE_FMS_CHECK = false;
     public static final double AUTO_SHUTTLE_BOUNDARY_X = 4.0;
     public static final boolean AUTO_SHUTTLE_ENABLED = true;
+    /** X boundary for alliance zone detection (meters from our wall) */
+    public static final double ALLIANCE_ZONE_BOUNDARY_X = 4.0;
   }
 
   // Shooter constants (single motor fixed shooter)
@@ -100,7 +102,7 @@ public final class Constants {
     public static final double SHOOTER_EXIT_HEIGHT_METERS = 0.50;
     
     /** Idle RPM when not actively spooling. Keeps flywheel warm for faster spin-up. */
-    public static final double DEFAULT_IDLE_RPM = 2000;
+    public static final double DEFAULT_IDLE_RPM = 3000;
     /** Fallback RPM used when vision/pose is unavailable and driver manually ranges shots. */
     public static final double FALLBACK_RPM = 2000;
     
@@ -128,7 +130,7 @@ public final class Constants {
     // The table should be sorted by distance (smallest first).
     //
     public static final List<double[]> SHOOTING_CALIBRATION = new ArrayList<>() {{
-      add(new double[]{0.60, 2250}); add(new double[]{3.01, 3175}); add(new double[]{5.31, 4175});
+      add(new double[]{0.60, 2250}); add(new double[]{3.01, 3175}); add (new double[]{3.26, 3350}); add(new double[]{3.56, 3350}); add(new double[]{3.88, 3520}); add(new double[]{5.31, 4175});
 
     }};
 
@@ -136,16 +138,27 @@ public final class Constants {
     /** Master enable for shoot-on-the-move velocity compensation */
     public static final boolean SHOOT_ON_MOVE_ENABLED = true;
     /** Fixed exit angle of the shooter above horizontal (degrees) */
-    public static final double SHOOTER_EXIT_ANGLE_DEG = 15;
+    public static final double SHOOTER_EXIT_ANGLE_DEG = 30;
     /** Ratio of ball exit speed to flywheel surface speed (0-1, tune empirically) change this value mostly, overshoot = need lower undershoot = need higher */
-    public static final double BALL_SPEED_EFFICIENCY = 0.7;
+    public static final double BALL_SPEED_EFFICIENCY = 1;
     /** Number of iterations for flight-time convergence (2-3 is plenty) */
     public static final int FLIGHT_TIME_ITERATIONS = 2;
     /**
      * Scaling factor for how much velocity compensation to apply (0.0-1.0+).
      * 1.0 = full physics-based compensation. Start lower and tune up.
      */
-    public static final double MOVE_COMPENSATION_FACTOR = 1.0;
+    public static final double MOVE_COMPENSATION_FACTOR = 2;
+
+    /**
+     * Extra RPM added per m/s of radial velocity (away from target).
+     * Compensates for the ball needing more/less energy when the robot
+     * is moving toward or away from the target during flight.
+     * Positive radial velocity = moving away = needs more RPM.
+     */
+    public static final double RADIAL_RPM_PER_MPS = 600;
+
+    /** Speed to drive at during teleop shoot-on-the-fly (m/s) */
+    public static final double SHOOT_ON_FLY_SPEED_MPS = 1.0;
   }
 
   public static final class Trigger {
@@ -154,7 +167,7 @@ public final class Constants {
     /** Idle RPM — slow feed to stage balls near the shooter */
     public static final double IDLE_SPEED_RPM = 2000;
     /** Shoot RPM — full speed reverse to feed balls into shooter (negative = reverse) */
-    public static final double SHOOT_SPEED_RPM = -3000.0;
+    public static final double SHOOT_SPEED_RPM = -6000.0;
     
     // --- Stall detection & auto-reverse ---
     // If the trigger is commanded to spin but actual RPM stays near 0 for
@@ -229,9 +242,9 @@ public final class Constants {
     
     // Vision measurement trust (standard deviations for pose estimator)
     // Lower = trust vision more, Higher = trust odometry more
-    public static final double VISION_STD_DEV_X = 0.7;
-    public static final double VISION_STD_DEV_Y = 0.7;
-    public static final double VISION_STD_DEV_THETA = 0.5;  // Trust camera rotation for auto-aim
+    public static final double VISION_STD_DEV_X = 0.1;
+    public static final double VISION_STD_DEV_Y = 0.1;
+    public static final double VISION_STD_DEV_THETA = 0.1;  // Trust camera rotation for auto-aim
     
     /** Maximum pose ambiguity to accept a vision measurement (0-1, lower = stricter) */
     public static final double MAX_AMBIGUITY = 0.1;
@@ -250,13 +263,13 @@ public final class Constants {
     // Inside AIM_SLOW_ZONE_DEG, KP scales down so the robot decelerates smoothly.
     // Output is clamped to MAX_ANGULAR_SPEED_RAD so large errors don't command unsafe rates.
     public static final double AIM_HEADING_KP = 15;    // Proportional (rad/s per radian of error)
-    public static final double AIM_HEADING_KD = 0.03;   // Derivative (rad/s per rad/s of error change)
+    public static final double AIM_HEADING_KD = 0.15;   // Derivative (rad/s per rad/s of error change)
     /** Below this error (degrees), output zero — prevents micro-oscillation jitter near target */
-    public static final double AIM_DEADBAND_DEG = 0.0;
+    public static final double AIM_DEADBAND_DEG = 0.5;
     /** When error is within this zone (degrees), KP ramps down for a smooth approach */
-    public static final double AIM_SLOW_ZONE_DEG = 0.0;
+    public static final double AIM_SLOW_ZONE_DEG = 15.0;
     /** Angle tolerance in degrees — "aimed" when error is within this */
-    public static final double AIM_TOLERANCE_DEG = 1;
+    public static final double AIM_TOLERANCE_DEG = 4;
     /** 
      * Sign multiplier for auto-aim rotation direction.
      * +1.0 = normal (positive angleToTarget → CCW rotation)
@@ -282,12 +295,12 @@ public final class Constants {
     // The belly pan strip is disconnected (broken).
     //
     //   Indices 0-7:   CANdle onboard LEDs
-    //   Indices 8-45:  Back/top strip: 38 LEDs
+    //   Indices 8-45:  Back/top strip: 36 LEDs
     //
     // No belly-only zone — those LEDs are gone.
     
     public static final int ONBOARD_LED_COUNT = 8;    // CANdle built-in LEDs (indices 0-7)
-    public static final int SHARED_STRIP_COUNT = 38;  // Back/top strip only
+    public static final int SHARED_STRIP_COUNT = 36;  // Back/top strip only
     public static final int BELLY_ONLY_COUNT = 0;     // Belly strip is disconnected (broken)
     
     // Computed layout indices
@@ -357,6 +370,7 @@ public final class Constants {
     public static final int[] SPOOLING_HIGHLIGHT = {255, 200, 100}; // Hot white-orange leading edge
     public static final int[] INTAKING_COLOR = {180, 255, 0};    // Yellow-green (distinct from pure green)
     public static final int[] INTAKING_HIGHLIGHT = {255, 255, 100}; // Bright yellow-white tip
+    public static final int[] REVERSE_INTAKE_COLOR = {255, 40, 0}; // Red-orange (spitting out)
     public static final int[] CLIMBING_COLOR = {0, 60, 255};     // Deep rich blue
     public static final int[] CLIMBING_HIGHLIGHT = {100, 180, 255}; // Sky-blue tip
     public static final int[] ESTOP_COLOR = {255, 0, 0};

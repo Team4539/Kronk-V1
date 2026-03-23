@@ -303,7 +303,7 @@ public class AutoShootCommand extends Command {
     }
     
     public boolean isReadyToFire() {
-        return shooterReady &&
+        return shooterReady && linedUp &&
                (allianceActive || gameState.isForceShootEnabled() || gameState.isGreenLightPreShift());
     }
     

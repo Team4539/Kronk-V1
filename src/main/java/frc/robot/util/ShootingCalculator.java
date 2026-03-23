@@ -51,6 +51,8 @@ public class ShootingCalculator {
     private Translation2d virtualTarget = new Translation2d();
     /** Estimated ball flight time in seconds */
     private double flightTimeSeconds = 0.0;
+    /** Radial velocity component (m/s, positive = moving away from target) */
+    private double radialVelocity = 0.0;
 
     // --- References ---
     
@@ -193,8 +195,21 @@ public class ShootingCalculator {
                 double ldx = aimTarget.getX() - robotX;
                 double ldy = aimTarget.getY() - robotY;
                 distance = Math.sqrt(ldx * ldx + ldy * ldy);
+
+                // Compute radial velocity: positive = moving away from target
+                // dot(velocity, unit vector from robot to target)
+                double distToReal = Math.sqrt(dx * dx + dy * dy);
+                if (distToReal > 0.01) {
+                    radialVelocity = (fieldVx * dx + fieldVy * dy) / distToReal;
+                    // Negate because dx/dy point FROM robot TO target,
+                    // so positive dot = moving toward target = negative radial
+                    radialVelocity = -radialVelocity;
+                } else {
+                    radialVelocity = 0.0;
+                }
             } else {
                 flightTimeSeconds = 0.0;
+                radialVelocity = 0.0;
             }
         }
 
@@ -217,6 +232,13 @@ public class ShootingCalculator {
             targetRPM = rpmOffset;
         } else {
             targetRPM = interpolateRPM(distance, Constants.Shooter.SHOOTING_CALIBRATION) + rpmOffset;
+
+            // Radial RPM compensation: when driving away from target, the ball
+            // must travel farther than the current distance by the time it arrives.
+            // The virtual target handles aim direction, but the RPM table slope
+            // may not fully account for the extra energy needed radially.
+            // Positive radialVelocity = moving away = add RPM.
+            targetRPM += radialVelocity * Constants.Shooter.RADIAL_RPM_PER_MPS;
         }
         double maxRPM = Constants.Shooter.MOTOR_FREE_SPEED_RPS * 60.0;
         targetRPM = clamp(targetRPM, 0, maxRPM);
@@ -354,6 +376,7 @@ public class ShootingCalculator {
         SmartDashboard.putNumber("Shooting/RPM", targetRPM);
         SmartDashboard.putNumber("Shooting/AngleToTarget", angleToTarget);
         SmartDashboard.putNumber("Shooting/FlightTime", flightTimeSeconds);
+        SmartDashboard.putNumber("Shooting/RadialVelocity", radialVelocity);
         SmartDashboard.putNumber("Shooting/VirtualTargetX", virtualTarget.getX());
         SmartDashboard.putNumber("Shooting/VirtualTargetY", virtualTarget.getY());
 

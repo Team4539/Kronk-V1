@@ -39,13 +39,13 @@ import frc.robot.util.Elastic.NotificationLevel;
  *   READY TO SHOOT = Reactor core — green waves radiate outward from center
  *   SPOOLING       = Power charge — orange fill bar with hot leading edge
  *   INTAKING       = Vacuum pull — dots sweep inward from edges to center
+ *   REVERSE INTAKE = Expel push — dots sweep outward from center to edges
  *   FORCE SHOOT    = Plasma field — purple interference waves shimmer
  *   DEFENSIVE      = Shield pulse — gold bars radiate outward from center
  *   NO AUTO        = Alarm sweep — red/orange bar sweeps back and forth
  *   BROWNOUT       = Dim amber flicker (safety)
  *   E-STOP         = Maximum chaos: triple scanner + strobe + flash-bangs
  *   GAME DATA      = Dramatic announcement with edge race or wipe
- *   GAME DATA LOST = White glitch scanner
  *   ZONE BLIP      = Alliance color ring radiates from center
  *   VICTORY        = Grand finale: bursts + rainbow + sparkle rain + strobe
  */
@@ -74,6 +74,7 @@ public class LEDSubsystem extends SubsystemBase {
     // State tracking
     private LEDState currentState = LEDState.BOOT_WARMUP;
     private ActionState currentAction = ActionState.IDLE;
+    private ModeState currentMode = ModeState.NONE;
     private double stateStartTime = 0;
     private int[] allianceColor = Constants.LEDs.BLUE_ALLIANCE;
     private boolean isEStopped = false;
@@ -115,9 +116,6 @@ public class LEDSubsystem extends SubsystemBase {
     private boolean hasFlashedEndgame10s = false;
     private boolean hasFlashedEndgame5s = false;
 
-    // Game data lost animation
-    private boolean gameDataLostActive = false;
-
     // Zone entry blip system
     private double blipStartTime = -1;
     private int[] blipColor = null;
@@ -152,10 +150,23 @@ public class LEDSubsystem extends SubsystemBase {
         SHOOTING,    // Reactor core — green waves radiate from center
         SPOOLING,    // Power charge — orange fill bar
         INTAKING,    // Vacuum pull — dots sweep inward
-        DEFENSIVE,   // Shield pulse — gold bars radiate outward
-        FORCE_SHOOT, // Plasma field — purple interference pattern
+        REVERSE_INTAKE, // Expel push — dots sweep outward
+        STALL_JAM,   // Red flash — motor stalled/reversing to clear jam
+        VISION_LOST, // Dim red breathing — no AprilTags, pose drifting
         NO_AUTO,     // Alarm sweep — red/orange scanner
         BROWNOUT     // Low voltage — amber flicker
+    }
+
+    /**
+     * Persistent mode states — shown when no higher-priority action is active.
+     * These "latch" on until explicitly cleared, surviving action overrides.
+     */
+    public enum ModeState {
+        NONE,          // No persistent mode
+        DEFENSIVE,     // Shield pulse — gold bars radiate outward
+        FORCE_SHOOT,   // Plasma field — purple interference pattern
+        OPPOSING_ZONE, // Auto-defensive — red/gold alternating bars (in opponent's zone)
+        ALLIANCE_ZONE  // Alliance color steady pulse — in our scoring zone
     }
 
     // =========================================================================
@@ -214,6 +225,10 @@ public class LEDSubsystem extends SubsystemBase {
     public void setAction(ActionState action) { currentAction = action; }
     public ActionState getAction() { return currentAction; }
     public void clearAction() { currentAction = ActionState.IDLE; }
+
+    public void setMode(ModeState mode) { currentMode = mode; }
+    public ModeState getMode() { return currentMode; }
+    public void clearMode() { currentMode = ModeState.NONE; }
 
     /** Check if the CANdle is responding on the CAN bus. */
     public boolean checkHealth() {
@@ -394,13 +409,6 @@ public class LEDSubsystem extends SubsystemBase {
             if (goldWave > 0) {
                 baseColor = lerpColor(baseColor, gold, goldWave * 0.6);
                 brightness = Math.max(brightness, goldWave * 0.9);
-            }
-
-            // Fire flicker: random pixels pop to full brightness
-            double flicker = noise1D(i * 4.3 + t * 12.0);
-            if (flicker > 0.9) {
-                double pop = (flicker - 0.9) / 0.1;
-                brightness = Math.max(brightness, pop);
             }
 
             setLED(stripStart + i, scaleColor(baseColor, brightness));
@@ -689,58 +697,6 @@ public class LEDSubsystem extends SubsystemBase {
                         setLED(stripStart + i, dimRed);
                     }
                 }
-            }
-        }
-
-        pushBuffer();
-    }
-
-    // =========================================================================
-    // PATTERN: GAME DATA LOST — Glitch Scanner
-    // =========================================================================
-
-    /**
-     * White scanning bar sweeps over black with periodic glitch bursts —
-     * random pixels flash white for a frame, creating a "signal lost" look.
-     */
-    private void setGameDataLostPattern() {
-        double t = Timer.getFPGATimestamp();
-        int stripStart = Constants.LEDs.STRIP_START;
-        int stripCount = Constants.LEDs.STRIP_COUNT;
-
-        double scanPos = triangleWave(t * 0.67);
-        double headPos = scanPos * (stripCount - 1);
-        int scanWidth = 5;
-
-        // Periodic glitch: every ~0.5s, random pixels flash for ~0.08s
-        double glitchCycle = t * 2.0;
-        boolean inGlitch = (glitchCycle % 1.0) < 0.16;
-
-        clearBuffer();
-
-        double onboardBreath = 0.1 + 0.2 * Math.sin(t * 2.0);
-        for (int i = 0; i < Constants.LEDs.ONBOARD_LED_COUNT && i < ledCount; i++) {
-            if (inGlitch && noise1D(i * 7.0 + t * 50.0) > 0.6) {
-                setLED(i, Constants.LEDs.WHITE);
-            } else {
-                setLED(i, scaleColor(Constants.LEDs.WHITE, onboardBreath));
-            }
-        }
-
-        for (int i = 0; i < stripCount; i++) {
-            // Glitch: random pixels flash white
-            if (inGlitch && noise1D(i * 3.1 + t * 50.0) > 0.7) {
-                double glitchBright = noise1D(i * 5.7 + t * 80.0);
-                setLED(stripStart + i, scaleColor(Constants.LEDs.WHITE, glitchBright));
-                continue;
-            }
-
-            double dist = Math.abs(i - headPos);
-            if (dist < 1.0) {
-                setLED(stripStart + i, Constants.LEDs.WHITE);
-            } else if (dist < scanWidth) {
-                double falloff = 1.0 - ((dist - 1.0) / (scanWidth - 1.0));
-                setLED(stripStart + i, scaleColor(Constants.LEDs.WHITE, falloff * falloff));
             }
         }
 
@@ -1153,6 +1109,45 @@ public class LEDSubsystem extends SubsystemBase {
     }
 
     /**
+     * REVERSE INTAKE: Expel push — dots sweep outward from center to edges.
+     * Visual opposite of intaking — "spitting out."
+     */
+    private void setReverseIntakePattern() {
+        double t = Timer.getFPGATimestamp();
+        int stripStart = Constants.LEDs.STRIP_START;
+        int stripCount = Constants.LEDs.STRIP_COUNT;
+        int center = stripCount / 2;
+
+        double speed = 22.0;
+        double dotSpacing = 8.0;
+
+        clearBuffer();
+
+        for (int i = 0; i < Constants.LEDs.ONBOARD_LED_COUNT && i < ledCount; i++) {
+            setLED(i, Constants.LEDs.REVERSE_INTAKE_COLOR);
+        }
+
+        for (int i = 0; i < stripCount; i++) {
+            double distFromCenter = Math.abs(i - center);
+            double maxDist = stripCount / 2.0;
+
+            // Dots flow outward: subtract speed*t so dots move away from center
+            double flowPhase = (distFromCenter - t * speed) % dotSpacing;
+            if (flowPhase < 0) flowPhase += dotSpacing;
+            double dotBrightness = Math.max(0, 1.0 - flowPhase / 2.5);
+            dotBrightness = dotBrightness * dotBrightness;
+
+            // Brighter near edges (where things are being expelled to)
+            double distFade = 0.3 + 0.7 * (distFromCenter / maxDist);
+
+            double brightness = 0.03 + dotBrightness * distFade;
+            setLED(stripStart + i, scaleColor(Constants.LEDs.REVERSE_INTAKE_COLOR, brightness));
+        }
+
+        pushBuffer();
+    }
+
+    /**
      * FORCE SHOOT: Plasma field — two interfering sine waves create a
      * shimmering purple pattern with bright peaks and dark valleys.
      */
@@ -1184,6 +1179,95 @@ public class LEDSubsystem extends SubsystemBase {
      * DEFENSIVE: Shield pulse — gold bars radiate outward from center
      * like expanding radar rings. Hard edges, dark gaps.
      */
+    // PATTERN: ALLIANCE ZONE — Steady alliance color pulse with breathing effect
+    // PATTERN: STALL/JAM — Rapid red flash to alert driver of motor jam
+    private void setStallJamPattern() {
+        double t = Timer.getFPGATimestamp();
+        int[] red = {255, 0, 0};
+
+        // Fast strobe: 8Hz flash
+        boolean on = ((int)(t * 16.0)) % 2 == 0;
+        double brightness = on ? 1.0 : 0.1;
+
+        clearBuffer();
+        for (int i = 0; i < ledCount; i++) {
+            setLED(i, scaleColor(red, brightness));
+        }
+        pushBuffer();
+    }
+
+    // PATTERN: OPPOSING ZONE — Alternating red/gold bars marching inward (you're on defense)
+    private void setOpposingZonePattern() {
+        double t = Timer.getFPGATimestamp();
+        int stripStart = Constants.LEDs.STRIP_START;
+        int stripCount = Constants.LEDs.STRIP_COUNT;
+        int[] red = {255, 40, 0};
+        int[] gold = Constants.LEDs.TEAM_GOLD;
+
+        clearBuffer();
+
+        // Onboard: alternating red pulse
+        for (int i = 0; i < Constants.LEDs.ONBOARD_LED_COUNT && i < ledCount; i++) {
+            double pulse = 0.5 + 0.5 * Math.sin(t * 5.0);
+            setLED(i, scaleColor(red, pulse));
+        }
+
+        // Strip: marching red/gold bars
+        double speed = 8.0;
+        double barWidth = 4.0;
+        for (int i = 0; i < stripCount; i++) {
+            double phase = ((i + t * speed) % (barWidth * 2)) / barWidth;
+            int[] color = phase < 1.0 ? red : gold;
+            double edge = Math.min(phase % 1.0, 1.0 - phase % 1.0) * 4.0;
+            double brightness = Math.min(1.0, edge + 0.3);
+            setLED(stripStart + i, scaleColor(color, brightness));
+        }
+
+        pushBuffer();
+    }
+
+    // PATTERN: VISION LOST — Dim red slow breathing (pose is drifting)
+    private void setVisionLostPattern() {
+        double t = Timer.getFPGATimestamp();
+        int[] dimRed = {180, 0, 0};
+
+        // Slow breathing: 1Hz cycle, low brightness
+        double breath = 0.1 + 0.3 * (0.5 + 0.5 * Math.sin(t * 2.0 * Math.PI));
+
+        clearBuffer();
+        for (int i = 0; i < ledCount; i++) {
+            setLED(i, scaleColor(dimRed, breath));
+        }
+        pushBuffer();
+    }
+
+    private void setAllianceZonePattern() {
+        double t = Timer.getFPGATimestamp();
+        int stripStart = Constants.LEDs.STRIP_START;
+        int stripCount = Constants.LEDs.STRIP_COUNT;
+
+        // Gentle breathing: 0.4 to 1.0 brightness
+        double breath = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(t * 3.0));
+
+        clearBuffer();
+
+        // Onboard LEDs: solid alliance color
+        for (int i = 0; i < Constants.LEDs.ONBOARD_LED_COUNT && i < ledCount; i++) {
+            setLED(i, scaleColor(allianceColor, breath));
+        }
+
+        // Strip: alliance color wave rippling outward from center
+        int center = stripCount / 2;
+        for (int i = 0; i < stripCount; i++) {
+            double dist = Math.abs(i - center);
+            double wave = 0.5 + 0.5 * Math.sin(t * 4.0 - dist * 0.4);
+            double brightness = wave * breath;
+            setLED(stripStart + i, scaleColor(allianceColor, brightness));
+        }
+
+        pushBuffer();
+    }
+
     private void setDefensivePattern() {
         double t = Timer.getFPGATimestamp();
         int stripStart = Constants.LEDs.STRIP_START;
@@ -1270,7 +1354,6 @@ public class LEDSubsystem extends SubsystemBase {
      * Priority order (highest first):
      *  1.  Brownout (safety)
      *  2.  E-Stop (maximum alert)
-     *  2.3 Game Data Lost (white glitch scanner)
      *  2.4 Zone Entry Blip (center radiate)
      *  2.5 Shift/Endgame Warning Flash
      *  3.  Game Data Announcement (who goes first)
@@ -1278,6 +1361,7 @@ public class LEDSubsystem extends SubsystemBase {
      *  5.  Ready to Shoot (reactor core)
      *  6.  Spooling (power charge bar)
      *  7.  Intaking (vacuum pull)
+     *  7.5 Reverse Intake (expel push)
      *  8.  Force Shoot (plasma field)
      *  9.  Defensive (shield pulse)
      *  10. No Auto (alarm sweep)
@@ -1299,13 +1383,6 @@ public class LEDSubsystem extends SubsystemBase {
         if (isEStopped) {
             currentPatternName = "E-STOP!!!";
             setEStopPattern();
-            return;
-        }
-
-        // === PRIORITY 2.3: GAME DATA LOST ===
-        if (gameDataLostActive) {
-            currentPatternName = "GAME DATA LOST!";
-            setGameDataLostPattern();
             return;
         }
 
@@ -1370,21 +1447,56 @@ public class LEDSubsystem extends SubsystemBase {
             return;
         }
 
-        // === PRIORITY 8: FORCE SHOOT — plasma field ===
-        if (currentAction == ActionState.FORCE_SHOOT) {
+        // === PRIORITY 7.5: REVERSE INTAKE — expel push ===
+        if (currentAction == ActionState.REVERSE_INTAKE) {
+            currentPatternName = "Reverse Intake";
+            setReverseIntakePattern();
+            return;
+        }
+
+        // === PRIORITY 7.6: STALL/JAM — red flash (motor reversing to clear) ===
+        if (currentAction == ActionState.STALL_JAM) {
+            currentPatternName = "STALL - Clearing Jam";
+            setStallJamPattern();
+            return;
+        }
+
+        // === PRIORITY 8: FORCE SHOOT MODE — plasma field (persistent) ===
+        if (currentMode == ModeState.FORCE_SHOOT) {
             currentPatternName = "Force Shoot";
             setForceShootPattern();
             return;
         }
 
-        // === PRIORITY 9: DEFENSIVE — shield pulse ===
-        if (currentAction == ActionState.DEFENSIVE) {
+        // === PRIORITY 9: DEFENSIVE MODE — shield pulse (persistent) ===
+        if (currentMode == ModeState.DEFENSIVE) {
             currentPatternName = "Defensive Brake";
             setDefensivePattern();
             return;
         }
 
-        // === PRIORITY 10: NO AUTO — alarm sweep ===
+        // === PRIORITY 9.5: OPPOSING ZONE — auto-defensive (persistent) ===
+        if (currentMode == ModeState.OPPOSING_ZONE) {
+            currentPatternName = "Opposing Zone";
+            setOpposingZonePattern();
+            return;
+        }
+
+        // === PRIORITY 10: VISION LOST — dim red breathing ===
+        if (currentAction == ActionState.VISION_LOST) {
+            currentPatternName = "Vision Lost";
+            setVisionLostPattern();
+            return;
+        }
+
+        // === PRIORITY 10.5: ALLIANCE ZONE — steady alliance color pulse ===
+        if (currentMode == ModeState.ALLIANCE_ZONE) {
+            currentPatternName = "Alliance Zone";
+            setAllianceZonePattern();
+            return;
+        }
+
+        // === PRIORITY 11: NO AUTO — alarm sweep ===
         if (currentAction == ActionState.NO_AUTO) {
             currentPatternName = "NO AUTO!!!";
             setNoAutoPattern();
@@ -1620,19 +1732,6 @@ public class LEDSubsystem extends SubsystemBase {
                 .withDisplaySeconds(5.0));
         }
 
-        // --- Check for game data LOST ---
-        if (gameState.didJustLoseGameData()) {
-            gameDataLostActive = true;
-            Elastic.sendNotification(new Elastic.Notification()
-                .withLevel(NotificationLevel.ERROR)
-                .withTitle("GAME DATA LOST!")
-                .withDescription("Game message went empty — check FMS connection")
-                .withDisplaySeconds(5.0));
-        }
-        if (gameDataLostActive && !gameState.isGameDataLost()) {
-            gameDataLostActive = false;
-        }
-
         // --- Check for zone entry / shift activation blips ---
         if (gameState.didJustBecomeActive() && currentState == LEDState.TELEOP) {
             triggerBlip("SHIFT START!", allianceColor);
@@ -1643,8 +1742,8 @@ public class LEDSubsystem extends SubsystemBase {
 
         // --- Pattern update ---
         // Per-LED patterns need full rate for smooth animation; simple patterns can throttle
-        boolean needsFullRate = announcementActive || blipColor != null || gameDataLostActive
-            || currentAction != ActionState.IDLE;
+        boolean needsFullRate = announcementActive || blipColor != null
+            || currentAction != ActionState.IDLE || currentMode != ModeState.NONE;
         ledUpdateCounter++;
         if (needsFullRate || ledUpdateCounter >= LED_UPDATE_DIVISOR) {
             ledUpdateCounter = 0;
