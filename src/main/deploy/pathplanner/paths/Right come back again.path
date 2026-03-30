@@ -24,20 +24,20 @@
         "y": 0.6145342286875553
       },
       "nextControl": {
-        "x": 5.777500044261177,
-        "y": 0.5235031223396371
+        "x": 5.777500044261172,
+        "y": 0.5235031223396364
       },
       "isLocked": false,
       "linkedName": null
     },
     {
       "anchor": {
-        "x": 1.0481751947,
-        "y": 1.731193147041429
+        "x": 2.071272799843236,
+        "y": 1.2187616549040137
       },
       "prevControl": {
-        "x": 1.1042514078382044,
-        "y": 0.8088877793432961
+        "x": 2.6540658750032122,
+        "y": 0.5976087275722568
       },
       "nextControl": null,
       "isLocked": false,
@@ -50,21 +50,7 @@
       "rotationDegrees": 0.0
     }
   ],
-  "constraintZones": [
-    {
-      "name": "Constraints Zone",
-      "minWaypointRelativePos": 1.4256287634966778,
-      "maxWaypointRelativePos": 2.0,
-      "constraints": {
-        "maxVelocity": 2.0,
-        "maxAcceleration": 4.5,
-        "maxAngularVelocity": 540.0,
-        "maxAngularAcceleration": 720.0,
-        "nominalVoltage": 12.0,
-        "unlimited": false
-      }
-    }
-  ],
+  "constraintZones": [],
   "pointTowardsZones": [],
   "eventMarkers": [
     {
@@ -75,17 +61,6 @@
         "type": "named",
         "data": {
           "name": "deployIntake"
-        }
-      }
-    },
-    {
-      "name": "movingShoot",
-      "waypointRelativePos": 1.5082083160299002,
-      "endWaypointRelativePos": 2.0,
-      "command": {
-        "type": "named",
-        "data": {
-          "name": "movingShoot"
         }
       }
     }

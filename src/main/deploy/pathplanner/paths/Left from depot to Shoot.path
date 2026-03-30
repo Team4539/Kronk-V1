@@ -3,25 +3,25 @@
   "waypoints": [
     {
       "anchor": {
-        "x": 0.7216182573218095,
-        "y": 6.721001079960874
+        "x": 0.9343991664418005,
+        "y": 5.765627295176188
       },
       "prevControl": null,
       "nextControl": {
-        "x": 0.9466854422592521,
-        "y": 6.854801615196661
+        "x": 1.1594663513792431,
+        "y": 5.899427830411975
       },
       "isLocked": false,
       "linkedName": "end of left to the depot"
     },
     {
       "anchor": {
-        "x": 1.5548359486447931,
-        "y": 5.865820256776035
+        "x": 2.576055809489468,
+        "y": 6.578897598333526
       },
       "prevControl": {
-        "x": 0.7662702479290272,
-        "y": 6.0859232665976215
+        "x": 1.7874901087737025,
+        "y": 6.799000608155112
       },
       "nextControl": null,
       "isLocked": false,
@@ -31,19 +31,7 @@
   "rotationTargets": [],
   "constraintZones": [],
   "pointTowardsZones": [],
-  "eventMarkers": [
-    {
-      "name": "movingShoot",
-      "waypointRelativePos": 0,
-      "endWaypointRelativePos": 1.0,
-      "command": {
-        "type": "named",
-        "data": {
-          "name": "movingShoot"
-        }
-      }
-    }
-  ],
+  "eventMarkers": [],
   "globalConstraints": {
     "maxVelocity": 3.8,
     "maxAcceleration": 4.5,
@@ -60,7 +48,7 @@
   "folder": "Left",
   "idealStartingState": {
     "velocity": 0,
-    "rotation": -105.8003182158223
+    "rotation": 178.45224780070868
   },
   "useDefaultConstraints": true
 }

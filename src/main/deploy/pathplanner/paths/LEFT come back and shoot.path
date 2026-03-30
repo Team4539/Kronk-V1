@@ -3,41 +3,41 @@
   "waypoints": [
     {
       "anchor": {
-        "x": 7.689744328243632,
-        "y": 5.950127528553278
+        "x": 7.815405495630191,
+        "y": 5.175899078970559
       },
       "prevControl": null,
       "nextControl": {
-        "x": 6.088584043475944,
-        "y": 7.915266158412878
+        "x": 7.022969962002938,
+        "y": 7.237480390448319
       },
       "isLocked": false,
       "linkedName": "end of neutral side left"
     },
     {
       "anchor": {
-        "x": 2.0043222222222226,
-        "y": 7.240922222222221
+        "x": 3.8153067040025146,
+        "y": 7.535576417487965
       },
       "prevControl": {
-        "x": 3.503094939093897,
-        "y": 7.63581030541998
+        "x": 5.277802406444884,
+        "y": 7.627256916113067
       },
       "nextControl": {
-        "x": 1.670843271185678,
-        "y": 7.1530590910888465
+        "x": 3.471122723628586,
+        "y": 7.514000313786083
       },
       "isLocked": false,
       "linkedName": null
     },
     {
       "anchor": {
-        "x": 1.5548359486447931,
-        "y": 5.865820256776035
+        "x": 2.576055809489468,
+        "y": 6.578897598333526
       },
       "prevControl": {
-        "x": 0.9940899247029644,
-        "y": 6.582567978519201
+        "x": 2.0153097855476396,
+        "y": 7.295645320076692
       },
       "nextControl": null,
       "isLocked": false,
@@ -54,21 +54,7 @@
       "rotationDegrees": 0.0
     }
   ],
-  "constraintZones": [
-    {
-      "name": "slow to shoot",
-      "minWaypointRelativePos": 0.8,
-      "maxWaypointRelativePos": 2.0,
-      "constraints": {
-        "maxVelocity": 1.0,
-        "maxAcceleration": 4.5,
-        "maxAngularVelocity": 540.0,
-        "maxAngularAcceleration": 720.0,
-        "nominalVoltage": 12.0,
-        "unlimited": false
-      }
-    }
-  ],
+  "constraintZones": [],
   "pointTowardsZones": [],
   "eventMarkers": [
     {
@@ -79,17 +65,6 @@
         "type": "named",
         "data": {
           "name": "deployIntake"
-        }
-      }
-    },
-    {
-      "name": "movingShoot",
-      "waypointRelativePos": 0.8,
-      "endWaypointRelativePos": 3.0,
-      "command": {
-        "type": "named",
-        "data": {
-          "name": "movingShoot"
         }
       }
     }
@@ -110,7 +85,7 @@
   "folder": "Left",
   "idealStartingState": {
     "velocity": 0,
-    "rotation": -108.19235421753932
+    "rotation": -108.19235421753933
   },
   "useDefaultConstraints": true
 }

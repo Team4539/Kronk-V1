@@ -401,7 +401,7 @@ public class RobotContainer {
                     double speed = Math.hypot(speeds.vxMetersPerSecond, speeds.vyMetersPerSecond);
                     if (speed > 0.1) {
                         latchedDriveAngle = Math.atan2(speeds.vyMetersPerSecond, speeds.vxMetersPerSecond);
-                        shootOnFlyLatched = true;
+                        shootOnFlyLatched = false;
                     } else {
                         shootOnFlyLatched = false;
                     }

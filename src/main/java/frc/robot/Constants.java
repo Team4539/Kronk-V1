@@ -136,7 +136,7 @@ public final class Constants {
 
     // --- Shoot-on-the-move compensation ---
     /** Master enable for shoot-on-the-move velocity compensation */
-    public static final boolean SHOOT_ON_MOVE_ENABLED = true;
+    public static final boolean SHOOT_ON_MOVE_ENABLED = false;
     /** Fixed exit angle of the shooter above horizontal (degrees) */
     public static final double SHOOTER_EXIT_ANGLE_DEG = 30;
     /** Ratio of ball exit speed to flywheel surface speed (0-1, tune empirically) change this value mostly, overshoot = need lower undershoot = need higher */
